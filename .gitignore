@@ -1,0 +1,21 @@
+# Binaries
+runner
+*.exe
+
+# IDE/Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Go
+vendor/
+
+# Incidents (runtime data)
+incidents/
+
+# Scratch/temp
+scratch/
