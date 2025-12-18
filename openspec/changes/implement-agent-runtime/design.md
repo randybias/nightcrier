@@ -541,13 +541,34 @@ type ExecutionConfig struct {
 
 ## Configuration
 
-Agent runtime behavior is configured via environment variables and config file:
+Agent runtime behavior is configured via environment variables and config file.
+
+### Agent Container Configuration
+
+The `k8s-triage-agent` Docker container is configured via `run-agent.sh`:
+
+```bash
+# Select AI agent backend
+./run-agent.sh -a claude   # Default, uses sonnet model
+./run-agent.sh -a codex    # OpenAI Codex
+./run-agent.sh -a gemini   # Google Gemini
+
+# Required: isolated workspace directory
+./run-agent.sh -w ./incidents/inc-123 "Investigate event.json"
+
+# Claude-specific options
+./run-agent.sh -m opus -t "Read,Grep,Glob,Bash" -s "Read-only mode" "prompt"
+```
+
+See `agent-container/README.md` for full configuration reference.
+
+### Event Runner Configuration
 
 ```yaml
 # config.yaml
 agent_runtime:
   # Agent command configuration
-  agent_command: "claude"  # or "codex", "goose", etc.
+  agent_command: "claude"  # or "codex", "gemini"
 
   # Workspace configuration
   workspace_root: "/var/lib/event-runner/workspaces"
@@ -676,15 +697,21 @@ Initial rollout plan:
 ## Open Questions
 
 ### Q1: Should we support multiple agent backends (Claude, Codex, etc.)?
-**Status:** Deferred to post-MVP
+**Status:** RESOLVED - Implemented in agent container
 
-**Considerations:**
-- Different CLIs have different flags and conventions
-- Would require abstraction layer for command building
-- Context bundle format might need to be agent-agnostic
-- Skills might not be portable across agents
+**Implementation:**
+The `k8s-triage-agent` Docker container supports multiple AI CLI backends via the `-a/--agent` flag:
 
-**Recommendation:** Start with Claude Code only, design interface to be extensible
+| Agent | Status | Notes |
+|-------|--------|-------|
+| Claude (default) | Working | Uses `-p` flag, sonnet model default |
+| Codex | Working | Uses `codex exec`, requires login step |
+| Gemini | Working | Uses `-p` flag |
+| Goose | Disabled | Requires X11 libs even in CLI mode |
+
+Each agent has CLI-specific invocation logic in `run-agent.sh`. The k8s-troubleshooter skill is built into the container at `/skills/` and works with Claude's skill system.
+
+**Reference:** See `agent-container/README.md` for full documentation.
 
 ### Q2: How should we handle agent crashes vs. agent-reported errors?
 **Status:** Needs decision before implementation

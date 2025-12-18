@@ -35,10 +35,18 @@
 
 ## 4. Skill Loading
 
-- [ ] 4.1 Implement skill source directory configuration and validation
-- [ ] 4.2 Implement k8s-troubleshooter skill copying to `.claude/skills/k8s-troubleshooter/`
-- [ ] 4.3 Verify SKILL.md, references/, and scripts/ are copied correctly
-- [ ] 4.4 Add error handling for missing skill source directory
+**Note:** Skills are now built into the `k8s-triage-agent` Docker container at `/skills/`.
+The container clones from https://github.com/randybias/k8s4agents during build.
+Claude accesses skills via `/skills/k8s-troubleshooter/SKILL.md` or the `/k8s-troubleshooter` slash command.
+
+- [x] 4.1 Implement skill source directory configuration and validation
+      **DONE**: Skills at `/skills/` in container, cloned from GitHub during build
+- [x] 4.2 Implement k8s-troubleshooter skill copying to `.claude/skills/k8s-troubleshooter/`
+      **DONE**: Skills at `/skills/k8s-troubleshooter/`, slash command at `/root/.claude/commands/`
+- [x] 4.3 Verify SKILL.md, references/, and scripts/ are copied correctly
+      **DONE**: Full skill directory cloned from GitHub
+- [x] 4.4 Add error handling for missing skill source directory
+      **DONE**: Build fails if GitHub clone fails
 - [ ] 4.5 Implement skill version tracking in workspace metadata (optional)
 - [ ] 4.6 Add skill loading unit tests with mock filesystem
 
@@ -223,10 +231,26 @@
 ## 21. Optional Enhancements (Post-MVP)
 
 - [ ] 21.1 Implement progressive output streaming with `stream-json` parsing
-- [ ] 21.2 Add support for multiple agent backends (Codex, Goose, etc.)
+- [x] 21.2 Add support for multiple agent backends (Codex, Goose, etc.)
+      **DONE**: Implemented in `agent-container/`. Supports Claude (default), Codex, Gemini.
+      Goose disabled due to X11 dependency. See `agent-container/README.md`.
 - [ ] 21.3 Implement skill versioning and update management
 - [ ] 21.4 Add workspace GC service with configurable retention
 - [ ] 21.5 Implement workspace compression for long-term retention
 - [ ] 21.6 Add agent health checks before invocation
 - [ ] 21.7 Implement retry logic for transient agent failures
 - [ ] 21.8 Add distributed tracing support with OpenTelemetry
+
+## 22. Agent Container Implementation (COMPLETED)
+
+The following tasks were implemented in `agent-container/`:
+
+- [x] 22.1 Docker container with kubectl, helm, and AI CLI tools
+- [x] 22.2 Multi-agent support: Claude (default/sonnet), Codex, Gemini
+- [x] 22.3 Built-in k8s-troubleshooter skill from https://github.com/randybias/k8s4agents
+- [x] 22.4 Workspace isolation: `-w` flag required, prevents mounting source code
+- [x] 22.5 Output capture: Timestamped logs in `<workspace>/output/`
+- [x] 22.6 Run script `run-agent.sh` with full configuration options
+- [x] 22.7 Makefile for build, test, and debug targets
+
+**Reference:** `agent-container/README.md`
