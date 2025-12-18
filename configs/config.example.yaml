@@ -1,0 +1,143 @@
+# Kubernetes MCP Alerts Event Runner Configuration
+# Copy this file to config.yaml and customize as needed.
+#
+# Configuration Precedence (highest to lowest):
+# 1. Command-line flags (e.g., --mcp-endpoint)
+# 2. Environment variables (e.g., K8S_CLUSTER_MCP_ENDPOINT)
+# 3. This configuration file
+# 4. Default values
+#
+# The runner searches for config.yaml in:
+# - Current directory (.)
+# - ./configs/
+# - /etc/runner/
+# Or specify explicitly with: runner --config /path/to/config.yaml
+
+# =============================================================================
+# MCP Connection (Required)
+# =============================================================================
+# The MCP server endpoint URL for kubernetes-mcp-server
+# Environment variable: K8S_CLUSTER_MCP_ENDPOINT
+mcp_endpoint: "http://kubernetes-mcp-server:8080/mcp"
+
+# =============================================================================
+# Workspace Configuration
+# =============================================================================
+# Directory where incident workspaces are created
+# Each incident gets a unique subdirectory with event context and results
+# Environment variable: WORKSPACE_ROOT
+workspace_root: "./incidents"
+
+# =============================================================================
+# Logging
+# =============================================================================
+# Log level: debug, info, warn, error
+# Environment variable: LOG_LEVEL
+log_level: "info"
+
+# =============================================================================
+# Agent Configuration
+# =============================================================================
+# Path to the agent execution script
+# Environment variable: AGENT_SCRIPT_PATH
+agent_script_path: "./agent-container/run-agent.sh"
+
+# Path to the system prompt file for the agent
+# Environment variable: AGENT_SYSTEM_PROMPT_FILE
+agent_system_prompt_file: "./configs/triage-system-prompt.md"
+
+# Comma-separated list of tools the agent is allowed to use
+# Environment variable: AGENT_ALLOWED_TOOLS
+agent_allowed_tools: "Read,Write,Grep,Glob,Bash,Skill"
+
+# AI model to use: sonnet, opus, haiku (Claude models)
+# Environment variable: AGENT_MODEL
+agent_model: "sonnet"
+
+# Maximum execution time for agent in seconds
+# Environment variable: AGENT_TIMEOUT
+agent_timeout: 300
+
+# =============================================================================
+# Event Processing
+# =============================================================================
+# Minimum severity level to process: DEBUG, INFO, WARNING, ERROR, CRITICAL
+# Events below this threshold are filtered out
+# Environment variable: SEVERITY_THRESHOLD
+severity_threshold: "ERROR"
+
+# Maximum number of concurrent agent sessions across all clusters
+# Acts as a global circuit breaker to prevent resource exhaustion
+# Environment variable: MAX_CONCURRENT_AGENTS
+max_concurrent_agents: 5
+
+# Maximum size of the global event queue
+# Environment variable: GLOBAL_QUEUE_SIZE
+global_queue_size: 100
+
+# Maximum size of per-cluster event queues
+# Each cluster gets its own queue to ensure fair processing
+# Environment variable: CLUSTER_QUEUE_SIZE
+cluster_queue_size: 10
+
+# Deduplication window in seconds
+# Events for the same resource within this window are deduplicated
+# Environment variable: DEDUP_WINDOW_SECONDS
+dedup_window_seconds: 300
+
+# Queue overflow policy: drop (remove oldest) or reject (reject new events)
+# Environment variable: QUEUE_OVERFLOW_POLICY
+queue_overflow_policy: "drop"
+
+# Graceful shutdown timeout in seconds
+# Environment variable: SHUTDOWN_TIMEOUT_SECONDS
+shutdown_timeout: 30
+
+# =============================================================================
+# SSE/MCP Reconnection Settings
+# =============================================================================
+# Initial backoff delay for reconnection attempts (seconds)
+# Environment variable: SSE_RECONNECT_INITIAL_BACKOFF
+sse_reconnect_initial_backoff: 1
+
+# Maximum backoff delay for reconnection attempts (seconds)
+# Environment variable: SSE_RECONNECT_MAX_BACKOFF
+sse_reconnect_max_backoff: 60
+
+# Read timeout for SSE/MCP connections (seconds)
+# Environment variable: SSE_READ_TIMEOUT_SECONDS
+sse_read_timeout: 120
+
+# =============================================================================
+# Slack Integration (Optional)
+# =============================================================================
+# Slack webhook URL for incident notifications
+# If not set, Slack notifications are disabled
+# Environment variable: SLACK_WEBHOOK_URL
+# slack_webhook_url: "https://hooks.slack.com/services/..."
+
+# =============================================================================
+# Azure Blob Storage (Optional)
+# =============================================================================
+# When configured, incident artifacts are uploaded to Azure Blob Storage
+# and SAS URLs are included in Slack notifications for direct access.
+#
+# Authentication: Provide EITHER connection_string OR (account + key)
+#
+# Full Azure connection string
+# Environment variable: AZURE_STORAGE_CONNECTION_STRING
+# azure_storage_connection_string: "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net"
+#
+# OR use separate account and key:
+# Environment variable: AZURE_STORAGE_ACCOUNT
+# azure_storage_account: "mystorageaccount"
+# Environment variable: AZURE_STORAGE_KEY
+# azure_storage_key: "..."
+#
+# Blob container name (required if Azure storage is enabled)
+# Environment variable: AZURE_STORAGE_CONTAINER
+# azure_storage_container: "incidents"
+#
+# SAS URL expiration duration (Go duration format)
+# Environment variable: AZURE_SAS_EXPIRY
+# azure_sas_expiry: "168h"  # 7 days

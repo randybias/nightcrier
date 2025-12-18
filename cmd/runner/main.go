@@ -19,10 +19,12 @@ import (
 )
 
 var (
+	configFile    string
 	mcpEndpoint   string
 	workspaceRoot string
 	scriptPath    string
 	logLevel      string
+	agentTimeout  int
 )
 
 func main() {
@@ -40,26 +42,23 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.Flags().StringVar(&mcpEndpoint, "mcp-endpoint", "", "MCP server endpoint URL (overrides K8S_CLUSTER_MCP_ENDPOINT env var)")
-	rootCmd.Flags().StringVar(&workspaceRoot, "workspace-root", "", "Workspace root directory (overrides WORKSPACE_ROOT env var, default: ./incidents)")
-	rootCmd.Flags().StringVar(&scriptPath, "script-path", "", "Path to agent script (default: ./scripts/stub-agent.sh)")
-	rootCmd.Flags().StringVar(&logLevel, "log-level", "", "Log level (overrides LOG_LEVEL env var, default: info)")
+	// Configuration file flag
+	rootCmd.Flags().StringVarP(&configFile, "config", "c", "", "Path to config file (default: searches for config.yaml in ., ./configs, /etc/runner)")
+
+	// Override flags (take precedence over config file and env vars)
+	rootCmd.Flags().StringVar(&mcpEndpoint, "mcp-endpoint", "", "MCP server endpoint URL (overrides config file and K8S_CLUSTER_MCP_ENDPOINT env var)")
+	rootCmd.Flags().StringVar(&workspaceRoot, "workspace-root", "", "Workspace root directory (overrides config file and WORKSPACE_ROOT env var)")
+	rootCmd.Flags().StringVar(&scriptPath, "script-path", "", "Path to agent script")
+	rootCmd.Flags().StringVar(&logLevel, "log-level", "", "Log level: debug, info, warn, error (overrides config file and LOG_LEVEL env var)")
+	rootCmd.Flags().IntVar(&agentTimeout, "agent-timeout", 0, "Agent execution timeout in seconds (overrides config file and AGENT_TIMEOUT env var)")
+
+	// Bind flags to viper for precedence handling
+	config.BindFlags(rootCmd.Flags())
 }
 
 func run(cmd *cobra.Command, args []string) error {
-	// Override environment variables with flags if provided
-	if mcpEndpoint != "" {
-		os.Setenv("K8S_CLUSTER_MCP_ENDPOINT", mcpEndpoint)
-	}
-	if workspaceRoot != "" {
-		os.Setenv("WORKSPACE_ROOT", workspaceRoot)
-	}
-	if logLevel != "" {
-		os.Setenv("LOG_LEVEL", logLevel)
-	}
-
-	// Load configuration
-	cfg, err := config.Load()
+	// Load configuration with precedence: flags > env vars > config file > defaults
+	cfg, err := config.LoadWithConfigFile(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -67,13 +66,20 @@ func run(cmd *cobra.Command, args []string) error {
 	// Setup structured logging
 	setupLogging(cfg.LogLevel)
 
+	// Log which config file was used (if any)
+	if usedConfigFile := config.GetConfigFile(); usedConfigFile != "" {
+		slog.Info("loaded configuration file", "path", usedConfigFile)
+	}
+
 	slog.Info("starting kubernetes-mcp-alerts-event-runner",
 		"mcp_endpoint", cfg.MCPEndpoint,
 		"workspace_root", cfg.WorkspaceRoot,
 		"log_level", cfg.LogLevel,
 		"agent_script", cfg.AgentScriptPath,
 		"agent_model", cfg.AgentModel,
-		"agent_timeout", cfg.AgentTimeout)
+		"agent_timeout", cfg.AgentTimeout,
+		"severity_threshold", cfg.SeverityThreshold,
+		"max_concurrent_agents", cfg.MaxConcurrentAgents)
 
 	// Determine script path (CLI flag overrides config)
 	agentScript := scriptPath
@@ -214,16 +220,16 @@ func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *a
 		}
 
 		summary := &reporting.IncidentSummary{
-			IncidentID:  incidentID,
-			Cluster:     event.Cluster,
-			Namespace:   event.GetNamespace(),
-			Resource:    fmt.Sprintf("%s/%s", event.GetResourceKind(), event.GetResourceName()),
-			Reason:      event.Event.Reason,
-			Status:      status,
-			RootCause:   rootCause,
-			Confidence:  confidence,
-			Duration:    duration,
-			ReportPath:  filepath.Join(workspacePath, "output", "investigation.md"),
+			IncidentID: incidentID,
+			Cluster:    event.Cluster,
+			Namespace:  event.GetNamespace(),
+			Resource:   fmt.Sprintf("%s/%s", event.GetResourceKind(), event.GetResourceName()),
+			Reason:     event.Event.Reason,
+			Status:     status,
+			RootCause:  rootCause,
+			Confidence: confidence,
+			Duration:   duration,
+			ReportPath: filepath.Join(workspacePath, "output", "investigation.md"),
 		}
 
 		if err := slackNotifier.SendIncidentNotification(summary); err != nil {

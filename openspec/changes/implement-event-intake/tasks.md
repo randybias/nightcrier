@@ -1,27 +1,60 @@
 # Implementation Tasks (Phase 1)
 
+## Walking Skeleton Baseline
+
+The following was implemented as part of the walking-skeleton (archived 2025-12-18):
+- Project skeleton with cmd/runner/, internal/config/, internal/events/, internal/agent/, internal/reporting/
+- MCP client using StreamableHTTP protocol (not raw SSE)
+- FaultEvent struct and parsing
+- Basic config system with env vars
+- Graceful shutdown
+- Structured logging with log/slog
+
+This task list has been updated to mark completed items and focus on remaining work.
+
+---
+
 ## 1. Project Skeleton and Dependencies
-- [ ] 1.1 Initialize Go module with `go.mod` and `go.sum`
-- [ ] 1.2 Scaffold directory structure: `cmd/runner/`, `internal/config/`, `internal/events/`, `internal/queue/`, `internal/dedup/`, `internal/agent/`
-- [ ] 1.3 Add dependency: `github.com/r3labs/sse/v2` for SSE client
-- [ ] 1.4 Add dependency: `github.com/spf13/cobra` for CLI framework
-- [ ] 1.5 Add dependency: `github.com/spf13/viper` for configuration management
-- [ ] 1.6 Add dependency: structured logging library (e.g., `go.uber.org/zap` or `log/slog`)
-- [ ] 1.7 Create `cmd/runner/main.go` with basic command structure
-- [ ] 1.8 Verify project builds with `go build ./cmd/runner`
+- [x] 1.1 Initialize Go module with `go.mod` and `go.sum`
+      **DONE**: Walking skeleton
+- [x] 1.2 Scaffold directory structure: `cmd/runner/`, `internal/config/`, `internal/events/`, `internal/queue/`, `internal/dedup/`, `internal/agent/`
+      **DONE**: Walking skeleton (queue/ and dedup/ still needed)
+- [x] 1.3 Add dependency: `github.com/mark3labs/mcp-go` for MCP client
+      **DONE**: Walking skeleton - uses MCP instead of raw SSE
+- [x] 1.4 Add dependency: `github.com/spf13/cobra` for CLI framework
+      **DONE**: Walking skeleton
+- [x] 1.5 Add dependency: `github.com/spf13/viper` for configuration management
+      **DONE**: YAML config feature branch
+- [x] 1.6 Add dependency: structured logging library (e.g., `go.uber.org/zap` or `log/slog`)
+      **DONE**: Walking skeleton uses log/slog
+- [x] 1.7 Create `cmd/runner/main.go` with basic command structure
+      **DONE**: Walking skeleton
+- [x] 1.8 Verify project builds with `go build ./cmd/runner`
+      **DONE**: Walking skeleton
 
 ## 2. Configuration System
-- [ ] 2.1 Define configuration struct in `internal/config/config.go` with all fields from design.md
-- [ ] 2.2 Implement environment variable loading with defaults
-- [ ] 2.3 Implement command-line flag parsing using cobra
-- [ ] 2.4 Implement configuration precedence (flags > env vars > defaults)
-- [ ] 2.5 Add validation for required fields (SSE_ENDPOINT)
-- [ ] 2.6 Add validation for numeric ranges (queue sizes >= 1, max agents >= 1)
-- [ ] 2.7 Add validation for severity threshold against allowed values
-- [ ] 2.8 Implement configuration logging at startup (mask sensitive values)
-- [ ] 2.9 Write unit tests for configuration loading and validation
-- [ ] 2.10 Add optional YAML configuration file support
-- [ ] 2.11 Document all configuration options in README or config example file
+- [x] 2.1 Define configuration struct in `internal/config/config.go` with all fields from design.md
+      **DONE**: YAML config feature - Config struct with all Phase 1 fields plus Azure storage
+- [x] 2.2 Implement environment variable loading with defaults
+      **DONE**: YAML config feature - viper binds env vars to config keys
+- [x] 2.3 Implement command-line flag parsing using cobra
+      **DONE**: YAML config feature - --config, --mcp-endpoint, --log-level, etc.
+- [x] 2.4 Implement configuration precedence (flags > env vars > file > defaults)
+      **DONE**: YAML config feature - viper handles precedence automatically
+- [x] 2.5 Add validation for required fields (K8S_CLUSTER_MCP_ENDPOINT)
+      **DONE**: YAML config feature - Validate() checks MCPEndpoint
+- [x] 2.6 Add validation for numeric ranges (queue sizes >= 1, max agents >= 1)
+      **DONE**: YAML config feature - Validate() checks all numeric ranges
+- [x] 2.7 Add validation for severity threshold against allowed values
+      **DONE**: YAML config feature - validates DEBUG, INFO, WARNING, ERROR, CRITICAL
+- [x] 2.8 Implement configuration logging at startup (mask sensitive values)
+      **DONE**: Walking skeleton + YAML config feature
+- [x] 2.9 Write unit tests for configuration loading and validation
+      **DONE**: YAML config feature - comprehensive tests in config_test.go
+- [x] 2.10 Add optional YAML configuration file support
+      **DONE**: YAML config feature - LoadWithConfigFile() supports YAML via viper
+- [x] 2.11 Document all configuration options in README or config example file
+      **DONE**: YAML config feature - configs/config.example.yaml
 
 ## 3. Event Data Structures
 - [ ] 3.1 Define `FaultEvent` struct in `internal/events/event.go`

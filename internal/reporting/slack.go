@@ -27,9 +27,9 @@ type SlackMessage struct {
 
 // SlackBlock represents a Slack block element
 type SlackBlock struct {
-	Type   string          `json:"type"`
-	Text   *SlackText      `json:"text,omitempty"`
-	Fields []SlackText     `json:"fields,omitempty"`
+	Type     string         `json:"type"`
+	Text     *SlackText     `json:"text,omitempty"`
+	Fields   []SlackText    `json:"fields,omitempty"`
 	Elements []SlackElement `json:"elements,omitempty"`
 }
 
@@ -54,16 +54,16 @@ type SlackAttachment struct {
 
 // IncidentSummary contains the key information for a Slack notification
 type IncidentSummary struct {
-	IncidentID    string
-	Cluster       string
-	Namespace     string
-	Resource      string
-	Reason        string
-	Status        string
-	RootCause     string
-	Confidence    string
-	Duration      time.Duration
-	ReportPath    string
+	IncidentID string
+	Cluster    string
+	Namespace  string
+	Resource   string
+	Reason     string
+	Status     string
+	RootCause  string
+	Confidence string
+	Duration   time.Duration
+	ReportPath string
 }
 
 // NewSlackNotifier creates a new Slack notifier
