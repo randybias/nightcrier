@@ -45,6 +45,16 @@ Minimal testing for skeleton:
 
 Full test coverage deferred to individual phase implementations.
 
+## Extension: Real Agent Integration
+
+After proving the stub flow works, extend to use the real containerized Claude agent:
+1. Create triage prompt templates (`configs/triage-system-prompt.md`, `configs/triage-prompt.md`)
+2. Test manually with `agent-container/run-agent.sh`
+3. Integrate into executor with proper environment (API keys, kubeconfig)
+4. End-to-end test with real fault → real AI triage
+
+This extension proves the full value proposition before investing in the remaining phases.
+
 ## Parallelization Strategy
 
 Independent workstreams (can run in parallel):

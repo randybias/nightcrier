@@ -108,6 +108,87 @@ Duration: 35ms
 - `internal/events/client.go` - MCP client with StreamableHTTP transport
 - `internal/events/event.go` - FaultEvent struct matching server format
 - `internal/agent/executor.go` - Absolute path fix, pass args
-- `internal/config/config.go` - MCP_ENDPOINT environment variable
+- `internal/config/config.go` - K8S_CLUSTER_MCP_ENDPOINT environment variable
 - `cmd/runner/main.go` - Updated to use new event structure
 - `scripts/stub-agent.sh` - Created test stub script
+
+## 7. Real Agent Integration (Extension)
+
+**Purpose**: Replace stub agent with containerized Claude agent to prove real triage value.
+
+- [x] 7.1 Create `configs/` directory for prompt templates
+- [x] 7.2 Create `configs/triage-system-prompt.md` with agent constraints and output format
+- [x] 7.3 Create `configs/triage-prompt.md` with production incident framing
+- [x] 7.4 Test containerized agent manually with `agent-container/run-agent.sh`
+- [x] 7.5 Verify investigation report generated in `output/investigation.md`
+- [x] 7.6 Update `internal/config/config.go` to add agent configuration:
+  - `SLACK_WEBHOOK_URL` (optional, for notifications)
+  - `AGENT_SCRIPT_PATH` (path to run-agent.sh)
+  - `AGENT_TIMEOUT` (default: 300s)
+- [x] 7.7 Add Slack notification support:
+  - Created `internal/reporting/slack.go` with SlackNotifier
+  - Extracts root cause and confidence from investigation.md
+  - Sends formatted notification to Slack webhook
+- [x] 7.8 Update `internal/agent/executor.go` to support containerized agent:
+  - Build prompt from event context
+  - Pass system prompt file path via `--system-prompt-file` flag
+  - Pass workspace, model, allowed-tools, timeout via command-line args
+  - Handle longer timeout (configurable via `AGENT_TIMEOUT`)
+- [x] 7.9 End-to-end test: kubernetes-mcp-server → runner → containerized Claude → investigation report → Slack notification
+  - Verified containerized agent generates comprehensive investigation reports
+  - Verified Slack summary extraction works (root cause + confidence)
+  - Slack notification code complete (requires `SLACK_WEBHOOK_URL` env var to enable)
+
+### Manual Test Results (2025-12-18)
+
+**Test Setup:**
+- Workspace: `scratch/test-incident-001/`
+- Event: Pod `failing-test-triage` with StartError (invalid `/nonexistent` command)
+- Agent: Claude sonnet via `agent-container/run-agent.sh`
+
+**Command:**
+```bash
+source ~/dev-secrets/api-keys.env
+./run-agent.sh -w ../scratch/test-incident-001 \
+  --system-prompt-file ../configs/triage-system-prompt.md \
+  -t "Read,Grep,Glob,Bash,Skill" \
+  -m sonnet \
+  "Production incident detected. Fault event details are in event.json. Perform immediate triage and root cause analysis."
+```
+
+**Result:**
+- Exit code: 0
+- Investigation report: 7.8KB detailed analysis
+- Root cause correctly identified: Invalid container command `/nonexistent`
+- Confidence: HIGH (100%)
+- Recommendations: Fix pod spec with valid command, preventive measures
+
+### Full Integration Test Results (2025-12-18)
+
+**Test Setup:**
+- Workspace: `scratch/e2e-test-001/`
+- Event: Same StartError event (copied from test-incident-001)
+- Agent: Claude sonnet via executor with full config
+
+**Components Verified:**
+1. `internal/config/config.go` - Added AgentSystemPromptFile, AgentAllowedTools, AgentModel
+2. `internal/agent/executor.go` - Passes all args to run-agent.sh via NewExecutorWithConfig
+3. `internal/reporting/slack.go` - Extracts root cause + confidence from investigation.md
+4. `cmd/runner/main.go` - Wires executor with full config, integrates Slack notifier
+
+**Result:**
+- Exit code: 0
+- Investigation report: 287 lines comprehensive analysis
+- Root cause extracted: "The pod specification configured the container with args..."
+- Confidence extracted: HIGH
+- Slack notification: Code complete, requires SLACK_WEBHOOK_URL env var
+
+**Key Config Options:**
+```
+AGENT_SCRIPT_PATH=./agent-container/run-agent.sh
+AGENT_SYSTEM_PROMPT_FILE=./configs/triage-system-prompt.md
+AGENT_ALLOWED_TOOLS=Read,Write,Grep,Glob,Bash,Skill
+AGENT_MODEL=sonnet
+AGENT_TIMEOUT=300
+SLACK_WEBHOOK_URL= (optional)
+```

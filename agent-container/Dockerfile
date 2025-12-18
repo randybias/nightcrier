@@ -92,20 +92,35 @@ RUN npm install -g @google/gemini-cli
 # Install command when they fix headless:
 # RUN curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash
 
-# Create workspace, skills, and output directories
-RUN mkdir -p /workspace /skills /output && chmod 777 /workspace /skills /output
+# Create non-root user for security (matches typical container best practices)
+# Using UID 1000 which is common default for first non-root user
+ARG USER_NAME=agent
+ARG USER_UID=1000
+ARG USER_GID=1000
 
-# Clone k8s4agents skills from GitHub
-# These provide Kubernetes troubleshooting capabilities for the AI agents
-RUN git clone --depth 1 https://github.com/randybias/k8s4agents.git /tmp/k8s4agents \
-    && cp -r /tmp/k8s4agents/skills/* /skills/ \
-    && chmod -R 755 /skills \
-    && rm -rf /tmp/k8s4agents
+RUN groupadd --gid ${USER_GID} ${USER_NAME} \
+    && useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USER_NAME}
 
-# Setup Claude Code user skills directory
-# Skills are available at /skills/k8s-troubleshooter/SKILL.md
-RUN mkdir -p /root/.claude/commands \
-    && echo "Read /skills/k8s-troubleshooter/SKILL.md and follow its instructions for Kubernetes troubleshooting." > /root/.claude/commands/k8s-troubleshooter.md
+# Create workspace and output directories with proper permissions
+RUN mkdir -p /workspace /output \
+    && chown -R ${USER_NAME}:${USER_NAME} /workspace /output
+
+# Clone k8s4agents skills from GitHub to user's Claude skills directory
+# This ensures ~/.claude/skills/ paths work identically to local usage
+RUN mkdir -p /home/${USER_NAME}/.claude/skills /home/${USER_NAME}/.claude/commands /home/${USER_NAME}/.kube \
+    && git clone --depth 1 https://github.com/randybias/k8s4agents.git /tmp/k8s4agents \
+    && cp -r /tmp/k8s4agents/skills/* /home/${USER_NAME}/.claude/skills/ \
+    && chmod -R 755 /home/${USER_NAME}/.claude/skills \
+    && rm -rf /tmp/k8s4agents \
+    && chown -R ${USER_NAME}:${USER_NAME} /home/${USER_NAME}/.claude /home/${USER_NAME}/.kube
+
+# Setup Claude Code slash command for k8s-troubleshooter
+RUN echo "Read ~/.claude/skills/k8s-troubleshooter/SKILL.md and follow its instructions for Kubernetes troubleshooting." \
+    > /home/${USER_NAME}/.claude/commands/k8s-troubleshooter.md \
+    && chown ${USER_NAME}:${USER_NAME} /home/${USER_NAME}/.claude/commands/k8s-troubleshooter.md
+
+# Switch to non-root user
+USER ${USER_NAME}
 
 # Set working directory
 WORKDIR /workspace

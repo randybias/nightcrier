@@ -427,19 +427,21 @@ fi
 DOCKER_ARGS+=("-v" "${WORKSPACE_DIR}:${CONTAINER_WORKSPACE}")
 DOCKER_ARGS+=("-v" "${OUTPUT_DIR}:/output")
 
-# Mount kubeconfig if it exists
+# Mount kubeconfig if it exists (to non-root user's home directory)
 if [[ -f "$KUBECONFIG_PATH" ]]; then
-    DOCKER_ARGS+=("-v" "${KUBECONFIG_PATH}:/root/.kube/config:ro")
+    DOCKER_ARGS+=("-v" "${KUBECONFIG_PATH}:/home/agent/.kube/config:ro")
 fi
 
-# Mount skills directory if specified
+# Mount skills directory if specified (overrides built-in skills, convert to absolute path)
 if [[ -n "$SKILLS_DIR" && -d "$SKILLS_DIR" ]]; then
-    DOCKER_ARGS+=("-v" "${SKILLS_DIR}:/skills:ro")
+    SKILLS_DIR_ABS="$(cd "$SKILLS_DIR" && pwd)"
+    DOCKER_ARGS+=("-v" "${SKILLS_DIR_ABS}:/home/agent/.claude/skills:ro")
 fi
 
-# Mount system prompt file if specified
+# Mount system prompt file if specified (convert to absolute path for Docker)
 if [[ -n "$CLAUDE_SYSTEM_PROMPT_FILE" && -f "$CLAUDE_SYSTEM_PROMPT_FILE" ]]; then
-    DOCKER_ARGS+=("-v" "${CLAUDE_SYSTEM_PROMPT_FILE}:/tmp/system-prompt.txt:ro")
+    CLAUDE_SYSTEM_PROMPT_FILE_ABS="$(cd "$(dirname "$CLAUDE_SYSTEM_PROMPT_FILE")" && pwd)/$(basename "$CLAUDE_SYSTEM_PROMPT_FILE")"
+    DOCKER_ARGS+=("-v" "${CLAUDE_SYSTEM_PROMPT_FILE_ABS}:/tmp/system-prompt.txt:ro")
 fi
 
 # Working directory

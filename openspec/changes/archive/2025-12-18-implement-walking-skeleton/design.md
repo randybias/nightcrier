@@ -40,7 +40,7 @@ cmd/
     main.go              # CLI entry point with Cobra
 internal/
   config/
-    config.go            # Configuration struct + loading (MCP_ENDPOINT)
+    config.go            # Configuration struct + loading (K8S_CLUSTER_MCP_ENDPOINT)
   events/
     client.go            # MCP client with StreamableHTTP transport
     event.go             # FaultEvent struct (matches kubernetes-mcp-server format)
@@ -75,7 +75,7 @@ scripts/
 - **Rationale**: Simplifies debugging; concurrency in Phase 4
 
 ### D5: MCP Protocol Configuration
-- **Decision**: Use `MCP_ENDPOINT` instead of `SSE_ENDPOINT`
+- **Decision**: Use `K8S_CLUSTER_MCP_ENDPOINT` instead of `SSE_ENDPOINT`
 - **Rationale**: Reflects actual protocol being used (MCP over StreamableHTTP)
 
 ### D6: Session Lifecycle Management
@@ -85,7 +85,7 @@ scripts/
 
 ## Data Flow (As Implemented)
 
-1. Runner connects to `MCP_ENDPOINT/mcp` via StreamableHTTP
+1. Runner connects to `K8S_CLUSTER_MCP_ENDPOINT/mcp` via StreamableHTTP
 2. MCP initialization and session established (session ID assigned)
 3. Set logging level to "info" for notifications
 4. Subscribe to faults: `events_subscribe(mode="faults")`
@@ -102,7 +102,7 @@ scripts/
 
 ```bash
 # Required
-MCP_ENDPOINT=http://localhost:8383
+K8S_CLUSTER_MCP_ENDPOINT=http://localhost:8383
 
 # Optional (with defaults)
 WORKSPACE_ROOT=./incidents

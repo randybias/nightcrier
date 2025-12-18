@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	sseEndpoint   string
+	mcpEndpoint   string
 	workspaceRoot string
 	scriptPath    string
 	logLevel      string
@@ -35,12 +35,12 @@ func main() {
 var rootCmd = &cobra.Command{
 	Use:   "runner",
 	Short: "Kubernetes MCP Alerts Event Runner",
-	Long:  "Listens to SSE events from kubernetes-mcp-server and processes alerts using Claude agents",
+	Long:  "MCP client that listens for fault events from kubernetes-mcp-server and spawns AI agents to triage them",
 	RunE:  run,
 }
 
 func init() {
-	rootCmd.Flags().StringVar(&sseEndpoint, "sse-endpoint", "", "SSE endpoint URL (overrides SSE_ENDPOINT env var)")
+	rootCmd.Flags().StringVar(&mcpEndpoint, "mcp-endpoint", "", "MCP server endpoint URL (overrides K8S_CLUSTER_MCP_ENDPOINT env var)")
 	rootCmd.Flags().StringVar(&workspaceRoot, "workspace-root", "", "Workspace root directory (overrides WORKSPACE_ROOT env var, default: ./incidents)")
 	rootCmd.Flags().StringVar(&scriptPath, "script-path", "", "Path to agent script (default: ./scripts/stub-agent.sh)")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "", "Log level (overrides LOG_LEVEL env var, default: info)")
@@ -48,8 +48,8 @@ func init() {
 
 func run(cmd *cobra.Command, args []string) error {
 	// Override environment variables with flags if provided
-	if sseEndpoint != "" {
-		os.Setenv("SSE_ENDPOINT", sseEndpoint)
+	if mcpEndpoint != "" {
+		os.Setenv("K8S_CLUSTER_MCP_ENDPOINT", mcpEndpoint)
 	}
 	if workspaceRoot != "" {
 		os.Setenv("WORKSPACE_ROOT", workspaceRoot)
@@ -68,30 +68,47 @@ func run(cmd *cobra.Command, args []string) error {
 	setupLogging(cfg.LogLevel)
 
 	slog.Info("starting kubernetes-mcp-alerts-event-runner",
-		"sse_endpoint", cfg.SSEEndpoint,
+		"mcp_endpoint", cfg.MCPEndpoint,
 		"workspace_root", cfg.WorkspaceRoot,
-		"log_level", cfg.LogLevel)
+		"log_level", cfg.LogLevel,
+		"agent_script", cfg.AgentScriptPath,
+		"agent_model", cfg.AgentModel,
+		"agent_timeout", cfg.AgentTimeout)
 
-	// Determine script path
+	// Determine script path (CLI flag overrides config)
 	agentScript := scriptPath
 	if agentScript == "" {
-		agentScript = "./scripts/stub-agent.sh"
+		agentScript = cfg.AgentScriptPath
 	}
 
 	// Verify script exists
 	if _, err := os.Stat(agentScript); os.IsNotExist(err) {
-		// Try absolute path from executable location
-		execPath, _ := os.Executable()
-		agentScript = filepath.Join(filepath.Dir(execPath), "scripts", "stub-agent.sh")
-		if _, err := os.Stat(agentScript); os.IsNotExist(err) {
-			return fmt.Errorf("agent script not found: %s", scriptPath)
-		}
+		return fmt.Errorf("agent script not found: %s", agentScript)
+	}
+
+	// Verify system prompt file exists
+	if _, err := os.Stat(cfg.AgentSystemPromptFile); os.IsNotExist(err) {
+		slog.Warn("system prompt file not found, will run without it", "path", cfg.AgentSystemPromptFile)
+		cfg.AgentSystemPromptFile = ""
 	}
 
 	// Create components
-	sseClient := events.NewClient(cfg.SSEEndpoint)
+	mcpClient := events.NewClient(cfg.MCPEndpoint)
 	workspaceMgr := agent.NewWorkspaceManager(cfg.WorkspaceRoot)
-	executor := agent.NewExecutor(agentScript)
+	executor := agent.NewExecutorWithConfig(agent.ExecutorConfig{
+		ScriptPath:       agentScript,
+		SystemPromptFile: cfg.AgentSystemPromptFile,
+		AllowedTools:     cfg.AgentAllowedTools,
+		Model:            cfg.AgentModel,
+		Timeout:          cfg.AgentTimeout,
+	})
+
+	// Create Slack notifier (optional - only if webhook URL configured)
+	var slackNotifier *reporting.SlackNotifier
+	if cfg.SlackWebhookURL != "" {
+		slackNotifier = reporting.NewSlackNotifier(cfg.SlackWebhookURL)
+		slog.Info("slack notifications enabled")
+	}
 
 	// Setup context with cancellation for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -106,13 +123,11 @@ func run(cmd *cobra.Command, args []string) error {
 		cancel()
 	}()
 
-	// Subscribe to SSE events
-	eventChan, err := sseClient.Subscribe(ctx)
+	// Subscribe to fault events via MCP
+	eventChan, err := mcpClient.Subscribe(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to SSE: %w", err)
+		return fmt.Errorf("failed to subscribe to MCP events: %w", err)
 	}
-
-	slog.Info("connected to SSE endpoint, waiting for events...")
 
 	// Process events
 	for {
@@ -125,23 +140,24 @@ func run(cmd *cobra.Command, args []string) error {
 				slog.Info("event channel closed")
 				return nil
 			}
-			if err := processEvent(ctx, event, workspaceMgr, executor); err != nil {
+			if err := processEvent(ctx, event, workspaceMgr, executor, slackNotifier); err != nil {
 				slog.Error("failed to process event", "error", err)
 			}
 		}
 	}
 }
 
-func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *agent.WorkspaceManager, executor *agent.Executor) error {
+func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *agent.WorkspaceManager, executor *agent.Executor, slackNotifier *reporting.SlackNotifier) error {
 	incidentID := uuid.New().String()
 	startedAt := time.Now()
 
-	slog.Info("processing event",
+	slog.Info("processing fault event",
 		"incident_id", incidentID,
-		"cluster_id", event.ClusterID,
-		"namespace", event.Namespace,
-		"resource", fmt.Sprintf("%s/%s", event.ResourceType, event.ResourceName),
-		"severity", event.Severity)
+		"cluster", event.Cluster,
+		"namespace", event.GetNamespace(),
+		"resource", fmt.Sprintf("%s/%s", event.GetResourceKind(), event.GetResourceName()),
+		"reason", event.Event.Reason,
+		"severity", event.GetSeverity())
 
 	// Create workspace
 	workspacePath, err := workspaceMgr.Create(incidentID)
@@ -180,11 +196,42 @@ func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *a
 		return fmt.Errorf("failed to write result: %w", err)
 	}
 
+	duration := completedAt.Sub(startedAt)
+
 	slog.Info("event processed",
 		"incident_id", incidentID,
 		"status", status,
 		"exit_code", exitCode,
-		"duration", completedAt.Sub(startedAt))
+		"duration", duration)
+
+	// Send Slack notification if configured
+	if slackNotifier != nil {
+		rootCause, confidence, err := reporting.ExtractSummaryFromReport(workspacePath)
+		if err != nil {
+			slog.Warn("failed to extract report summary for slack", "error", err)
+			rootCause = "See investigation report"
+			confidence = "UNKNOWN"
+		}
+
+		summary := &reporting.IncidentSummary{
+			IncidentID:  incidentID,
+			Cluster:     event.Cluster,
+			Namespace:   event.GetNamespace(),
+			Resource:    fmt.Sprintf("%s/%s", event.GetResourceKind(), event.GetResourceName()),
+			Reason:      event.Event.Reason,
+			Status:      status,
+			RootCause:   rootCause,
+			Confidence:  confidence,
+			Duration:    duration,
+			ReportPath:  filepath.Join(workspacePath, "output", "investigation.md"),
+		}
+
+		if err := slackNotifier.SendIncidentNotification(summary); err != nil {
+			slog.Error("failed to send slack notification", "error", err)
+		} else {
+			slog.Info("slack notification sent", "incident_id", incidentID)
+		}
+	}
 
 	return nil
 }

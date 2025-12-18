@@ -40,7 +40,7 @@ This repo hosts the Kubernetes MCP alerts event runner. Use these notes to keep 
 ## Coding Style & Naming Conventions
 - Go: rely on `gofmt`; prefer short, lower snake file names; exported identifiers need doc comments.
 - YAML: 2-space indent; keep manifests small and reuse via kustomize patches.
-- Config keys lower-kebab (e.g., `alert-source`); env vars upper snake (e.g., `MCP_ENDPOINT`).
+- Config keys lower-kebab (e.g., `alert-source`); env vars upper snake (e.g., `K8S_CLUSTER_MCP_ENDPOINT`).
 
 ## Testing Guidelines
 - Table-driven tests for handlers and clients; mock external calls instead of hitting live clusters.
