@@ -65,9 +65,49 @@ Task 5 depends on all of 1-4 completing.
 
 ## 6. Manual Integration Test
 
-- [ ] 6.1 Start kubernetes-mcp-server (or mock SSE server)
-- [ ] 6.2 Run skeleton: `go run ./cmd/runner --sse-endpoint http://localhost:8080/events`
-- [ ] 6.3 Trigger fault event
-- [ ] 6.4 Verify workspace directory created
-- [ ] 6.5 Verify event.json contains event data
-- [ ] 6.6 Verify result.json shows exit_code 0
+- [x] 6.1 Start kubernetes-mcp-server on port 8383
+- [x] 6.2 Run skeleton: `./runner --mcp-endpoint http://localhost:8383`
+- [x] 6.3 Trigger fault event (create failing pod)
+- [x] 6.4 Verify workspace directory created
+- [x] 6.5 Verify event.json contains event data
+- [x] 6.6 Verify result.json shows exit_code 0
+
+## Implementation Notes (2025-12-18)
+
+### Key Changes from Original Plan
+
+1. **Transport**: Changed from raw SSE (`/sse` endpoint) to MCP StreamableHTTP (`/mcp` endpoint)
+   - Uses `mcp.StreamableClientTransport` instead of `mcp.SSEClientTransport`
+   - Required for proper session tracking and notification delivery
+
+2. **Event Subscription**: Uses MCP protocol instead of raw SSE
+   - Calls `events_subscribe` tool with `mode: "faults"`
+   - Receives events via `logging/message` notifications with `logger: "kubernetes/faults"`
+   - Requires `session.Wait()` goroutine to keep connection alive
+
+3. **Event Structure**: Matches kubernetes-mcp-server `FaultEvent` format
+   - `subscriptionId`, `cluster`, `event`, `logs[]`
+   - `event.involvedObject` contains Pod details
+   - Container logs enriched by server
+
+4. **Executor Fix**: Script path converted to absolute path
+   - Required because `cmd.Dir` changes working directory to workspace
+
+### Test Results
+
+```
+Incident ID: 5cc31391-ca70-4550-87a2-b97e50b37031
+Pod: final-test-1766040896 (StartError)
+Status: success
+Exit Code: 0
+Duration: 35ms
+```
+
+### Files Modified
+
+- `internal/events/client.go` - MCP client with StreamableHTTP transport
+- `internal/events/event.go` - FaultEvent struct matching server format
+- `internal/agent/executor.go` - Absolute path fix, pass args
+- `internal/config/config.go` - MCP_ENDPOINT environment variable
+- `cmd/runner/main.go` - Updated to use new event structure
+- `scripts/stub-agent.sh` - Created test stub script
