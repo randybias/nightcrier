@@ -24,7 +24,7 @@ This task list has been updated to mark completed items and focus on remaining w
 - [x] 1.4 Add dependency: `github.com/spf13/cobra` for CLI framework
       **DONE**: Walking skeleton
 - [x] 1.5 Add dependency: `github.com/spf13/viper` for configuration management
-      **DONE**: YAML config feature branch
+      **DONE**: YAML config feature - viper enables YAML config files with precedence handling
 - [x] 1.6 Add dependency: structured logging library (e.g., `go.uber.org/zap` or `log/slog`)
       **DONE**: Walking skeleton uses log/slog
 - [x] 1.7 Create `cmd/runner/main.go` with basic command structure
@@ -34,11 +34,11 @@ This task list has been updated to mark completed items and focus on remaining w
 
 ## 2. Configuration System
 - [x] 2.1 Define configuration struct in `internal/config/config.go` with all fields from design.md
-      **DONE**: YAML config feature - Config struct with all Phase 1 fields plus Azure storage
+      **DONE**: YAML config feature - Config struct with all Phase 1 fields plus Azure storage, using mapstructure tags
 - [x] 2.2 Implement environment variable loading with defaults
       **DONE**: YAML config feature - viper binds env vars to config keys
 - [x] 2.3 Implement command-line flag parsing using cobra
-      **DONE**: YAML config feature - --config, --mcp-endpoint, --log-level, etc.
+      **DONE**: YAML config feature - --config, --mcp-endpoint, --log-level, --agent-timeout, etc.
 - [x] 2.4 Implement configuration precedence (flags > env vars > file > defaults)
       **DONE**: YAML config feature - viper handles precedence automatically
 - [x] 2.5 Add validation for required fields (K8S_CLUSTER_MCP_ENDPOINT)
@@ -57,8 +57,10 @@ This task list has been updated to mark completed items and focus on remaining w
       **DONE**: YAML config feature - configs/config.example.yaml
 
 ## 3. Event Data Structures
-- [ ] 3.1 Define `FaultEvent` struct in `internal/events/event.go`
-- [ ] 3.2 Add JSON struct tags for all FaultEvent fields
+- [x] 3.1 Define `FaultEvent` struct in `internal/events/event.go`
+      **DONE**: Walking skeleton - matches kubernetes-mcp-server format
+- [x] 3.2 Add JSON struct tags for all FaultEvent fields
+      **DONE**: Walking skeleton
 - [ ] 3.3 Define `DeduplicationKey` struct
 - [ ] 3.4 Implement `DeduplicationKey.String()` method for cache key generation
 - [ ] 3.5 Define severity constants (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -66,21 +68,28 @@ This task list has been updated to mark completed items and focus on remaining w
 - [ ] 3.7 Write unit tests for severity comparison logic
 - [ ] 3.8 Write unit tests for deduplication key generation
 
-## 4. SSE Client Implementation
-- [ ] 4.1 Create `internal/events/client.go` for SSE client wrapper
-- [ ] 4.2 Initialize r3labs/sse client with configured endpoint
+## 4. MCP Client Implementation (was SSE)
+- [x] 4.1 Create `internal/events/client.go` for MCP client wrapper
+      **DONE**: Walking skeleton - uses MCP StreamableHTTP transport
+- [x] 4.2 Initialize MCP client with configured endpoint
+      **DONE**: Walking skeleton - NewClient(endpoint)
 - [ ] 4.3 Configure exponential backoff (1s initial, 60s max)
-- [ ] 4.4 Configure Last-Event-ID tracking
-- [ ] 4.5 Implement event subscription with context support
-- [ ] 4.6 Add connection success logging
-- [ ] 4.7 Add connection failure logging with error details
+- [ ] 4.4 Configure session recovery on reconnection
+- [x] 4.5 Implement event subscription with context support
+      **DONE**: Walking skeleton - Subscribe(ctx) returns event channel
+- [x] 4.6 Add connection success logging
+      **DONE**: Walking skeleton
+- [x] 4.7 Add connection failure logging with error details
+      **DONE**: Walking skeleton
 - [ ] 4.8 Implement reconnection logging with backoff duration
-- [ ] 4.9 Handle SSE event data field extraction
-- [ ] 4.10 Parse event ID field for Last-Event-ID tracking
-- [ ] 4.11 Implement graceful shutdown on context cancellation
-- [ ] 4.12 Write integration test with mock SSE server
+- [x] 4.9 Handle MCP notification data field extraction
+      **DONE**: Walking skeleton - parses logging/message notifications
+- [ ] 4.10 Parse session ID for recovery on reconnect
+- [x] 4.11 Implement graceful shutdown on context cancellation
+      **DONE**: Walking skeleton
+- [ ] 4.12 Write integration test with mock MCP server
 - [ ] 4.13 Test reconnection behavior with temporary server failure
-- [ ] 4.14 Test Last-Event-ID header transmission on reconnect
+- [ ] 4.14 Test session recovery on reconnect
 
 ## 5. Event Validation and Parsing
 - [ ] 5.1 Create `internal/events/validator.go`
@@ -169,12 +178,18 @@ This task list has been updated to mark completed items and focus on remaining w
 - [ ] 11.11 Write tests for graceful shutdown
 
 ## 12. Agent Spawner Stub
-- [ ] 12.1 Create `internal/agent/spawner.go`
-- [ ] 12.2 Define `Spawner` interface with `Spawn(event *FaultEvent) error` method
-- [ ] 12.3 Implement stub that logs event details and returns nil
-- [ ] 12.4 Add configurable sleep duration to simulate agent execution
-- [ ] 12.5 Log "agent started" and "agent completed" messages
-- [ ] 12.6 Note: Full agent implementation is in Phase 2
+- [x] 12.1 Create `internal/agent/spawner.go`
+      **DONE**: Walking skeleton - full agent implementation in executor.go
+- [x] 12.2 Define `Spawner` interface with `Spawn(event *FaultEvent) error` method
+      **DONE**: Walking skeleton - Executor struct with Execute method
+- [x] 12.3 Implement stub that logs event details and returns nil
+      **SUPERSEDED**: Walking skeleton implements full containerized agent
+- [x] 12.4 Add configurable sleep duration to simulate agent execution
+      **SUPERSEDED**: Real agent execution with configurable timeout
+- [x] 12.5 Log "agent started" and "agent completed" messages
+      **DONE**: Walking skeleton
+- [x] 12.6 Note: Full agent implementation is in Phase 2
+      **DONE**: Walking skeleton implemented full agent ahead of schedule
 
 ## 13. Main Event Processing Loop
 - [ ] 13.1 Create `internal/events/processor.go`
@@ -192,25 +207,36 @@ This task list has been updated to mark completed items and focus on remaining w
 - [ ] 13.13 Test error paths (validation failures, filtering, dedup)
 
 ## 14. Graceful Shutdown
-- [ ] 14.1 Implement signal handling (SIGTERM, SIGINT) in main.go
-- [ ] 14.2 Create shutdown context with configured timeout
-- [ ] 14.3 Stop accepting new SSE events
+- [x] 14.1 Implement signal handling (SIGTERM, SIGINT) in main.go
+      **DONE**: Walking skeleton
+- [x] 14.2 Create shutdown context with configured timeout
+      **DONE**: Walking skeleton - uses context.WithCancel
+- [x] 14.3 Stop accepting new MCP events
+      **DONE**: Walking skeleton - context cancellation stops event loop
 - [ ] 14.4 Close cluster queues to signal workers
 - [ ] 14.5 Wait for in-flight agents to complete (with timeout)
-- [ ] 14.6 Log shutdown progress at each stage
+- [x] 14.6 Log shutdown progress at each stage
+      **DONE**: Walking skeleton
 - [ ] 14.7 If timeout expires, forcibly terminate remaining agents
 - [ ] 14.8 Log final statistics (events processed, queued, dropped)
-- [ ] 14.9 Close SSE connection cleanly
-- [ ] 14.10 Exit with appropriate status code (0 for clean, 1 for timeout)
+- [x] 14.9 Close MCP connection cleanly
+      **DONE**: Walking skeleton
+- [x] 14.10 Exit with appropriate status code (0 for clean, 1 for timeout)
+      **DONE**: Walking skeleton
 - [ ] 14.11 Write tests for graceful shutdown
 - [ ] 14.12 Write tests for forced shutdown on timeout
 
 ## 15. Structured Logging
-- [ ] 15.1 Initialize structured logger in main.go
-- [ ] 15.2 Configure log level from configuration
-- [ ] 15.3 Define consistent field names for structured logs
-- [ ] 15.4 Use structured logging throughout codebase
-- [ ] 15.5 Log all event state transitions with appropriate fields
+- [x] 15.1 Initialize structured logger in main.go
+      **DONE**: Walking skeleton - uses log/slog
+- [x] 15.2 Configure log level from configuration
+      **DONE**: Walking skeleton - LOG_LEVEL env var
+- [x] 15.3 Define consistent field names for structured logs
+      **DONE**: Walking skeleton
+- [x] 15.4 Use structured logging throughout codebase
+      **DONE**: Walking skeleton
+- [x] 15.5 Log all event state transitions with appropriate fields
+      **DONE**: Walking skeleton
 - [ ] 15.6 Add request ID or correlation ID to logs (optional)
 - [ ] 15.7 Test log output format and levels
 

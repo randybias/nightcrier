@@ -1,0 +1,66 @@
+# Implementation Tasks: Rename to "nightcrier"
+
+## Prerequisites
+- [ ] Create GitHub repository `nightcrier` (or rename existing repo)
+
+---
+
+## 1. Go Module and Imports
+- [ ] 1.1 Update `go.mod` module path to `github.com/rbias/nightcrier`
+- [ ] 1.2 Update imports in `cmd/runner/main.go`
+- [ ] 1.3 Update imports in `internal/agent/context.go`
+- [ ] 1.4 Run `go mod tidy` to update `go.sum`
+- [ ] 1.5 Verify build with `go build ./...`
+
+## 2. Command Directory
+- [ ] 2.1 Rename `cmd/runner/` to `cmd/nightcrier/`
+- [ ] 2.2 Update any Makefile or build scripts referencing `cmd/runner`
+
+## 3. MCP Client Identity
+- [ ] 3.1 Update `internal/events/client.go` Implementation Name from `kubernetes-mcp-alerts-event-runner` to `nightcrier`
+- [ ] 3.2 Consider updating Version to `1.0.0` to mark the rename milestone
+
+## 4. Configuration System
+- [ ] 4.1 Update config search path in `internal/config/config.go` from `/etc/runner/` to `/etc/nightcrier/`
+- [ ] 4.2 Update comments in `configs/config.example.yaml`
+- [ ] 4.3 Update comments in `configs/config-test.yaml`
+- [ ] 4.4 Update any references to `runner --config` in documentation
+
+## 5. Docker/Container
+- [ ] 5.1 Update `agent-container/Makefile` IMAGE_NAME default from `k8s-triage-agent` to `nightcrier-agent`
+- [ ] 5.2 Update `agent-container/README.md` if it references old names
+- [ ] 5.3 Update `internal/config/config.go` default for `agent_image` from `k8s-triage-agent:latest` to `nightcrier-agent:latest`
+- [ ] 5.4 Update `configs/config.example.yaml` agent_image default
+- [ ] 5.5 Update `configs/config-test.yaml` agent_image value
+
+## 6. Documentation
+- [ ] 6.1 Update `README.md` title and all references
+- [ ] 6.2 Update `openspec/project.md` purpose and architecture sections
+- [ ] 6.3 Update architecture diagram in `openspec/project.md`
+
+## 7. OpenSpec Files
+- [ ] 7.1 Update `openspec/changes/implement-event-intake/proposal.md` references
+- [ ] 7.2 Update `openspec/changes/implement-agent-runtime/proposal.md` references
+- [ ] 7.3 Update `openspec/changes/implement-reporting/proposal.md` references
+- [ ] 7.4 Update any other OpenSpec files with old name references
+
+## 8. Verification
+- [ ] 8.1 Run `go build ./cmd/nightcrier`
+- [ ] 8.2 Run all tests with `go test ./...`
+- [ ] 8.3 Verify config loading works with new paths
+- [ ] 8.4 Build Docker image with new name
+- [ ] 8.5 Run end-to-end test with kubernetes-mcp-server
+- [ ] 8.6 Grep codebase for any remaining old name references: `rg "kubernetes-mcp-alerts-event-runner|k8s-triage-agent" --type-not binary`
+
+## 9. Cleanup
+- [ ] 9.1 Update git remote URL if repository was renamed
+- [ ] 9.2 Tag release as `v1.0.0-nightcrier` or similar to mark rename
+- [ ] 9.3 Archive this change proposal
+
+---
+
+## Parallelization Notes
+
+Tasks 1-6 can be executed in parallel after task 1.1 (go.mod change) is complete, as imports must be updated first.
+
+Task 8 (verification) must be done after all other tasks.

@@ -15,6 +15,10 @@ type Result struct {
 	StartedAt   time.Time `json:"started_at"`
 	CompletedAt time.Time `json:"completed_at"`
 	Status      string    `json:"status"` // "success", "failed", "error"
+
+	// Cloud storage fields (populated when cloud storage is used)
+	PresignedURLs         map[string]string `json:"presigned_urls,omitempty"`           // URLs to access artifacts (e.g., "investigation.md" -> URL)
+	PresignedURLsExpireAt *time.Time        `json:"presigned_urls_expire_at,omitempty"` // When the presigned URLs expire
 }
 
 // WriteResult writes the execution result to the workspace as JSON

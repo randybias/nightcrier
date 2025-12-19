@@ -29,9 +29,8 @@ GOOGLE_API_KEY="${GOOGLE_API_KEY:-}"
 
 # Workspace configuration
 # IMPORTANT: Workspace should be an INCIDENT directory, not source code!
-# The container will have read/write access to this directory.
+# event.json and output/ from this directory are mounted into the container.
 WORKSPACE_DIR="${WORKSPACE_DIR:-}"  # Required - must be specified
-CONTAINER_WORKSPACE="${CONTAINER_WORKSPACE:-/workspace}"
 
 # Output configuration
 OUTPUT_DIR="${OUTPUT_DIR:-}"  # If empty, uses WORKSPACE_DIR/output
@@ -86,8 +85,7 @@ OPTIONS:
   -d, --debug                   Enable debug output
 
 Workspace:
-  -w, --workspace DIR           Host workspace directory (default: current dir)
-  --container-workspace PATH    Container workspace path (default: /workspace)
+  -w, --workspace DIR           Host incident directory containing event.json
 
 Output:
   --output-dir DIR              Directory for output files (default: workspace/output)
@@ -105,6 +103,14 @@ Claude CLI Options (when --agent claude):
   --system-prompt-file PATH     File containing system prompt (host path)
   -v, --verbose                 Enable verbose Claude output
   --max-turns N                 Maximum conversation turns
+
+Codex CLI Options (when --agent codex):
+  -m, --model MODEL             Model mapping: opus->gpt-5-codex, sonnet->gpt-5.2, haiku->gpt-4o
+                                Or specify directly: gpt-5-codex, gpt-5.2, gpt-4o (default: gpt-5.2)
+  Automatically enabled flags:
+    --enable skills             Load SKILL.md from ~/.codex/skills/
+    --dangerously-bypass-approvals-and-sandbox
+                                Bypass sandbox (required for Docker without Landlock)
 
 Container Options:
   -i, --image IMAGE             Docker image (default: k8s-triage-agent:latest)
@@ -198,10 +204,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         -w|--workspace)
             WORKSPACE_DIR="$2"
-            shift 2
-            ;;
-        --container-workspace)
-            CONTAINER_WORKSPACE="$2"
             shift 2
             ;;
         --output-dir)
@@ -423,29 +425,39 @@ if [[ -n "$KUBERNETES_CONTEXT" ]]; then
     DOCKER_ARGS+=("-e" "KUBERNETES_CONTEXT=${KUBERNETES_CONTEXT}")
 fi
 
-# Volume mounts
-DOCKER_ARGS+=("-v" "${WORKSPACE_DIR}:${CONTAINER_WORKSPACE}")
-DOCKER_ARGS+=("-v" "${OUTPUT_DIR}:/output")
+# Volume mounts - everything goes into /home/agent (the agent's home AND workspace)
+# This keeps skills, config files, and incident data all in one place
+AGENT_HOME="/home/agent"
 
-# Mount kubeconfig if it exists (to non-root user's home directory)
-if [[ -f "$KUBECONFIG_PATH" ]]; then
-    DOCKER_ARGS+=("-v" "${KUBECONFIG_PATH}:/home/agent/.kube/config:ro")
+# Mount event.json directly into agent home
+if [[ -f "${WORKSPACE_DIR}/event.json" ]]; then
+    DOCKER_ARGS+=("-v" "${WORKSPACE_DIR}/event.json:${AGENT_HOME}/event.json:ro")
 fi
 
-# Mount skills directory if specified (overrides built-in skills, convert to absolute path)
+# Mount output directory into agent home (read-write for agent to write results)
+mkdir -p "${OUTPUT_DIR}"
+DOCKER_ARGS+=("-v" "${OUTPUT_DIR}:${AGENT_HOME}/output")
+
+# Mount kubeconfig
+if [[ -f "$KUBECONFIG_PATH" ]]; then
+    DOCKER_ARGS+=("-v" "${KUBECONFIG_PATH}:${AGENT_HOME}/.kube/config:ro")
+fi
+
+# Mount skills directory if specified (overrides built-in skills)
 if [[ -n "$SKILLS_DIR" && -d "$SKILLS_DIR" ]]; then
     SKILLS_DIR_ABS="$(cd "$SKILLS_DIR" && pwd)"
-    DOCKER_ARGS+=("-v" "${SKILLS_DIR_ABS}:/home/agent/.claude/skills:ro")
+    DOCKER_ARGS+=("-v" "${SKILLS_DIR_ABS}:${AGENT_HOME}/.claude/skills:ro")
+    DOCKER_ARGS+=("-v" "${SKILLS_DIR_ABS}:${AGENT_HOME}/.codex/skills:ro")
 fi
 
-# Mount system prompt file if specified (convert to absolute path for Docker)
+# Mount system prompt file if specified
 if [[ -n "$CLAUDE_SYSTEM_PROMPT_FILE" && -f "$CLAUDE_SYSTEM_PROMPT_FILE" ]]; then
     CLAUDE_SYSTEM_PROMPT_FILE_ABS="$(cd "$(dirname "$CLAUDE_SYSTEM_PROMPT_FILE")" && pwd)/$(basename "$CLAUDE_SYSTEM_PROMPT_FILE")"
     DOCKER_ARGS+=("-v" "${CLAUDE_SYSTEM_PROMPT_FILE_ABS}:/tmp/system-prompt.txt:ro")
 fi
 
-# Working directory
-DOCKER_ARGS+=("-w" "$CONTAINER_WORKSPACE")
+# Working directory IS the agent home - everything in one place
+DOCKER_ARGS+=("-w" "${AGENT_HOME}")
 
 # Image
 DOCKER_ARGS+=("$AGENT_IMAGE")
@@ -501,7 +513,34 @@ build_agent_command() {
             # Use 'codex exec' for non-interactive/headless mode
             # Must login with API key first (codex doesn't auto-use OPENAI_API_KEY)
             # --skip-git-repo-check needed when not in a git repo
-            cmd="echo -n \"\${OPENAI_API_KEY}\" > /tmp/.codex-key && codex login --with-api-key < /tmp/.codex-key && rm -f /tmp/.codex-key && codex exec --skip-git-repo-check '${PROMPT//\'/\'\\\'\'}'"
+            # --enable skills to enable SKILL.md loading from ~/.codex/skills
+            # In Docker containers without Landlock, we need --dangerously-bypass-approvals-and-sandbox
+            # AGENTS.md is in /home/agent (the working directory) so Codex finds it automatically
+            cmd="echo -n \"\${OPENAI_API_KEY}\" > /tmp/.codex-key && codex login --with-api-key < /tmp/.codex-key && rm -f /tmp/.codex-key && codex exec --skip-git-repo-check --enable skills --dangerously-bypass-approvals-and-sandbox"
+
+            # Model (default: gpt-5.2 for general tasks)
+            # Note: Codex uses -m flag same as Claude, but with OpenAI model names
+            if [[ -n "$CLAUDE_MODEL" ]]; then
+                case "$CLAUDE_MODEL" in
+                    opus|gpt-5-codex)
+                        cmd+=" -m gpt-5-codex"
+                        ;;
+                    sonnet|gpt-5.2)
+                        cmd+=" -m gpt-5.2"
+                        ;;
+                    haiku|gpt-4o)
+                        cmd+=" -m gpt-4o"
+                        ;;
+                    *)
+                        # Pass through custom model name
+                        cmd+=" -m $CLAUDE_MODEL"
+                        ;;
+                esac
+            else
+                cmd+=" -m gpt-5.2"
+            fi
+
+            cmd+=" '${PROMPT//\'/\'\\\'\'}'"
             ;;
 
         goose)
@@ -514,7 +553,7 @@ build_agent_command() {
     esac
 
     # Tee output to file
-    cmd+=" 2>&1 | tee /output/${OUTPUT_FILE}"
+    cmd+=" 2>&1 | tee ${AGENT_HOME}/output/${OUTPUT_FILE}"
 
     echo "$cmd"
 }

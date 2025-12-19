@@ -101,29 +101,67 @@ ARG USER_GID=1000
 RUN groupadd --gid ${USER_GID} ${USER_NAME} \
     && useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USER_NAME}
 
-# Create workspace and output directories with proper permissions
-RUN mkdir -p /workspace /output \
-    && chown -R ${USER_NAME}:${USER_NAME} /workspace /output
+# Create output directory in agent home (workspace IS the home directory)
+RUN mkdir -p /home/${USER_NAME}/output \
+    && chown -R ${USER_NAME}:${USER_NAME} /home/${USER_NAME}/output
 
-# Clone k8s4agents skills from GitHub to user's Claude skills directory
-# This ensures ~/.claude/skills/ paths work identically to local usage
-RUN mkdir -p /home/${USER_NAME}/.claude/skills /home/${USER_NAME}/.claude/commands /home/${USER_NAME}/.kube \
+# Clone k8s4agents skills from GitHub to user's skills directories
+# Install to both ~/.claude/skills/ and ~/.codex/skills/ for CLI compatibility
+RUN mkdir -p /home/${USER_NAME}/.claude/skills /home/${USER_NAME}/.claude/commands \
+             /home/${USER_NAME}/.codex/skills /home/${USER_NAME}/.kube \
     && git clone --depth 1 https://github.com/randybias/k8s4agents.git /tmp/k8s4agents \
     && cp -r /tmp/k8s4agents/skills/* /home/${USER_NAME}/.claude/skills/ \
-    && chmod -R 755 /home/${USER_NAME}/.claude/skills \
+    && cp -r /tmp/k8s4agents/skills/* /home/${USER_NAME}/.codex/skills/ \
+    && chmod -R 755 /home/${USER_NAME}/.claude/skills /home/${USER_NAME}/.codex/skills \
     && rm -rf /tmp/k8s4agents \
-    && chown -R ${USER_NAME}:${USER_NAME} /home/${USER_NAME}/.claude /home/${USER_NAME}/.kube
+    && chown -R ${USER_NAME}:${USER_NAME} /home/${USER_NAME}/.claude /home/${USER_NAME}/.codex /home/${USER_NAME}/.kube
 
 # Setup Claude Code slash command for k8s-troubleshooter
 RUN echo "Read ~/.claude/skills/k8s-troubleshooter/SKILL.md and follow its instructions for Kubernetes troubleshooting." \
     > /home/${USER_NAME}/.claude/commands/k8s-troubleshooter.md \
     && chown ${USER_NAME}:${USER_NAME} /home/${USER_NAME}/.claude/commands/k8s-troubleshooter.md
 
+# Create AGENTS.md for Codex and CLAUDE.md for Claude Code
+# Both files provide the same instructions - agent home IS the workspace
+RUN cat > /home/${USER_NAME}/AGENTS.md << 'EOF'
+# Kubernetes Incident Triage Agent
+
+You are a Kubernetes incident triage agent investigating a production incident.
+
+## Files
+
+- `event.json` - The Kubernetes event that triggered this investigation
+- `output/investigation.md` - Write your findings here
+
+## Instructions
+
+1. Read `event.json` to understand the incident
+2. Use kubectl to investigate (read-only: get, describe, logs)
+3. Use the k8s-troubleshooter skill if needed
+4. Write findings to `output/investigation.md`
+
+## Output Format
+
+Write a markdown report with:
+- Executive Summary (1-2 sentences)
+- Root Cause Analysis
+- Evidence (relevant kubectl outputs)
+- Recommendations
+
+## Safety
+
+- Read-only kubectl commands only
+- Do not modify cluster state
+EOF
+
+RUN cp /home/${USER_NAME}/AGENTS.md /home/${USER_NAME}/CLAUDE.md \
+    && chown ${USER_NAME}:${USER_NAME} /home/${USER_NAME}/AGENTS.md /home/${USER_NAME}/CLAUDE.md
+
 # Switch to non-root user
 USER ${USER_NAME}
 
-# Set working directory
-WORKDIR /workspace
+# Working directory IS the agent home - everything in one place
+WORKDIR /home/${USER_NAME}
 
 # No default entrypoint - run-agent.sh will call the appropriate CLI
 ENTRYPOINT ["/bin/bash", "-c"]

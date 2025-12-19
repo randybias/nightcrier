@@ -16,7 +16,8 @@ type ExecutorConfig struct {
 	SystemPromptFile string
 	AllowedTools     string
 	Model            string
-	Timeout          int // seconds
+	Timeout          int    // seconds
+	AgentCLI         string // claude, codex, goose, gemini
 }
 
 // Executor runs the agent script in a workspace directory.
@@ -74,6 +75,7 @@ func (e *Executor) ExecuteWithPrompt(ctx context.Context, workspacePath string, 
 		"script", e.config.ScriptPath,
 		"workspace", workspacePath,
 		"incident_id", incidentID,
+		"agent_cli", e.config.AgentCLI,
 		"model", e.config.Model,
 		"timeout", e.config.Timeout)
 
@@ -83,6 +85,11 @@ func (e *Executor) ExecuteWithPrompt(ctx context.Context, workspacePath string, 
 		"--model", e.config.Model,
 		"--allowed-tools", e.config.AllowedTools,
 		"--timeout", fmt.Sprintf("%d", e.config.Timeout),
+	}
+
+	// Add agent CLI selection if specified
+	if e.config.AgentCLI != "" {
+		args = append(args, "--agent", e.config.AgentCLI)
 	}
 
 	if e.config.SystemPromptFile != "" {

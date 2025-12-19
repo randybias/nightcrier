@@ -1,12 +1,24 @@
 # Change: Add Resilience and Observability (Phase 4)
 
+## Walking Skeleton Baseline
+
+The walking-skeleton implementation (archived 2025-12-18) provides minimal resilience features:
+
+**Already Implemented:**
+- Basic graceful shutdown on SIGTERM/SIGINT
+- Configurable agent timeout (AGENT_TIMEOUT env var, default 300s)
+- Context-based cancellation for event processing
+
+**This Change Adds:**
+All advanced resilience and observability features: reconnection with backoff, queue expiration, Prometheus metrics, health endpoints, and comprehensive shutdown handling.
+
 ## Why
 
 The Kubernetes MCP Alerts Event Runner currently lacks production-grade resilience mechanisms and operational visibility. Without these capabilities, the system is vulnerable to:
 
 - **Resource Exhaustion**: Long-running or hung agent processes can consume unbounded CPU and memory
 - **Queue Memory Leaks**: Stale events accumulate indefinitely in per-cluster queues
-- **Connection Fragility**: SSE stream failures require manual intervention to recover
+- **Connection Fragility**: MCP connection failures require manual intervention to recover
 - **Operational Blindness**: No metrics or health endpoints for monitoring, alerting, or debugging
 - **Graceless Failures**: Unclean shutdowns can lose in-flight work and leave orphaned processes
 

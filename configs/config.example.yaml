@@ -20,6 +20,12 @@
 # Environment variable: K8S_CLUSTER_MCP_ENDPOINT
 mcp_endpoint: "http://kubernetes-mcp-server:8080/mcp"
 
+# Subscription mode for events_subscribe tool: "events" or "faults"
+# - "faults": Only receive fault/warning events (default)
+# - "events": Receive all Kubernetes events
+# Environment variable: SUBSCRIBE_MODE
+subscribe_mode: "faults"
+
 # =============================================================================
 # Workspace Configuration
 # =============================================================================
@@ -57,6 +63,44 @@ agent_model: "sonnet"
 # Maximum execution time for agent in seconds
 # Environment variable: AGENT_TIMEOUT
 agent_timeout: 300
+
+# AI CLI to use: claude, codex, goose, gemini
+# Environment variable: AGENT_CLI
+agent_cli: "claude"
+
+# Docker image for the agent container
+# Environment variable: AGENT_IMAGE
+agent_image: "k8s-triage-agent:latest"
+
+# =============================================================================
+# LLM API Keys (Optional)
+# =============================================================================
+# These can also be set via environment variables.
+# Only set the key(s) for the LLM provider(s) you're using.
+# WARNING: Be careful not to commit API keys to version control!
+#
+# Anthropic API key (for Claude)
+# Environment variable: ANTHROPIC_API_KEY
+# anthropic_api_key: "sk-ant-..."
+#
+# OpenAI API key (for Codex/GPT)
+# Environment variable: OPENAI_API_KEY
+# openai_api_key: "sk-..."
+#
+# Google/Gemini API key
+# Environment variable: GEMINI_API_KEY
+# gemini_api_key: "..."
+
+# =============================================================================
+# Kubernetes Configuration
+# =============================================================================
+# Path to kubeconfig file
+# Environment variable: KUBECONFIG_PATH
+# kubeconfig_path: "~/.kube/config"
+
+# Kubernetes context to use (default: current context)
+# Environment variable: KUBERNETES_CONTEXT
+# kubernetes_context: "my-cluster"
 
 # =============================================================================
 # Event Processing

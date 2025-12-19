@@ -8,6 +8,11 @@
 *.swp
 *.swo
 
+# AI Assistant configs
+.claude/
+.cursor/
+.gemini/
+
 # OS
 .DS_Store
 
@@ -19,3 +24,9 @@ incidents/
 
 # Scratch/temp
 scratch/
+
+# Runtime logs
+*.log
+
+# Temp files
+unwedge.txt

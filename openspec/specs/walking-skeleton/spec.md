@@ -23,9 +23,7 @@ kubernetes-mcp-server  -->  Event Runner  -->  Containerized Claude Agent
                                   v
                           Slack notification (optional)
 ```
-
 ## Requirements
-
 ### Requirement: MCP Event Subscription
 
 The system SHALL connect to kubernetes-mcp-server via MCP StreamableHTTP protocol and subscribe to fault events.
@@ -33,17 +31,32 @@ The system SHALL connect to kubernetes-mcp-server via MCP StreamableHTTP protoco
 #### Scenario: Successful MCP connection
 - **GIVEN** a valid `K8S_CLUSTER_MCP_ENDPOINT` URL
 - **WHEN** the runner starts
-- **THEN** it connects via StreamableHTTP, initializes a session, and subscribes with `events_subscribe(mode="faults")`
+- **THEN** it connects via StreamableHTTP, initializes a session, and subscribes with `events_subscribe(mode=<configured-mode>)`
 
-#### Scenario: Event reception
-- **GIVEN** an active MCP subscription
+#### Scenario: Event reception (faults mode)
+- **GIVEN** an active MCP subscription with mode="faults"
 - **WHEN** a fault occurs in the cluster
-- **THEN** the runner receives a `logging/message` notification with `logger="kubernetes/faults"` containing FaultEvent data
+- **THEN** the runner receives a `logging/message` notification with `logger="kubernetes/faults"` containing FaultEvent data with nested event structure
 
-#### Scenario: Event parsing
-- **GIVEN** a fault notification
+#### Scenario: Event reception (resource-faults mode)
+- **GIVEN** an active MCP subscription with mode="resource-faults"
+- **WHEN** a fault occurs in the cluster
+- **THEN** the runner receives a `logging/message` notification with `logger="kubernetes/resource-faults"` containing FaultEvent data with flat structure (resource, context, faultType, severity, timestamp)
+
+#### Scenario: Event parsing (faults mode)
+- **GIVEN** a fault notification from faults mode
 - **WHEN** the event is received
-- **THEN** the JSON is parsed into a FaultEvent struct matching kubernetes-mcp-server format (subscriptionId, cluster, event, logs)
+- **THEN** the JSON is parsed into a FaultEvent struct with nested event object (subscriptionId, cluster, event.namespace, event.reason, event.message, event.involvedObject)
+
+#### Scenario: Event parsing (resource-faults mode)
+- **GIVEN** a fault notification from resource-faults mode
+- **WHEN** the event is received
+- **THEN** the JSON is parsed into a FaultEvent struct with flat structure (subscriptionId, cluster, resource.kind, resource.name, resource.namespace, context, faultType, severity, timestamp)
+
+#### Scenario: Helper method compatibility
+- **GIVEN** a parsed FaultEvent from either subscription mode
+- **WHEN** helper methods (GetResourceName, GetResourceKind, GetNamespace, GetSeverity) are called
+- **THEN** the correct values are returned regardless of which mode was used
 
 ### Requirement: Incident Workspace Creation
 
@@ -106,28 +119,36 @@ The system SHALL send Slack notifications when configured.
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `K8S_CLUSTER_MCP_ENDPOINT` | Yes | - | kubernetes-mcp-server URL |
-| `ANTHROPIC_API_KEY` | Yes | - | Claude API key |
+| `ANTHROPIC_API_KEY` | Conditional | - | Claude API key (required if AGENT_CLI=claude) |
+| `OPENAI_API_KEY` | Conditional | - | OpenAI API key (required if AGENT_CLI=codex) |
 | `WORKSPACE_ROOT` | No | `./incidents` | Incident workspace directory |
+| `SUBSCRIBE_MODE` | No | `faults` | Subscription mode: `faults` or `resource-faults` |
 | `AGENT_SCRIPT_PATH` | No | `./agent-container/run-agent.sh` | Path to agent script |
 | `AGENT_SYSTEM_PROMPT_FILE` | No | `./configs/triage-system-prompt.md` | System prompt for agent |
 | `AGENT_ALLOWED_TOOLS` | No | `Read,Write,Grep,Glob,Bash,Skill` | Tools available to agent |
-| `AGENT_MODEL` | No | `sonnet` | Claude model |
+| `AGENT_MODEL` | No | `sonnet` | Model to use |
 | `AGENT_TIMEOUT` | No | `300` | Agent timeout in seconds |
+| `AGENT_CLI` | No | `claude` | CLI tool: `claude`, `codex`, `goose`, `gemini` |
 | `SLACK_WEBHOOK_URL` | No | - | Slack webhook for notifications |
 | `LOG_LEVEL` | No | `info` | Logging level |
+
+See `cloud-storage` spec for Azure Blob Storage configuration.
 
 ## Implementation Files
 
 - `cmd/runner/main.go` - CLI entrypoint with Cobra
 - `internal/config/config.go` - Configuration loading
 - `internal/events/client.go` - MCP client with StreamableHTTP
-- `internal/events/event.go` - FaultEvent struct
+- `internal/events/event.go` - FaultEvent struct (dual-mode support)
 - `internal/agent/workspace.go` - Workspace creation
 - `internal/agent/context.go` - Event context writing
 - `internal/agent/executor.go` - Agent execution
 - `internal/reporting/result.go` - Result recording
 - `internal/reporting/slack.go` - Slack notifications
-- `agent-container/run-agent.sh` - Container orchestration
+- `internal/storage/storage.go` - Storage interface
+- `internal/storage/azure.go` - Azure Blob Storage adapter
+- `internal/storage/filesystem.go` - Filesystem storage adapter
+- `agent-container/run-agent.sh` - Container orchestration (multi-CLI)
 - `agent-container/Dockerfile` - Agent container image
 - `configs/triage-system-prompt.md` - Agent system prompt
 

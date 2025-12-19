@@ -27,10 +27,10 @@ type SlackMessage struct {
 
 // SlackBlock represents a Slack block element
 type SlackBlock struct {
-	Type     string         `json:"type"`
-	Text     *SlackText     `json:"text,omitempty"`
-	Fields   []SlackText    `json:"fields,omitempty"`
-	Elements []SlackElement `json:"elements,omitempty"`
+	Type     string        `json:"type"`
+	Text     *SlackText    `json:"text,omitempty"`
+	Fields   []SlackText   `json:"fields,omitempty"`
+	Elements []interface{} `json:"elements,omitempty"`
 }
 
 // SlackText represents text content in Slack
@@ -43,6 +43,13 @@ type SlackText struct {
 type SlackElement struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
+}
+
+// SlackButton represents a button element in an actions block
+type SlackButton struct {
+	Type string     `json:"type"`
+	Text *SlackText `json:"text"`
+	URL  string     `json:"url"`
 }
 
 // SlackAttachment represents a Slack attachment
@@ -64,6 +71,7 @@ type IncidentSummary struct {
 	Confidence string
 	Duration   time.Duration
 	ReportPath string
+	ReportURL  string
 }
 
 // NewSlackNotifier creates a new Slack notifier
@@ -90,43 +98,71 @@ func (s *SlackNotifier) SendIncidentNotification(summary *IncidentSummary) error
 		statusColor = "danger"
 	}
 
-	// Build the message
-	msg := SlackMessage{
-		Blocks: []SlackBlock{
-			{
-				Type: "header",
-				Text: &SlackText{
-					Type: "plain_text",
-					Text: fmt.Sprintf("Kubernetes Incident Triage %s", statusEmoji),
-				},
-			},
-			{
-				Type: "section",
-				Fields: []SlackText{
-					{Type: "mrkdwn", Text: fmt.Sprintf("*Cluster:*\n%s", summary.Cluster)},
-					{Type: "mrkdwn", Text: fmt.Sprintf("*Namespace:*\n%s", summary.Namespace)},
-					{Type: "mrkdwn", Text: fmt.Sprintf("*Resource:*\n%s", summary.Resource)},
-					{Type: "mrkdwn", Text: fmt.Sprintf("*Reason:*\n%s", summary.Reason)},
-				},
-			},
-			{
-				Type: "section",
-				Text: &SlackText{
-					Type: "mrkdwn",
-					Text: fmt.Sprintf("*Root Cause (%s confidence):*\n%s", summary.Confidence, summary.RootCause),
-				},
-			},
-			{
-				Type: "context",
-				Elements: []SlackElement{
-					{Type: "mrkdwn", Text: fmt.Sprintf("Incident ID: `%s` | Duration: %s", summary.IncidentID, summary.Duration.Round(time.Second))},
-				},
+	// Build the blocks
+	blocks := []SlackBlock{
+		{
+			Type: "header",
+			Text: &SlackText{
+				Type: "plain_text",
+				Text: fmt.Sprintf("Kubernetes Incident Triage %s", statusEmoji),
 			},
 		},
+		{
+			Type: "section",
+			Fields: []SlackText{
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Cluster:*\n%s", summary.Cluster)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Namespace:*\n%s", summary.Namespace)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Resource:*\n%s", summary.Resource)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Reason:*\n%s", summary.Reason)},
+			},
+		},
+		{
+			Type: "section",
+			Text: &SlackText{
+				Type: "mrkdwn",
+				Text: fmt.Sprintf("*Root Cause (%s confidence):*\n%s", summary.Confidence, summary.RootCause),
+			},
+		},
+		{
+			Type: "context",
+			Elements: []interface{}{
+				SlackElement{Type: "mrkdwn", Text: fmt.Sprintf("Incident ID: `%s` | Duration: %s", summary.IncidentID, summary.Duration.Round(time.Second))},
+			},
+		},
+	}
+
+	// Add "View Report" button if URL is available
+	if summary.ReportURL != "" {
+		blocks = append(blocks, SlackBlock{
+			Type: "actions",
+			Elements: []interface{}{
+				SlackButton{
+					Type: "button",
+					Text: &SlackText{
+						Type: "plain_text",
+						Text: "View Report",
+					},
+					URL: summary.ReportURL,
+				},
+			},
+		})
+	}
+
+	// Determine footer text based on available data
+	var footer string
+	if summary.ReportURL != "" {
+		footer = "Report: URL (see button above)"
+	} else if summary.ReportPath != "" {
+		footer = fmt.Sprintf("Report: %s", summary.ReportPath)
+	}
+
+	// Build the message
+	msg := SlackMessage{
+		Blocks: blocks,
 		Attachments: []SlackAttachment{
 			{
 				Color:  statusColor,
-				Footer: fmt.Sprintf("Report: %s", summary.ReportPath),
+				Footer: footer,
 			},
 		},
 	}

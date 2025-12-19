@@ -1,5 +1,23 @@
 # Change: Implement Event Intake (Phase 1)
 
+## Walking Skeleton Baseline
+
+The walking-skeleton implementation (archived 2025-12-18) provides the foundation that this change builds upon:
+
+**Already Implemented:**
+- Project skeleton: `cmd/runner/`, `internal/config/`, `internal/events/`, `internal/agent/`, `internal/reporting/`
+- Cobra CLI framework with flags
+- Configuration from environment variables (`K8S_CLUSTER_MCP_ENDPOINT`, `WORKSPACE_ROOT`, `LOG_LEVEL`, etc.)
+- MCP client using StreamableHTTP protocol (supersedes raw SSE - connects to `/mcp` endpoint)
+- FaultEvent struct matching kubernetes-mcp-server format
+- Event subscription via `events_subscribe(mode="faults")`
+- Graceful shutdown on SIGTERM/SIGINT
+- Structured logging with `log/slog`
+- Basic event processing loop
+
+**This Change Adds:**
+Advanced event intake features not in the walking skeleton: reconnection logic, severity filtering, deduplication, circuit breaker, per-cluster queuing, and queue overflow management.
+
 ## Why
 To establish the foundation of the Event Runner by connecting to the `kubernetes-mcp-server`, filtering noise, and managing concurrency. This corresponds to Phase 1 of the high-level plan and enables automated triage of Kubernetes faults by AI agents.
 
@@ -10,15 +28,16 @@ The Event Runner serves as a critical control plane between the kubernetes-mcp-s
 ### New Capability: `event-processing`
 Implements the complete event intake pipeline with the following components:
 
-#### SSE Client Integration
-- Connect to kubernetes-mcp-server via Server-Sent Events (SSE)
+#### MCP Client Enhancement (builds on walking skeleton)
+- **DONE**: Connect to kubernetes-mcp-server via MCP StreamableHTTP protocol
 - Automatic reconnection with exponential backoff (1s to 60s)
-- Last-Event-ID tracking for resumable connections
+- Session recovery on reconnection
 - Heartbeat detection and timeout handling
 - Comprehensive connection error handling
 
-#### Event Validation and Parsing
-- Parse JSON event payloads from SSE stream
+#### Event Validation and Parsing (builds on walking skeleton)
+- **DONE**: Parse JSON event payloads from MCP notifications
+- **DONE**: FaultEvent struct with cluster, event, logs fields
 - Validate required fields (cluster_id, severity, resource_name)
 - Handle malformed events gracefully
 - Extract event metadata for routing and processing
@@ -52,35 +71,36 @@ Implements the complete event intake pipeline with the following components:
 - Reject policy: immediately reject new events when full
 - Comprehensive logging of overflow events
 
-#### Configuration System
-- Environment variables with sensible defaults
-- Command-line flag overrides
+#### Configuration System (builds on walking skeleton)
+- **DONE**: Environment variables with sensible defaults
+- **DONE**: Command-line flag overrides
 - Optional YAML configuration file
-- Validation at startup with clear error messages
+- **DONE**: Validation at startup with clear error messages
 - Configuration precedence: flags > env vars > file > defaults
 
-#### Structured Logging
-- Comprehensive audit trail of all event decisions
-- State transitions: received, validated, filtered, queued, processing, completed
-- Structured log format with consistent field names
-- Configurable log levels
+#### Structured Logging (builds on walking skeleton)
+- **DONE**: Comprehensive audit trail of all event decisions
+- **DONE**: State transitions: received, validated, filtered, queued, processing, completed
+- **DONE**: Structured log format with consistent field names (using log/slog)
+- **DONE**: Configurable log levels
 
-#### Graceful Shutdown
-- Signal handling (SIGTERM, SIGINT)
+#### Graceful Shutdown (builds on walking skeleton)
+- **DONE**: Signal handling (SIGTERM, SIGINT)
 - Drain in-flight events with timeout
-- Clean SSE connection closure
+- **DONE**: Clean MCP connection closure
 - Final statistics logging
 
-### Project Structure
+### Project Structure (partially implemented)
 ```
-cmd/runner/              # Main entry point
+cmd/runner/              # Main entry point - DONE
 internal/
-  config/                # Configuration loading and validation
-  events/                # SSE client, event parsing, validation, filtering
-  queue/                 # Circuit breaker, cluster queues, router, workers
-  dedup/                 # Deduplication cache
-  agent/                 # Agent spawner stub (full impl in Phase 2)
-  testing/mocksse/       # Mock SSE server for testing
+  config/                # Configuration loading and validation - DONE
+  events/                # MCP client, event parsing, validation, filtering - DONE (basic)
+  queue/                 # Circuit breaker, cluster queues, router, workers - TODO
+  dedup/                 # Deduplication cache - TODO
+  agent/                 # Agent execution - DONE (full impl from walking skeleton)
+  reporting/             # Result recording, Slack notifications - DONE
+  testing/mocksse/       # Mock MCP server for testing - TODO
 ```
 
 ## Impact
@@ -112,9 +132,16 @@ internal/
 
 ### Configuration Requirements
 Minimum required configuration:
-- `SSE_ENDPOINT` - URL of kubernetes-mcp-server SSE endpoint
+- `K8S_CLUSTER_MCP_ENDPOINT` - URL of kubernetes-mcp-server MCP endpoint (**DONE**)
 
-Optional configuration with defaults:
+Already implemented (walking skeleton):
+- `WORKSPACE_ROOT` (default: ./incidents) - **DONE**
+- `LOG_LEVEL` (default: info) - **DONE**
+- `AGENT_TIMEOUT` (default: 300) - **DONE**
+- `AGENT_MODEL` (default: sonnet) - **DONE**
+- `SLACK_WEBHOOK_URL` (optional) - **DONE**
+
+Still needed for this change:
 - `SEVERITY_THRESHOLD` (default: ERROR)
 - `MAX_CONCURRENT_AGENTS` (default: 5)
 - `GLOBAL_QUEUE_SIZE` (default: 100)

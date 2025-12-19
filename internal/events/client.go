@@ -12,13 +12,14 @@ import (
 )
 
 const (
-	// LoggerFaults is the logger name for fault events from kubernetes-mcp-server
-	LoggerFaults = "kubernetes/faults"
+	// LoggerPrefix is the prefix for all kubernetes-mcp-server loggers
+	LoggerPrefix = "kubernetes/"
 )
 
 // Client handles MCP connections to receive fault events from kubernetes-mcp-server
 type Client struct {
 	endpoint       string
+	subscribeMode  string // "events" or "faults"
 	mcpClient      *mcp.Client
 	session        *mcp.ClientSession
 	eventChan      chan *FaultEvent
@@ -27,13 +28,18 @@ type Client struct {
 }
 
 // NewClient creates a new MCP client for the given endpoint
-// endpoint should be the base URL of the MCP server (e.g., "http://localhost:8383")
-func NewClient(endpoint string) *Client {
+// endpoint should be the full MCP endpoint URL (e.g., "http://localhost:8383/mcp")
+// subscribeMode should be "events" or "faults" (default: "faults")
+func NewClient(endpoint, subscribeMode string) *Client {
+	if subscribeMode == "" {
+		subscribeMode = "faults"
+	}
 	eventChan := make(chan *FaultEvent, 100)
 
 	c := &Client{
-		endpoint:  endpoint,
-		eventChan: eventChan,
+		endpoint:      endpoint,
+		subscribeMode: subscribeMode,
+		eventChan:     eventChan,
 	}
 
 	// Create MCP client with logging message handler to receive fault notifications
@@ -51,17 +57,25 @@ func NewClient(endpoint string) *Client {
 }
 
 // handleLoggingMessage processes MCP log notifications
-// Fault events come as log messages with logger="kubernetes/faults"
+// Fault events come as log messages with logger="kubernetes/{mode}" based on subscribe mode
 func (c *Client) handleLoggingMessage(ctx context.Context, req *mcp.LoggingMessageRequest) {
 	params := req.Params
 
-	// Only process fault events
-	if params.Logger != LoggerFaults {
-		slog.Debug("ignoring non-fault log message", "logger", params.Logger)
+	// Expected logger name is "kubernetes/{subscribeMode}"
+	expectedLogger := LoggerPrefix + c.subscribeMode
+
+	// Only process events matching our subscription mode
+	if params.Logger != expectedLogger {
+		slog.Debug("ignoring non-matching log message", "logger", params.Logger, "expected", expectedLogger)
 		return
 	}
 
 	slog.Debug("received fault notification", "level", params.Level, "logger", params.Logger)
+
+	// Log raw data for debugging
+	if rawJSON, err := json.Marshal(params.Data); err == nil {
+		slog.Debug("raw MCP data", "data", string(rawJSON))
+	}
 
 	// Parse the fault event from the log data
 	faultEvent, err := parseFaultEvent(params.Data)
@@ -74,8 +88,8 @@ func (c *Client) handleLoggingMessage(ctx context.Context, req *mcp.LoggingMessa
 		"cluster", faultEvent.Cluster,
 		"namespace", faultEvent.GetNamespace(),
 		"resource", fmt.Sprintf("%s/%s", faultEvent.GetResourceKind(), faultEvent.GetResourceName()),
-		"reason", faultEvent.Event.Reason,
-		"message", faultEvent.Event.Message)
+		"reason", faultEvent.GetReason(),
+		"message", faultEvent.GetContext())
 
 	// Send to channel (non-blocking)
 	select {
@@ -109,14 +123,13 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan *FaultEvent, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Create Streamable HTTP transport - connect to /mcp endpoint
-	mcpEndpoint := c.endpoint + "/mcp"
+	// Create Streamable HTTP transport using the configured endpoint as-is
 	transport := &mcp.StreamableClientTransport{
-		Endpoint:   mcpEndpoint,
+		Endpoint:   c.endpoint,
 		HTTPClient: &http.Client{},
 	}
 
-	slog.Info("connecting to MCP server", "endpoint", mcpEndpoint)
+	slog.Info("connecting to MCP server", "endpoint", c.endpoint)
 
 	// Connect to server
 	session, err := c.mcpClient.Connect(ctx, transport, nil)
@@ -138,13 +151,13 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan *FaultEvent, error) {
 		return nil, fmt.Errorf("failed to set logging level: %w", err)
 	}
 
-	slog.Info("subscribing to fault events")
+	slog.Info("subscribing to events", "mode", c.subscribeMode)
 
-	// Subscribe to fault events using the events_subscribe tool
+	// Subscribe to events using the events_subscribe tool
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "events_subscribe",
 		Arguments: map[string]any{
-			"mode": "faults",
+			"mode": c.subscribeMode,
 		},
 	})
 	if err != nil {

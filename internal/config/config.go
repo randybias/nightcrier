@@ -12,7 +12,8 @@ import (
 // Config holds the application configuration.
 type Config struct {
 	// MCP Connection
-	MCPEndpoint string `mapstructure:"mcp_endpoint"`
+	MCPEndpoint   string `mapstructure:"mcp_endpoint"`
+	SubscribeMode string `mapstructure:"subscribe_mode"` // events, faults
 
 	// Workspace
 	WorkspaceRoot string `mapstructure:"workspace_root"`
@@ -29,6 +30,17 @@ type Config struct {
 	AgentAllowedTools     string `mapstructure:"agent_allowed_tools"`
 	AgentModel            string `mapstructure:"agent_model"`
 	AgentTimeout          int    `mapstructure:"agent_timeout"` // seconds
+	AgentCLI              string `mapstructure:"agent_cli"`     // claude, codex, goose, gemini
+	AgentImage            string `mapstructure:"agent_image"`   // Docker image for agent container
+
+	// LLM API Keys (optional - can also be set via environment)
+	AnthropicAPIKey string `mapstructure:"anthropic_api_key"`
+	OpenAIAPIKey    string `mapstructure:"openai_api_key"`
+	GeminiAPIKey    string `mapstructure:"gemini_api_key"`
+
+	// Kubernetes Configuration
+	KubeconfigPath    string `mapstructure:"kubeconfig_path"`
+	KubernetesContext string `mapstructure:"kubernetes_context"`
 
 	// Event Processing (Phase 1 additions)
 	SeverityThreshold   string `mapstructure:"severity_threshold"`
@@ -44,7 +56,7 @@ type Config struct {
 	SSEReconnectMaxBackoff     int `mapstructure:"sse_reconnect_max_backoff"`     // seconds
 	SSEReadTimeout             int `mapstructure:"sse_read_timeout"`              // seconds
 
-	// Azure Storage Configuration (optional)
+	// Azure Storage Configuration (optional - used when cloud storage is enabled)
 	AzureStorageConnectionString string `mapstructure:"azure_storage_connection_string"`
 	AzureStorageAccount          string `mapstructure:"azure_storage_account"`
 	AzureStorageKey              string `mapstructure:"azure_storage_key"`
@@ -54,6 +66,9 @@ type Config struct {
 
 // setDefaults configures default values for all configuration options.
 func setDefaults() {
+	// MCP defaults
+	viper.SetDefault("subscribe_mode", "faults")
+
 	// Workspace defaults
 	viper.SetDefault("workspace_root", "./incidents")
 
@@ -66,6 +81,8 @@ func setDefaults() {
 	viper.SetDefault("agent_allowed_tools", "Read,Write,Grep,Glob,Bash,Skill")
 	viper.SetDefault("agent_model", "sonnet")
 	viper.SetDefault("agent_timeout", 300)
+	viper.SetDefault("agent_cli", "claude")
+	viper.SetDefault("agent_image", "k8s-triage-agent:latest")
 
 	// Event processing defaults (from design.md)
 	viper.SetDefault("severity_threshold", "ERROR")
@@ -91,6 +108,7 @@ func bindEnvVars() {
 	// Map config keys to environment variable names
 	envBindings := map[string]string{
 		"mcp_endpoint":                    "K8S_CLUSTER_MCP_ENDPOINT",
+		"subscribe_mode":                  "SUBSCRIBE_MODE",
 		"workspace_root":                  "WORKSPACE_ROOT",
 		"log_level":                       "LOG_LEVEL",
 		"slack_webhook_url":               "SLACK_WEBHOOK_URL",
@@ -99,6 +117,13 @@ func bindEnvVars() {
 		"agent_allowed_tools":             "AGENT_ALLOWED_TOOLS",
 		"agent_model":                     "AGENT_MODEL",
 		"agent_timeout":                   "AGENT_TIMEOUT",
+		"agent_cli":                       "AGENT_CLI",
+		"agent_image":                     "AGENT_IMAGE",
+		"anthropic_api_key":               "ANTHROPIC_API_KEY",
+		"openai_api_key":                  "OPENAI_API_KEY",
+		"gemini_api_key":                  "GEMINI_API_KEY",
+		"kubeconfig_path":                 "KUBECONFIG_PATH",
+		"kubernetes_context":              "KUBERNETES_CONTEXT",
 		"severity_threshold":              "SEVERITY_THRESHOLD",
 		"max_concurrent_agents":           "MAX_CONCURRENT_AGENTS",
 		"global_queue_size":               "GLOBAL_QUEUE_SIZE",
@@ -248,6 +273,11 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("sse_read_timeout must be >= 1, got %d", c.SSEReadTimeout)
 	}
 
+	// Require at least one LLM API key
+	if err := c.ValidateLLMAPIKeys(); err != nil {
+		return err
+	}
+
 	// Validate Azure configuration if enabled
 	if err := c.ValidateAzureConfig(); err != nil {
 		return err
@@ -256,76 +286,106 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// ValidateLLMAPIKeys ensures at least one LLM API key is configured.
+// Returns an error if no API keys are found.
+func (c *Config) ValidateLLMAPIKeys() error {
+	if c.AnthropicAPIKey != "" {
+		return nil
+	}
+	if c.OpenAIAPIKey != "" {
+		return nil
+	}
+	if c.GeminiAPIKey != "" {
+		return nil
+	}
+
+	return fmt.Errorf("at least one LLM API key is required: set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY (via environment variable, config file, or command-line)")
+}
+
 // GetConfigFile returns the config file that was used, if any.
 func GetConfigFile() string {
 	return viper.ConfigFileUsed()
 }
 
 // IsAzureStorageEnabled detects if Azure storage is configured.
+// Returns true if AZURE_STORAGE_ACCOUNT or AZURE_STORAGE_CONNECTION_STRING is set.
 func (c *Config) IsAzureStorageEnabled() bool {
 	return c.AzureStorageAccount != "" || c.AzureStorageConnectionString != ""
 }
 
 // GetWorkspaceRoot returns the configured workspace root directory.
+// This method is part of the StorageConfig interface.
 func (c *Config) GetWorkspaceRoot() string {
 	return c.WorkspaceRoot
 }
 
 // GetAzureConnectionString returns the Azure connection string.
+// This method is part of the AzureConfig interface.
 func (c *Config) GetAzureConnectionString() string {
 	return c.AzureStorageConnectionString
 }
 
 // GetAzureAccount returns the Azure storage account name.
+// This method is part of the AzureConfig interface.
 func (c *Config) GetAzureAccount() string {
 	return c.AzureStorageAccount
 }
 
 // GetAzureKey returns the Azure storage account access key.
+// This method is part of the AzureConfig interface.
 func (c *Config) GetAzureKey() string {
 	return c.AzureStorageKey
 }
 
 // GetAzureContainer returns the Azure storage container name.
+// This method is part of the AzureConfig interface.
 func (c *Config) GetAzureContainer() string {
 	return c.AzureStorageContainer
 }
 
 // GetAzureSASExpiry returns the SAS token expiration duration.
+// This method is part of the AzureConfig interface.
 func (c *Config) GetAzureSASExpiry() time.Duration {
 	duration, err := time.ParseDuration(c.AzureSASExpiry)
 	if err != nil {
-		return 168 * time.Hour // Default 7 days
+		// Fall back to default (7 days) if parsing fails
+		return 168 * time.Hour
 	}
 	return duration
 }
 
-// ValidateAzureConfig validates Azure storage configuration if enabled.
+// ValidateAzureConfig validates Azure storage configuration if Azure storage is enabled.
+// Returns an error if Azure is enabled but required fields are missing or invalid.
 func (c *Config) ValidateAzureConfig() error {
+	// If Azure storage is not enabled, no validation needed
 	if !c.IsAzureStorageEnabled() {
 		return nil
 	}
 
+	// Validate container is provided (required for Azure storage)
 	if c.AzureStorageContainer == "" {
-		return fmt.Errorf("azure_storage_container is required when Azure storage is enabled")
+		return fmt.Errorf("AZURE_STORAGE_CONTAINER is required when Azure storage is enabled")
 	}
 
+	// Validate authentication: either connection string OR account+key must be provided
 	hasConnectionString := c.AzureStorageConnectionString != ""
 	hasAccountAndKey := c.AzureStorageAccount != "" && c.AzureStorageKey != ""
 
 	if !hasConnectionString && !hasAccountAndKey {
-		return fmt.Errorf("Azure storage requires either azure_storage_connection_string or both azure_storage_account and azure_storage_key")
+		return fmt.Errorf("Azure storage requires either AZURE_STORAGE_CONNECTION_STRING or both AZURE_STORAGE_ACCOUNT and AZURE_STORAGE_KEY")
 	}
 
+	// If connection string is provided, validate it's parseable
 	if hasConnectionString {
 		if err := validateConnectionString(c.AzureStorageConnectionString); err != nil {
-			return fmt.Errorf("invalid azure_storage_connection_string: %w", err)
+			return fmt.Errorf("invalid AZURE_STORAGE_CONNECTION_STRING: %w", err)
 		}
 	}
 
+	// Validate SAS expiry is a valid duration
 	if c.AzureSASExpiry != "" {
 		if _, err := time.ParseDuration(c.AzureSASExpiry); err != nil {
-			return fmt.Errorf("invalid azure_sas_expiry duration '%s': %w", c.AzureSASExpiry, err)
+			return fmt.Errorf("invalid AZURE_SAS_EXPIRY duration '%s': %w", c.AzureSASExpiry, err)
 		}
 	}
 
@@ -333,11 +393,14 @@ func (c *Config) ValidateAzureConfig() error {
 }
 
 // validateConnectionString performs basic validation on Azure connection string format.
+// It checks for the presence of required key-value pairs but doesn't validate their actual values.
 func validateConnectionString(connStr string) error {
 	if connStr == "" {
 		return fmt.Errorf("connection string is empty")
 	}
 
+	// Connection string should contain key=value pairs separated by semicolons
+	// Required fields: AccountName and either AccountKey or SharedAccessSignature
 	parts := strings.Split(connStr, ";")
 	if len(parts) < 2 {
 		return fmt.Errorf("connection string must contain at least 2 key-value pairs")

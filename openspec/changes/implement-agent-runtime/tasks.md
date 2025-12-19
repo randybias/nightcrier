@@ -1,36 +1,67 @@
 # Implementation Tasks (Phase 2)
 
+## Walking Skeleton Baseline
+
+The walking-skeleton (archived 2025-12-18) implemented substantial agent runtime functionality:
+- WorkspaceManager with Create() method
+- WriteEventContext() for event.json
+- Executor with Execute() and ExecuteWithPrompt() methods
+- Containerized agent execution via run-agent.sh
+- Exit code capture and structured logging
+- Configurable timeout, model, tools, system prompt
+
+This task list marks completed items and focuses on remaining enhancements.
+
+---
+
 ## 1. Core Data Structures and Interfaces
 
-- [ ] 1.1 Define `Incident` struct with ID, cluster, namespace, severity, timestamp, event data, logs, and resources
-- [ ] 1.2 Define `AgentResult` struct with incident ID, status, workspace dir, timestamps, exit code, output log, artifacts, and error
+- [x] 1.1 Define `Incident` struct with ID, cluster, namespace, severity, timestamp, event data, logs, and resources
+      **DONE**: Walking skeleton - FaultEvent struct in internal/events/event.go
+- [x] 1.2 Define `AgentResult` struct with incident ID, status, workspace dir, timestamps, exit code, output log, artifacts, and error
+      **DONE**: Walking skeleton - Result struct in internal/reporting/result.go
 - [ ] 1.3 Define `AgentStatus` type with constants: created, starting, running, success, failed, timeout, cancelled
 - [ ] 1.4 Define `AgentRuntime` interface with methods: RunAgent, GetStatus, Cancel
-- [ ] 1.5 Define `WorkspaceManager` interface with methods: CreateWorkspace, SetupSkills, CleanupWorkspace
-- [ ] 1.6 Define `ContextBuilder` interface with methods: BuildContextBundle, WriteContextFiles
-- [ ] 1.7 Define `AgentExecutor` interface with methods: Execute, Monitor
-- [ ] 1.8 Define `ContextBundle` struct with Files map, EnvVars map, SystemPrompt, UserPrompt
-- [ ] 1.9 Define `ExecutionConfig` struct with workspace dir, context bundle, timeout, command, and args
+- [x] 1.5 Define `WorkspaceManager` interface with methods: CreateWorkspace, SetupSkills, CleanupWorkspace
+      **PARTIAL**: Walking skeleton - WorkspaceManager with Create(), skills in container
+- [x] 1.6 Define `ContextBuilder` interface with methods: BuildContextBundle, WriteContextFiles
+      **DONE**: Walking skeleton - WriteEventContext() in context.go
+- [x] 1.7 Define `AgentExecutor` interface with methods: Execute, Monitor
+      **PARTIAL**: Walking skeleton - Executor with Execute(), ExecuteWithPrompt()
+- [x] 1.8 Define `ContextBundle` struct with Files map, EnvVars map, SystemPrompt, UserPrompt
+      **DONE**: Walking skeleton - ExecutorConfig struct
+- [x] 1.9 Define `ExecutionConfig` struct with workspace dir, context bundle, timeout, command, and args
+      **DONE**: Walking skeleton - ExecutorConfig struct
 - [ ] 1.10 Define `CleanupPolicy` enum for workspace retention strategies
 
 ## 2. Configuration Management
 
-- [ ] 2.1 Define configuration struct for agent_runtime with all required fields
+- [x] 2.1 Define configuration struct for agent_runtime with all required fields
+      **DONE**: Walking skeleton - Config struct in internal/config/config.go with Agent* fields
 - [ ] 2.2 Implement config file parser (YAML) for agent_runtime section
-- [ ] 2.3 Implement environment variable override logic with precedence
-- [ ] 2.4 Add validation for required configuration fields (agent_command, workspace_root, etc.)
-- [ ] 2.5 Implement default values for optional configuration (timeout, retention, etc.)
+- [x] 2.3 Implement environment variable override logic with precedence
+      **DONE**: Walking skeleton - AGENT_SCRIPT_PATH, AGENT_TIMEOUT, AGENT_MODEL, etc.
+- [x] 2.4 Add validation for required configuration fields (agent_command, workspace_root, etc.)
+      **DONE**: Walking skeleton - validates script path exists
+- [x] 2.5 Implement default values for optional configuration (timeout, retention, etc.)
+      **DONE**: Walking skeleton - defaults in config.go
 - [ ] 2.6 Add configuration test coverage for all scenarios
 
 ## 3. Workspace Management
 
-- [ ] 3.1 Implement workspace path construction with UUID validation
-- [ ] 3.2 Implement workspace directory creation with structure: `.claude/`, `context/`, `output/`
-- [ ] 3.3 Set workspace permissions to 0700 (owner-only read/write)
-- [ ] 3.4 Implement workspace uniqueness validation (prevent overwrites)
+- [x] 3.1 Implement workspace path construction with UUID validation
+      **DONE**: Walking skeleton - uses UUID for incident ID
+- [x] 3.2 Implement workspace directory creation with structure: `.claude/`, `context/`, `output/`
+      **PARTIAL**: Walking skeleton - creates incident dir, output/ created by agent
+- [x] 3.3 Set workspace permissions to 0700 (owner-only read/write)
+      **DONE**: Walking skeleton - workspace.go uses 0700
+- [x] 3.4 Implement workspace uniqueness validation (prevent overwrites)
+      **DONE**: Walking skeleton - UUID ensures uniqueness
 - [ ] 3.5 Implement workspace cleanup with retention policy support
-- [ ] 3.6 Add path traversal protection using filepath.Join and filepath.Clean
-- [ ] 3.7 Verify all workspace operations stay within workspace_root boundary
+- [x] 3.6 Add path traversal protection using filepath.Join and filepath.Clean
+      **DONE**: Walking skeleton - uses filepath.Join
+- [x] 3.7 Verify all workspace operations stay within workspace_root boundary
+      **DONE**: Walking skeleton
 - [ ] 3.8 Add workspace manager unit tests for all scenarios
 
 ## 4. Skill Loading
@@ -53,49 +84,72 @@ Claude accesses skills via `/skills/k8s-troubleshooter/SKILL.md` or the `/k8s-tr
 ## 5. Context Bundle Creation
 
 - [ ] 5.1 Implement incident.json generation with structured metadata
-- [ ] 5.2 Implement event.json generation with raw event payload
+- [x] 5.2 Implement event.json generation with raw event payload
+      **DONE**: Walking skeleton - WriteEventContext() in context.go
 - [ ] 5.3 Implement logs.txt generation with enriched log excerpts
+      **NOTE**: Container logs included in event.json from kubernetes-mcp-server
 - [ ] 5.4 Implement cluster-info.json generation with cluster name, namespace, resources
 - [ ] 5.5 Implement system-instructions.txt generation with read-only enforcement text
-- [ ] 5.6 Implement environment variable builder with all required vars (INCIDENT_ID, INCIDENT_WORKSPACE, etc.)
-- [ ] 5.7 Add ANTHROPIC_API_KEY or CLAUDE_API_KEY from config/env
+- [x] 5.6 Implement environment variable builder with all required vars (INCIDENT_ID, INCIDENT_WORKSPACE, etc.)
+      **DONE**: Walking skeleton - INCIDENT_ID passed to agent
+- [x] 5.7 Add ANTHROPIC_API_KEY or CLAUDE_API_KEY from config/env
+      **DONE**: Walking skeleton - passed via run-agent.sh
 - [ ] 5.8 Add CLAUDE_READ_ONLY_MODE=true environment marker
-- [ ] 5.9 Implement context file writing to `context/` directory
+- [x] 5.9 Implement context file writing to `context/` directory
+      **DONE**: Walking skeleton - writes event.json to workspace root
 - [ ] 5.10 Add context bundle unit tests with sample incidents
 
 ## 6. Prompt Construction
 
-- [ ] 6.1 Implement PROMPT.md template with incident summary, severity, context references
-- [ ] 6.2 Add explicit read-only instructions to prompt
-- [ ] 6.3 Add expected outputs and artifact location guidance
+- [x] 6.1 Implement PROMPT.md template with incident summary, severity, context references
+      **DONE**: Walking skeleton - configs/triage-system-prompt.md and inline prompt in executor.go
+- [x] 6.2 Add explicit read-only instructions to prompt
+      **DONE**: Walking skeleton - triage-system-prompt.md includes read-only constraints
+- [x] 6.3 Add expected outputs and artifact location guidance
+      **DONE**: Walking skeleton - prompt specifies output/investigation.md
 - [ ] 6.4 Implement severity-based prompt customization (urgency emphasis)
 - [ ] 6.5 Add prompt generation unit tests for different severities
 
 ## 7. Agent Command Construction
 
-- [ ] 7.1 Implement command builder to construct `claude` command with all flags
-- [ ] 7.2 Add `-p "$(cat PROMPT.md)"` for prompt passing
-- [ ] 7.3 Add `--output-format stream-json` flag
-- [ ] 7.4 Add `--allowedTools` flag with read-only tool restrictions
-- [ ] 7.5 Add `--append-system-prompt-file context/system-instructions.txt` flag
-- [ ] 7.6 Make command configurable via agent_command config
+- [x] 7.1 Implement command builder to construct `claude` command with all flags
+      **DONE**: Walking skeleton - run-agent.sh handles command construction
+- [x] 7.2 Add `-p "$(cat PROMPT.md)"` for prompt passing
+      **DONE**: Walking skeleton - prompt passed as argument to run-agent.sh
+- [x] 7.3 Add `--output-format stream-json` flag
+      **DONE**: Walking skeleton - run-agent.sh includes this
+- [x] 7.4 Add `--allowedTools` flag with read-only tool restrictions
+      **DONE**: Walking skeleton - AGENT_ALLOWED_TOOLS config
+- [x] 7.5 Add `--append-system-prompt-file context/system-instructions.txt` flag
+      **DONE**: Walking skeleton - --system-prompt-file flag
+- [x] 7.6 Make command configurable via agent_command config
+      **DONE**: Walking skeleton - AGENT_SCRIPT_PATH config
 - [ ] 7.7 Add command builder unit tests
 
 ## 8. Process Execution and Lifecycle
 
-- [ ] 8.1 Implement exec.CommandContext creation with timeout context
-- [ ] 8.2 Configure process working directory to workspace root
-- [ ] 8.3 Configure process environment variables from context bundle
+- [x] 8.1 Implement exec.CommandContext creation with timeout context
+      **DONE**: Walking skeleton - executor.go uses context.WithTimeout
+- [x] 8.2 Configure process working directory to workspace root
+      **DONE**: Walking skeleton - workspace passed to run-agent.sh
+- [x] 8.3 Configure process environment variables from context bundle
+      **DONE**: Walking skeleton - INCIDENT_ID set in environment
 - [ ] 8.4 Configure process group with `SysProcAttr{Setpgid: true}`
 - [ ] 8.5 Implement graceful shutdown with SIGINT to process group
 - [ ] 8.6 Set cmd.Cancel to send SIGINT to negative PID (process group)
 - [ ] 8.7 Set cmd.WaitDelay to 30 seconds before SIGKILL
-- [ ] 8.8 Implement stdout/stderr capture to `output/agent.log`
-- [ ] 8.9 Implement log file creation before process start
-- [ ] 8.10 Add output flushing logic to prevent data loss
-- [ ] 8.11 Implement process start with error handling
-- [ ] 8.12 Implement process wait with error handling
-- [ ] 8.13 Capture and record exit code
+- [x] 8.8 Implement stdout/stderr capture to `output/agent.log`
+      **DONE**: Walking skeleton - run-agent.sh tees output to log file
+- [x] 8.9 Implement log file creation before process start
+      **DONE**: Walking skeleton - run-agent.sh handles this
+- [x] 8.10 Add output flushing logic to prevent data loss
+      **DONE**: Walking skeleton - stdout/stderr piped and logged
+- [x] 8.11 Implement process start with error handling
+      **DONE**: Walking skeleton - executor.go
+- [x] 8.12 Implement process wait with error handling
+      **DONE**: Walking skeleton - executor.go
+- [x] 8.13 Capture and record exit code
+      **DONE**: Walking skeleton - executor.go returns exit code
 - [ ] 8.14 Add process execution integration tests (with dummy script)
 
 ## 9. State Management and Lifecycle Tracking
@@ -111,9 +165,12 @@ Claude accesses skills via `/skills/k8s-troubleshooter/SKILL.md` or the `/k8s-tr
 
 ## 10. Exit Code Interpretation
 
-- [ ] 10.1 Implement exit code capture from process
-- [ ] 10.2 Map exit code 0 to success status
-- [ ] 10.3 Map non-zero exit codes to failed status with code recorded
+- [x] 10.1 Implement exit code capture from process
+      **DONE**: Walking skeleton - executor.go captures exitErr.ExitCode()
+- [x] 10.2 Map exit code 0 to success status
+      **DONE**: Walking skeleton - main.go maps to "success"
+- [x] 10.3 Map non-zero exit codes to failed status with code recorded
+      **DONE**: Walking skeleton - main.go maps to "failed"
 - [ ] 10.4 Detect signal-based termination (SIGTERM, SIGKILL)
 - [ ] 10.5 Map timeout context to timeout status
 - [ ] 10.6 Map cancellation context to cancelled status

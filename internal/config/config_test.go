@@ -13,12 +13,26 @@ func resetViper() {
 	viper.Reset()
 }
 
+// setTestAPIKey sets a dummy API key for tests that need to pass LLM validation
+func setTestAPIKey(t *testing.T) func() {
+	os.Setenv("ANTHROPIC_API_KEY", "test-key-for-unit-tests")
+	return func() {
+		os.Unsetenv("ANTHROPIC_API_KEY")
+	}
+}
+
+// testConfigWithAPIKey returns config content with a test API key included
+func testConfigWithAPIKey(baseConfig string) string {
+	return baseConfig + "\nanthropic_api_key: \"test-key-for-unit-tests\"\n"
+}
+
 func TestLoadWithDefaults(t *testing.T) {
 	resetViper()
 
-	// Set required env var
+	// Set required env vars
 	os.Setenv("K8S_CLUSTER_MCP_ENDPOINT", "http://localhost:8080/mcp")
 	defer os.Unsetenv("K8S_CLUSTER_MCP_ENDPOINT")
+	defer setTestAPIKey(t)()
 
 	cfg, err := Load()
 	if err != nil {
@@ -69,6 +83,7 @@ func TestLoadFromEnvVars(t *testing.T) {
 	os.Setenv("AGENT_TIMEOUT", "600")
 	os.Setenv("SEVERITY_THRESHOLD", "WARNING")
 	os.Setenv("MAX_CONCURRENT_AGENTS", "10")
+	defer setTestAPIKey(t)()
 
 	defer func() {
 		os.Unsetenv("K8S_CLUSTER_MCP_ENDPOINT")
@@ -126,6 +141,7 @@ global_queue_size: 50
 cluster_queue_size: 5
 dedup_window_seconds: 600
 queue_overflow_policy: "reject"
+anthropic_api_key: "test-key"
 `
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("failed to write config file: %v", err)
@@ -182,6 +198,7 @@ mcp_endpoint: "http://config-file-server:8080/mcp"
 workspace_root: "/config/incidents"
 log_level: "warn"
 agent_timeout: 120
+anthropic_api_key: "test-key"
 `
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("failed to write config file: %v", err)
@@ -237,6 +254,7 @@ func TestValidation_InvalidSeverityThreshold(t *testing.T) {
 	configContent := `
 mcp_endpoint: "http://localhost:8080/mcp"
 severity_threshold: "INVALID"
+anthropic_api_key: "test-key"
 `
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("failed to write config file: %v", err)
@@ -261,6 +279,7 @@ func TestValidation_InvalidNumericRanges(t *testing.T) {
 			config: `
 mcp_endpoint: "http://localhost:8080/mcp"
 max_concurrent_agents: 0
+anthropic_api_key: "test-key"
 `,
 			wantErr: true,
 		},
@@ -269,6 +288,7 @@ max_concurrent_agents: 0
 			config: `
 mcp_endpoint: "http://localhost:8080/mcp"
 global_queue_size: 0
+anthropic_api_key: "test-key"
 `,
 			wantErr: true,
 		},
@@ -277,6 +297,7 @@ global_queue_size: 0
 			config: `
 mcp_endpoint: "http://localhost:8080/mcp"
 cluster_queue_size: 0
+anthropic_api_key: "test-key"
 `,
 			wantErr: true,
 		},
@@ -285,6 +306,7 @@ cluster_queue_size: 0
 			config: `
 mcp_endpoint: "http://localhost:8080/mcp"
 dedup_window_seconds: -1
+anthropic_api_key: "test-key"
 `,
 			wantErr: true,
 		},
@@ -293,6 +315,7 @@ dedup_window_seconds: -1
 			config: `
 mcp_endpoint: "http://localhost:8080/mcp"
 agent_timeout: 0
+anthropic_api_key: "test-key"
 `,
 			wantErr: true,
 		},
@@ -324,6 +347,7 @@ func TestValidation_InvalidQueueOverflowPolicy(t *testing.T) {
 	configContent := `
 mcp_endpoint: "http://localhost:8080/mcp"
 queue_overflow_policy: "invalid"
+anthropic_api_key: "test-key"
 `
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("failed to write config file: %v", err)
@@ -348,6 +372,7 @@ func TestValidation_SSEReconnectSettings(t *testing.T) {
 			config: `
 mcp_endpoint: "http://localhost:8080/mcp"
 sse_reconnect_initial_backoff: 0
+anthropic_api_key: "test-key"
 `,
 			wantErr: true,
 		},
@@ -357,6 +382,7 @@ sse_reconnect_initial_backoff: 0
 mcp_endpoint: "http://localhost:8080/mcp"
 sse_reconnect_initial_backoff: 10
 sse_reconnect_max_backoff: 5
+anthropic_api_key: "test-key"
 `,
 			wantErr: true,
 		},
@@ -365,6 +391,7 @@ sse_reconnect_max_backoff: 5
 			config: `
 mcp_endpoint: "http://localhost:8080/mcp"
 sse_read_timeout: 0
+anthropic_api_key: "test-key"
 `,
 			wantErr: true,
 		},
@@ -402,6 +429,7 @@ func TestValidation_ValidSeverityLevels(t *testing.T) {
 			configContent := `
 mcp_endpoint: "http://localhost:8080/mcp"
 severity_threshold: "` + severity + `"
+anthropic_api_key: "test-key"
 `
 			if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 				t.Fatalf("failed to write config file: %v", err)
@@ -429,6 +457,7 @@ func TestValidation_ValidQueueOverflowPolicies(t *testing.T) {
 			configContent := `
 mcp_endpoint: "http://localhost:8080/mcp"
 queue_overflow_policy: "` + policy + `"
+anthropic_api_key: "test-key"
 `
 			if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 				t.Fatalf("failed to write config file: %v", err)
@@ -445,9 +474,10 @@ queue_overflow_policy: "` + policy + `"
 func TestConfigFileNotFound(t *testing.T) {
 	resetViper()
 
-	// Set required env var
+	// Set required env vars
 	os.Setenv("K8S_CLUSTER_MCP_ENDPOINT", "http://localhost:8080/mcp")
 	defer os.Unsetenv("K8S_CLUSTER_MCP_ENDPOINT")
+	defer setTestAPIKey(t)()
 
 	// Should not fail even if no config file exists
 	cfg, err := Load()
@@ -481,6 +511,7 @@ func TestAzureStorageEnabled(t *testing.T) {
 			name: "disabled when no Azure config",
 			config: `
 mcp_endpoint: "http://localhost:8080/mcp"
+anthropic_api_key: "test-key"
 `,
 			enabled: false,
 		},
@@ -490,6 +521,7 @@ mcp_endpoint: "http://localhost:8080/mcp"
 mcp_endpoint: "http://localhost:8080/mcp"
 azure_storage_connection_string: "AccountName=test;AccountKey=key123"
 azure_storage_container: "incidents"
+anthropic_api_key: "test-key"
 `,
 			enabled: true,
 		},
@@ -500,6 +532,7 @@ mcp_endpoint: "http://localhost:8080/mcp"
 azure_storage_account: "teststorage"
 azure_storage_key: "key123"
 azure_storage_container: "incidents"
+anthropic_api_key: "test-key"
 `,
 			enabled: true,
 		},
@@ -552,4 +585,90 @@ func TestGetAzureSASExpiry(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidation_RequiresLLMAPIKey(t *testing.T) {
+	resetViper()
+
+	// Config without any API key should fail
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := `
+mcp_endpoint: "http://localhost:8080/mcp"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	_, err := LoadWithConfigFile(configPath)
+	if err == nil {
+		t.Error("LoadWithConfigFile() should fail when no LLM API key is configured")
+	}
+
+	// Verify error message is helpful
+	expectedMsg := "at least one LLM API key is required"
+	if err != nil && !contains(err.Error(), expectedMsg) {
+		t.Errorf("error message should contain %q, got: %v", expectedMsg, err)
+	}
+}
+
+func TestValidation_AcceptsAnyLLMAPIKey(t *testing.T) {
+	resetViper()
+
+	tests := []struct {
+		name   string
+		config string
+	}{
+		{
+			name: "anthropic key",
+			config: `
+mcp_endpoint: "http://localhost:8080/mcp"
+anthropic_api_key: "sk-ant-test"
+`,
+		},
+		{
+			name: "openai key",
+			config: `
+mcp_endpoint: "http://localhost:8080/mcp"
+openai_api_key: "sk-test"
+`,
+		},
+		{
+			name: "gemini key",
+			config: `
+mcp_endpoint: "http://localhost:8080/mcp"
+gemini_api_key: "test-key"
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetViper()
+
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+			if err := os.WriteFile(configPath, []byte(tt.config), 0644); err != nil {
+				t.Fatalf("failed to write config file: %v", err)
+			}
+
+			_, err := LoadWithConfigFile(configPath)
+			if err != nil {
+				t.Errorf("LoadWithConfigFile() should succeed with %s: %v", tt.name, err)
+			}
+		})
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
