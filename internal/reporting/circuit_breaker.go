@@ -5,6 +5,16 @@ import (
 	"time"
 )
 
+// Notification Circuit Breaker
+//
+// This circuit breaker tracks consecutive agent failures and throttles Slack
+// notifications to prevent alert spam during LLM API outages. It sends a single
+// "System Degraded" alert when the failure threshold is reached, and a "System
+// Recovered" alert when the system returns to healthy operation.
+//
+// This is DISTINCT from the Agent Concurrency Limiter (implement-event-intake)
+// which limits the number of concurrent agent executions across clusters.
+
 // CircuitBreakerState represents the current state of the circuit breaker
 type CircuitBreakerState int
 

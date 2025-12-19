@@ -16,7 +16,11 @@ The walking-skeleton implementation (archived 2025-12-18) provides the foundatio
 - Basic event processing loop
 
 **This Change Adds:**
-Advanced event intake features not in the walking skeleton: reconnection logic, severity filtering, deduplication, circuit breaker, per-cluster queuing, and queue overflow management.
+Advanced event intake features not in the walking skeleton: reconnection logic, concurrency limiting, per-cluster queuing, and queue overflow management.
+
+**Handled Upstream (kubernetes-mcp-server):**
+- Severity filtering - Use subscription filters when calling `events_subscribe()`
+- Deduplication - kubernetes-mcp-server has TTL-based deduplication in `pkg/events/dedup.go`
 
 ## Why
 To establish the foundation of the Event Runner by connecting to the `kubernetes-mcp-server`, filtering noise, and managing concurrency. This corresponds to Phase 1 of the high-level plan and enables automated triage of Kubernetes faults by AI agents.
@@ -43,21 +47,21 @@ Implements the complete event intake pipeline with the following components:
 - Extract event metadata for routing and processing
 
 #### Severity-Based Filtering
-- Configurable severity threshold (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-- Drop events below threshold to reduce noise
-- Debug logging for filtered events
+- **HANDLED UPSTREAM**: kubernetes-mcp-server supports subscription filters
+- Pass severity/type filters to `events_subscribe()` call
+- No client-side filtering needed; reduces network traffic
 
 #### Deduplication System
-- Time-window-based deduplication (5-minute default)
-- Prevent redundant processing of same resource+namespace
-- In-memory cache with automatic expiry
-- Thread-safe concurrent access
+- **HANDLED UPSTREAM**: kubernetes-mcp-server has `pkg/events/dedup.go`
+- TTL-based deduplication at the source
+- No client-side deduplication needed; reduces network traffic
 
-#### Global Circuit Breaker
+#### Agent Concurrency Limiter (formerly "Global Circuit Breaker")
 - Hard limit on total concurrent agents across all clusters (default: 5)
 - Semaphore-based implementation using buffered channels
 - Prevents agent storms and resource exhaustion
 - Configurable capacity
+- **Note**: This is distinct from the Notification Circuit Breaker (prevent-spurious-notifications) which throttles Slack alerts on agent failures
 
 #### Per-Cluster Concurrency Control
 - Strictly one agent per cluster at any time
@@ -95,13 +99,13 @@ Implements the complete event intake pipeline with the following components:
 cmd/runner/              # Main entry point - DONE
 internal/
   config/                # Configuration loading and validation - DONE
-  events/                # MCP client, event parsing, validation, filtering - DONE (basic)
-  queue/                 # Circuit breaker, cluster queues, router, workers - TODO
-  dedup/                 # Deduplication cache - TODO
+  events/                # MCP client, event parsing, validation - DONE (basic)
+  queue/                 # Concurrency limiter, cluster queues, router, workers - TODO
   agent/                 # Agent execution - DONE (full impl from walking skeleton)
-  reporting/             # Result recording, Slack notifications - DONE
+  reporting/             # Result recording, Slack notifications, circuit breaker - DONE
   testing/mocksse/       # Mock MCP server for testing - TODO
 ```
+Note: Deduplication and severity filtering handled upstream by kubernetes-mcp-server.
 
 ## Impact
 
@@ -109,18 +113,18 @@ internal/
 - `event-processing` - Complete event intake and routing system
 
 ### New Code
-- Core runner skeleton with CLI framework (cobra)
-- Configuration system (viper)
-- SSE client wrapper (r3labs/sse)
-- Event validation and filtering logic
-- Deduplication cache with TTL
-- Global circuit breaker (semaphore pattern)
-- Per-cluster queuing and worker management
-- Event router with dynamic cluster queue creation
-- Structured logging throughout
-- Graceful shutdown handling
-- Comprehensive unit and integration tests
-- Mock SSE server for testing
+- Core runner skeleton with CLI framework (cobra) - **DONE**
+- Configuration system (viper) - **DONE**
+- MCP client using StreamableHTTP protocol - **DONE**
+- Event validation and parsing logic - **DONE**
+- ~~Deduplication cache with TTL~~ - HANDLED UPSTREAM
+- Agent Concurrency Limiter (semaphore pattern) - TODO
+- Per-cluster queuing and worker management - TODO
+- Event router with dynamic cluster queue creation - TODO
+- Structured logging throughout - **DONE**
+- Graceful shutdown handling - **DONE**
+- Comprehensive unit and integration tests - PARTIAL
+- Mock MCP server for testing - TODO
 
 ### Dependencies
 - **Runtime**: Requires running `kubernetes-mcp-server` with SSE endpoint
@@ -142,12 +146,13 @@ Already implemented (walking skeleton):
 - `SLACK_WEBHOOK_URL` (optional) - **DONE**
 
 Still needed for this change:
-- `SEVERITY_THRESHOLD` (default: ERROR)
-- `MAX_CONCURRENT_AGENTS` (default: 5)
-- `GLOBAL_QUEUE_SIZE` (default: 100)
-- `CLUSTER_QUEUE_SIZE` (default: 10)
-- `DEDUP_WINDOW_SECONDS` (default: 300)
+- `MAX_CONCURRENT_AGENTS` (default: 5) - Agent Concurrency Limiter capacity
+- `GLOBAL_QUEUE_SIZE` (default: 100) - Global event queue size
+- `CLUSTER_QUEUE_SIZE` (default: 10) - Per-cluster queue size
 - See design.md for complete configuration schema
+
+Note: `SEVERITY_THRESHOLD` and `DEDUP_WINDOW_SECONDS` configs exist but are unused;
+filtering and deduplication are handled upstream by kubernetes-mcp-server.
 
 ### Testing Requirements
 - Unit tests for all core components

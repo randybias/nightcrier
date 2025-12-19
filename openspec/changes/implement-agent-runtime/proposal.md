@@ -17,7 +17,13 @@ The walking-skeleton implementation (archived 2025-12-18) provides substantial a
 - Investigation report generation (output/investigation.md)
 
 **This Change Adds:**
-Advanced runtime features: in-memory state tracking, Prometheus metrics, progressive output streaming, workspace GC, and comprehensive testing.
+Advanced runtime features: in-memory state tracking, Prometheus metrics, progressive output streaming, workspace garbage collection, and comprehensive testing.
+
+**Workspace Garbage Collection (GC):**
+- Automatically clean up old incident workspace directories to reclaim disk space
+- Configurable retention period (e.g., 7 days)
+- Runs periodically or on-demand
+- Preserves workspaces for incidents still being processed
 
 ## Why
 To enable the runner to actually invoke AI agents in a safe, isolated manner to investigate the events accepted by the processing layer.
