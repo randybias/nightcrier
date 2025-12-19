@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rbias/kubernetes-mcp-alerts-event-runner/internal/agent"
-	"github.com/rbias/kubernetes-mcp-alerts-event-runner/internal/config"
-	"github.com/rbias/kubernetes-mcp-alerts-event-runner/internal/events"
-	"github.com/rbias/kubernetes-mcp-alerts-event-runner/internal/incident"
-	"github.com/rbias/kubernetes-mcp-alerts-event-runner/internal/reporting"
-	"github.com/rbias/kubernetes-mcp-alerts-event-runner/internal/storage"
+	"github.com/rbias/nightcrier/internal/agent"
+	"github.com/rbias/nightcrier/internal/config"
+	"github.com/rbias/nightcrier/internal/events"
+	"github.com/rbias/nightcrier/internal/incident"
+	"github.com/rbias/nightcrier/internal/reporting"
+	"github.com/rbias/nightcrier/internal/storage"
 	"github.com/spf13/cobra"
 )
 

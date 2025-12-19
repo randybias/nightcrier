@@ -1,6 +1,6 @@
-# Makefile for k8s-triage-agent container
+# Makefile for nightcrier-agent container
 
-IMAGE_NAME ?= k8s-triage-agent
+IMAGE_NAME ?= nightcrier-agent
 IMAGE_TAG ?= latest
 FULL_IMAGE = $(IMAGE_NAME):$(IMAGE_TAG)
 
@@ -115,7 +115,7 @@ help:
 	@echo "  clean        - Remove the image"
 	@echo ""
 	@echo "Variables:"
-	@echo "  IMAGE_NAME   - Image name (default: k8s-triage-agent)"
+	@echo "  IMAGE_NAME   - Image name (default: nightcrier-agent)"
 	@echo "  IMAGE_TAG    - Image tag (default: latest)"
 	@echo ""
 	@echo "Example:"

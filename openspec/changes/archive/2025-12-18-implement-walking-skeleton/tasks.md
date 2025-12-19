@@ -9,7 +9,7 @@ Task 5 depends on all of 1-4 completing.
 
 ## 1. Project Skeleton and Configuration
 
-- [x] 1.1 Initialize Go module: `go mod init github.com/rbias/kubernetes-mcp-alerts-event-runner`
+- [x] 1.1 Initialize Go module: `go mod init github.com/rbias/nightcrier`
 - [x] 1.2 Create directory structure: `cmd/runner/`, `internal/config/`, `internal/events/`, `internal/agent/`, `internal/reporting/`
 - [x] 1.3 Add dependencies: `github.com/r3labs/sse/v2`, `github.com/spf13/cobra`
 - [x] 1.4 Create `internal/config/config.go` with Config struct (SSE_ENDPOINT, WORKSPACE_ROOT, LOG_LEVEL)

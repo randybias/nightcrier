@@ -47,8 +47,8 @@ func NewClient(endpoint, subscribeMode string) *Client {
 	// Create MCP client with logging message handler to receive fault notifications
 	c.mcpClient = mcp.NewClient(
 		&mcp.Implementation{
-			Name:    "kubernetes-mcp-alerts-event-runner",
-			Version: "0.1.0",
+			Name:    "nightcrier",
+			Version: "1.0.0",
 		},
 		&mcp.ClientOptions{
 			LoggingMessageHandler: c.handleLoggingMessage,

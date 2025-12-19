@@ -1,4 +1,4 @@
-# Kubernetes MCP Alerts Event Runner
+# Nightcrier
 
 An AI-powered incident triage system that automatically investigates Kubernetes faults using Claude AI agents through the Model Context Protocol (MCP).
 
@@ -11,7 +11,7 @@ This system listens for fault events from a Kubernetes MCP server and spawns AI 
 ### High-Level Flow
 
 ```
-kubernetes-mcp-server -> MCP Events -> Event Runner -> AI Agent -> Investigation Report
+kubernetes-mcp-server -> MCP Events -> Nightcrier -> AI Agent -> Investigation Report
                                             |
                                             v
                                     Storage (Azure/Filesystem)
@@ -30,7 +30,7 @@ kubernetes-mcp-server -> MCP Events -> Event Runner -> AI Agent -> Investigation
          │
          v
 ┌─────────────────────────────────────────────────────────────┐
-│  Event Runner                                                │
+│  Nightcrier                                                  │
 │                                                               │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │ 1. Create Workspace                                   │  │
@@ -141,8 +141,8 @@ Circuit Breaker States:
 
 ```bash
 # Clone the repository
-git clone https://github.com/rbias/kubernetes-mcp-alerts-event-runner.git
-cd kubernetes-mcp-alerts-event-runner
+git clone https://github.com/rbias/nightcrier.git
+cd nightcrier
 
 # Build the runner
 go build -o runner ./cmd/runner
@@ -711,3 +711,4 @@ See [openspec/AGENTS.md](openspec/AGENTS.md) for development workflow and contri
 
 - [kubernetes-mcp-server](https://github.com/rbias/kubernetes-mcp-server) - MCP server for Kubernetes fault events
 - [Model Context Protocol](https://github.com/anthropics/mcp) - Protocol specification
+- [Nightcrier](https://github.com/rbias/nightcrier) - This project

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rbias/kubernetes-mcp-alerts-event-runner/internal/reporting"
+	"github.com/rbias/nightcrier/internal/reporting"
 )
 
 func TestDetectAgentFailure(t *testing.T) {

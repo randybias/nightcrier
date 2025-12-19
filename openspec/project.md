@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The kubernetes-mcp-alerts-event-runner is an MCP client that listens for fault events from kubernetes-mcp-server and spawns AI agents to perform read-only triage of Kubernetes incidents. It acts as a bridge between Kubernetes cluster monitoring and AI-powered incident investigation.
+Nightcrier is an MCP client that listens for fault events from kubernetes-mcp-server and spawns AI agents to perform read-only triage of Kubernetes incidents. It acts as a bridge between Kubernetes cluster monitoring and AI-powered incident investigation.
 
 ### Goals
 
@@ -120,7 +120,7 @@ A fault is a Warning event targeting a Pod, enriched with:
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────┐
-│             kubernetes-mcp-alerts-event-runner              │
+│                        Nightcrier                           │
 │                                                              │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
 │  │ MCP Client   │→ │ Workspace    │→ │ Agent        │      │

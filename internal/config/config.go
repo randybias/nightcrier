@@ -88,7 +88,7 @@ func setDefaults() {
 	viper.SetDefault("agent_model", "sonnet")
 	viper.SetDefault("agent_timeout", 300)
 	viper.SetDefault("agent_cli", "claude")
-	viper.SetDefault("agent_image", "k8s-triage-agent:latest")
+	viper.SetDefault("agent_image", "nightcrier-agent:latest")
 	viper.SetDefault("agent_prompt", "Production incident detected. Incident context is in incident.json. Perform immediate triage and root cause analysis. Write findings to output/investigation.md")
 
 	// Event processing defaults (from design.md)
@@ -212,9 +212,9 @@ func LoadWithConfigFile(configFile string) (*Config, error) {
 		// Search for config file in standard locations
 		viper.SetConfigName("config")
 		viper.SetConfigType("yaml")
-		viper.AddConfigPath(".")           // Current directory
-		viper.AddConfigPath("./configs")   // configs subdirectory
-		viper.AddConfigPath("/etc/runner") // System-wide config
+		viper.AddConfigPath(".")               // Current directory
+		viper.AddConfigPath("./configs")       // configs subdirectory
+		viper.AddConfigPath("/etc/nightcrier") // System-wide config
 	}
 
 	// Read config file (ignore "not found" errors - file is optional)

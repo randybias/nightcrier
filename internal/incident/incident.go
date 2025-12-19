@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/rbias/kubernetes-mcp-alerts-event-runner/internal/events"
+	"github.com/rbias/nightcrier/internal/events"
 )
 
 // Status constants for incident lifecycle

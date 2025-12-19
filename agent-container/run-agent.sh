@@ -16,7 +16,7 @@ set -euo pipefail
 # =============================================================================
 
 # Docker image
-AGENT_IMAGE="${AGENT_IMAGE:-k8s-triage-agent:latest}"
+AGENT_IMAGE="${AGENT_IMAGE:-nightcrier-agent:latest}"
 
 # Agent selection (claude, codex, goose, gemini)
 AGENT_CLI="${AGENT_CLI:-claude}"
@@ -113,7 +113,7 @@ Codex CLI Options (when --agent codex):
                                 Bypass sandbox (required for Docker without Landlock)
 
 Container Options:
-  -i, --image IMAGE             Docker image (default: k8s-triage-agent:latest)
+  -i, --image IMAGE             Docker image (default: nightcrier-agent:latest)
   --timeout SECONDS             Container timeout (default: 600)
   --memory LIMIT                Memory limit (default: 2g)
   --cpus LIMIT                  CPU limit (e.g., 1.5)

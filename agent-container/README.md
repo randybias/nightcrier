@@ -1,4 +1,4 @@
-# K8s Triage Agent Container
+# Nightcrier Agent Container
 
 Docker container for running AI agents to investigate Kubernetes incidents.
 
@@ -85,7 +85,7 @@ The container includes the [k8s-troubleshooter](https://github.com/randybias/k8s
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGENT_IMAGE` | `k8s-triage-agent:latest` | Docker image to use |
+| `AGENT_IMAGE` | `nightcrier-agent:latest` | Docker image to use |
 | `WORKSPACE_DIR` | (required) | Host workspace directory |
 | `OUTPUT_DIR` | `workspace/output` | Output directory for logs |
 | `KUBECONFIG_PATH` | `~/.kube/config` | Path to kubeconfig |
