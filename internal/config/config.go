@@ -63,6 +63,11 @@ type Config struct {
 	AzureStorageKey              string `mapstructure:"azure_storage_key"`
 	AzureStorageContainer        string `mapstructure:"azure_storage_container"`
 	AzureSASExpiry               string `mapstructure:"azure_sas_expiry"`
+
+	// Circuit Breaker and Notification Configuration (Phase 2)
+	NotifyOnAgentFailure        bool `mapstructure:"notify_on_agent_failure"`
+	FailureThresholdForAlert    int  `mapstructure:"failure_threshold_for_alert"`
+	UploadFailedInvestigations  bool `mapstructure:"upload_failed_investigations"`
 }
 
 // setDefaults configures default values for all configuration options.
@@ -102,6 +107,11 @@ func setDefaults() {
 
 	// Azure defaults
 	viper.SetDefault("azure_sas_expiry", "168h")
+
+	// Circuit breaker and notification defaults
+	viper.SetDefault("notify_on_agent_failure", true)
+	viper.SetDefault("failure_threshold_for_alert", 3)
+	viper.SetDefault("upload_failed_investigations", false)
 }
 
 // bindEnvVars binds environment variables to viper keys.
@@ -142,6 +152,9 @@ func bindEnvVars() {
 		"azure_storage_key":               "AZURE_STORAGE_KEY",
 		"azure_storage_container":         "AZURE_STORAGE_CONTAINER",
 		"azure_sas_expiry":                "AZURE_SAS_EXPIRY",
+		"notify_on_agent_failure":         "NOTIFY_ON_AGENT_FAILURE",
+		"failure_threshold_for_alert":     "FAILURE_THRESHOLD_FOR_ALERT",
+		"upload_failed_investigations":    "UPLOAD_FAILED_INVESTIGATIONS",
 	}
 
 	for key, envVar := range envBindings {
@@ -154,14 +167,17 @@ func bindEnvVars() {
 func BindFlags(flags *pflag.FlagSet) {
 	// Bind flags that match config keys
 	flagBindings := map[string]string{
-		"mcp-endpoint":          "mcp_endpoint",
-		"workspace-root":        "workspace_root",
-		"log-level":             "log_level",
-		"config":                "config_file",
-		"agent-timeout":         "agent_timeout",
-		"severity-threshold":    "severity_threshold",
-		"max-concurrent-agents": "max_concurrent_agents",
-		"shutdown-timeout":      "shutdown_timeout",
+		"mcp-endpoint":                  "mcp_endpoint",
+		"workspace-root":                "workspace_root",
+		"log-level":                     "log_level",
+		"config":                        "config_file",
+		"agent-timeout":                 "agent_timeout",
+		"severity-threshold":            "severity_threshold",
+		"max-concurrent-agents":         "max_concurrent_agents",
+		"shutdown-timeout":              "shutdown_timeout",
+		"notify-on-agent-failure":       "notify_on_agent_failure",
+		"failure-threshold-for-alert":   "failure_threshold_for_alert",
+		"upload-failed-investigations":  "upload_failed_investigations",
 	}
 
 	for flagName, configKey := range flagBindings {
@@ -274,6 +290,11 @@ func (c *Config) Validate() error {
 	}
 	if c.SSEReadTimeout < 1 {
 		return fmt.Errorf("sse_read_timeout must be >= 1, got %d", c.SSEReadTimeout)
+	}
+
+	// Validate circuit breaker settings
+	if c.FailureThresholdForAlert < 1 {
+		return fmt.Errorf("failure_threshold_for_alert must be >= 1, got %d", c.FailureThresholdForAlert)
 	}
 
 	// Require at least one LLM API key

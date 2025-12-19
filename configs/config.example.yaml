@@ -190,3 +190,22 @@ sse_read_timeout: 120
 # SAS URL expiration duration (Go duration format)
 # Environment variable: AZURE_SAS_EXPIRY
 # azure_sas_expiry: "168h"  # 7 days
+
+# =============================================================================
+# Circuit Breaker and Failure Notifications (Phase 2)
+# =============================================================================
+# Whether to send notifications when agent failures occur
+# When true, system degraded alerts are sent after threshold is reached
+# Environment variable: NOTIFY_ON_AGENT_FAILURE
+notify_on_agent_failure: true
+
+# Number of consecutive failures before triggering a system degraded alert
+# Lower values = more sensitive, higher values = more tolerant
+# Environment variable: FAILURE_THRESHOLD_FOR_ALERT
+failure_threshold_for_alert: 3
+
+# Whether to upload failed investigation attempts to storage
+# When true, even failed investigations are saved to Azure/filesystem storage
+# When false, only successful investigations are uploaded (default)
+# Environment variable: UPLOAD_FAILED_INVESTIGATIONS
+upload_failed_investigations: false

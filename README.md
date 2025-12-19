@@ -8,6 +8,8 @@ This system listens for fault events from a Kubernetes MCP server and spawns AI 
 
 ## Architecture
 
+### High-Level Flow
+
 ```
 kubernetes-mcp-server -> MCP Events -> Event Runner -> AI Agent -> Investigation Report
                                             |
@@ -18,6 +20,101 @@ kubernetes-mcp-server -> MCP Events -> Event Runner -> AI Agent -> Investigation
                                     Slack Notification (with Report URL)
 ```
 
+### Detailed Validation Flow
+
+```
+┌─────────────────┐
+│  Fault Event    │
+│  from MCP       │
+└────────┬────────┘
+         │
+         v
+┌─────────────────────────────────────────────────────────────┐
+│  Event Runner                                                │
+│                                                               │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ 1. Create Workspace                                   │  │
+│  │    ./incidents/<incident-id>/                        │  │
+│  │    - incident.json (event context)                   │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                          │                                   │
+│                          v                                   │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ 2. Execute AI Agent                                   │  │
+│  │    - Spawn container with LLM CLI                    │  │
+│  │    - Agent investigates incident                     │  │
+│  │    - Writes output/investigation.md                  │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                          │                                   │
+│                          v                                   │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ 3. Validate Output                                    │  │
+│  │    ✓ Exit code = 0?                                  │  │
+│  │    ✓ investigation.md exists?                        │  │
+│  │    ✓ File size > 100 bytes?                          │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                          │                                   │
+│              ┌───────────┴───────────┐                      │
+│              │                       │                       │
+│              v                       v                       │
+│      ┌──────────────┐        ┌──────────────┐              │
+│      │   SUCCESS    │        │   FAILURE    │              │
+│      └──────┬───────┘        └──────┬───────┘              │
+│             │                       │                       │
+│             │                       v                       │
+│             │              ┌─────────────────────┐         │
+│             │              │ Circuit Breaker     │         │
+│             │              │ Track Failures      │         │
+│             │              │ (count: 1/3, 2/3..) │         │
+│             │              └─────────┬───────────┘         │
+│             │                        │                      │
+│             │                        v                      │
+│             │              ┌─────────────────────┐         │
+│             │              │ Threshold Reached?  │         │
+│             │              │ (default: 3 failures)│         │
+│             │              └─────────┬───────────┘         │
+│             │                        │                      │
+│             │              ┌─────────┴─────────┐           │
+│             │              │                   │           │
+│             │              v                   v           │
+│             │         ┌────────┐      ┌──────────────┐   │
+│             │         │  YES   │      │     NO       │   │
+│             │         └───┬────┘      └──────────────┘   │
+│             │             │                                │
+│             │             v                                │
+│             │    ┌─────────────────────┐                  │
+│             │    │ Send System         │                  │
+│             │    │ Degraded Alert      │                  │
+│             │    │ (if configured)     │                  │
+│             │    └─────────────────────┘                  │
+│             │                                               │
+│             │  Skip individual notification                │
+│             │  Skip storage upload (by default)           │
+│             │                                               │
+│             v                                               │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ 4. Upload to Storage (if validated)                  │  │
+│  │    - Azure Blob Storage (with SAS URLs)              │  │
+│  │    - OR Filesystem storage                           │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                          │                                   │
+│                          v                                   │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ 5. Send Slack Notification (if validated)            │  │
+│  │    - Incident details + root cause                   │  │
+│  │    - Link to investigation report                    │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                                                               │
+└───────────────────────────────────────────────────────────────┘
+
+Circuit Breaker States:
+┌──────────┐  threshold failures   ┌──────────┐
+│  CLOSED  │ ─────────────────────> │   OPEN   │
+│ (Normal) │                        │(Degraded)│
+└──────────┘ <───────────────────── └──────────┘
+              1 success + alert sent
+```
+
 ## Features
 
 - Automated incident detection via MCP server integration
@@ -26,6 +123,9 @@ kubernetes-mcp-server -> MCP Events -> Event Runner -> AI Agent -> Investigation
 - Slack notifications with investigation reports
 - Secure artifact storage with SAS URL generation (Azure mode)
 - Containerized agent execution environment
+- Circuit breaker for agent failure handling
+- Intelligent validation to prevent spurious notifications
+- System health monitoring with degraded/recovered alerts
 
 ## Prerequisites
 
@@ -73,6 +173,9 @@ docker build -t k8s-triage-agent:latest .
 #### Optional - Slack Notifications
 
 - `SLACK_WEBHOOK_URL` - Slack webhook URL for notifications (if not set, Slack notifications are disabled)
+- `NOTIFY_ON_AGENT_FAILURE` - Send system degraded alerts when agent failures occur (default: `true`)
+- `FAILURE_THRESHOLD_FOR_ALERT` - Number of consecutive failures before sending alert (default: `3`)
+- `UPLOAD_FAILED_INVESTIGATIONS` - Upload failed investigation attempts to storage (default: `false`)
 
 #### Optional - Azure Blob Storage
 
@@ -134,6 +237,96 @@ The container must have the following structure:
     result.json             # Execution result with URLs
     output/
       investigation.md      # AI-generated investigation report
+```
+
+### Circuit Breaker and Agent Failure Handling
+
+The system includes intelligent agent failure handling to prevent spurious notifications and improve reliability.
+
+#### How It Works
+
+When an AI agent executes, the system validates the output to ensure the agent successfully completed its investigation:
+
+1. **Validation Checks**: Each agent execution is validated for:
+   - Exit code is 0 (no execution errors)
+   - Output file exists (`output/investigation.md`)
+   - Output file size is substantial (> 100 bytes)
+
+2. **Circuit Breaker**: If validation fails, the system records the failure and tracks consecutive failures:
+   - **Closed State** (Normal): Agent failures are tracked but no system-level alerts are sent
+   - **Open State** (Degraded): After reaching the failure threshold, a system degraded alert is sent
+
+3. **Automatic Recovery**: When an agent successfully completes an investigation after the circuit breaker opened:
+   - Circuit breaker resets to closed state
+   - A system recovered alert is sent
+   - Failure counter resets to zero
+
+#### Configuration Options
+
+Three environment variables control circuit breaker behavior:
+
+```bash
+# Enable/disable system degraded alerts (default: true)
+export NOTIFY_ON_AGENT_FAILURE=true
+
+# Number of consecutive failures before sending alert (default: 3)
+export FAILURE_THRESHOLD_FOR_ALERT=3
+
+# Upload failed investigations to storage (default: false)
+export UPLOAD_FAILED_INVESTIGATIONS=false
+```
+
+In `config.yaml`:
+```yaml
+# Circuit breaker and failure notification configuration
+notify_on_agent_failure: true
+failure_threshold_for_alert: 3
+upload_failed_investigations: false
+```
+
+#### Notification Behavior
+
+**Individual Incident Notifications (per-incident):**
+- Sent for successful investigations only
+- Skipped when agent validation fails
+- Prevents spam from failed LLM API calls or agent issues
+
+**System Degraded Alerts (aggregated):**
+- Sent when `failure_threshold_for_alert` consecutive failures occur
+- Only sent if `notify_on_agent_failure` is `true`
+- Includes failure statistics and recent failure reasons
+- Indicates the AI agent system may be experiencing issues
+
+**System Recovered Alerts:**
+- Sent when agent successfully completes after circuit opened
+- Includes total downtime and failure count
+- Indicates system returned to healthy state
+
+#### Storage Upload Behavior
+
+By default (`upload_failed_investigations: false`):
+- Only successful investigations are uploaded to storage
+- Failed investigations remain in local workspace for debugging
+- Reduces storage costs and prevents uploading incomplete data
+
+When `upload_failed_investigations: true`:
+- All investigations are uploaded, even if validation failed
+- Useful for debugging agent issues
+- Allows inspection of partial output
+
+#### Example Flow
+
+```
+Event → Agent Execution → Validation → Outcome
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Event 1 → Agent runs → ✓ Valid → Upload + Notify
+Event 2 → API error  → ✗ Failed → Skip upload/notify (failure 1/3)
+Event 3 → Agent runs → ✗ Empty  → Skip upload/notify (failure 2/3)
+Event 4 → Timeout    → ✗ Failed → Skip upload/notify (failure 3/3)
+                                    ⚠️  SEND SYSTEM DEGRADED ALERT
+Event 5 → Agent runs → ✓ Valid → Upload + Notify
+                                    ✅ SEND SYSTEM RECOVERED ALERT
 ```
 
 ## Usage
@@ -383,6 +576,87 @@ When Slack is configured, notifications include:
 - File path (when filesystem storage is used)
 
 ## Troubleshooting
+
+### Agent Failures
+
+**Problem**: Receiving "AI Agent System Degraded" alerts in Slack
+- This indicates the circuit breaker threshold has been reached (default: 3 consecutive failures)
+- Common causes:
+  - LLM API key issues (expired, missing, or incorrect)
+  - LLM API rate limiting or service outages
+  - Agent timeout (default 300 seconds)
+  - Network connectivity issues
+  - Resource constraints (CPU, memory)
+
+**Diagnosis Steps**:
+
+1. Check runner logs for failure details:
+```bash
+# Look for agent failure messages
+./runner --log-level debug
+
+# Sample log output:
+# WARN agent execution failed validation incident_id=abc-123 reason="agent exited with non-zero code: 1"
+# WARN circuit breaker threshold reached, system degraded failure_count=3
+```
+
+2. Check the workspace for investigation artifacts:
+```bash
+# List failed incidents
+ls -la ./incidents/
+
+# Check specific incident
+cat ./incidents/<incident-id>/incident.json
+
+# Check if output directory exists and has content
+ls -la ./incidents/<incident-id>/output/
+cat ./incidents/<incident-id>/output/investigation.md
+```
+
+3. Verify LLM API key configuration:
+```bash
+# Check if API key is set
+echo $ANTHROPIC_API_KEY | wc -c  # Should be > 50 characters
+echo $OPENAI_API_KEY | wc -c
+echo $GEMINI_API_KEY | wc -c
+
+# Test API key validity (for Anthropic)
+curl https://api.anthropic.com/v1/messages \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
+  -d '{"model":"claude-3-5-sonnet-20241022","max_tokens":10,"messages":[{"role":"user","content":"test"}]}'
+```
+
+4. Check agent execution logs:
+```bash
+# If using docker, check container logs
+docker ps -a | grep triage-agent
+docker logs <container-id>
+```
+
+**Common Solutions**:
+
+1. **API Key Issues**: Verify correct API key is set and not expired
+2. **Rate Limiting**: Increase delay between incidents or upgrade API tier
+3. **Timeouts**: Increase `AGENT_TIMEOUT` (default: 300s)
+```bash
+export AGENT_TIMEOUT=600
+```
+4. **Network Issues**: Check firewall rules and proxy settings
+5. **Resource Constraints**: Increase container memory/CPU limits
+
+**Recovery**:
+Once the underlying issue is fixed, the system will automatically detect the next successful investigation and send a "System Recovered" alert.
+
+**Problem**: Agent failures not triggering system alerts
+- Check `NOTIFY_ON_AGENT_FAILURE` is set to `true` (default)
+- Verify `SLACK_WEBHOOK_URL` is configured
+- Check failure count hasn't reached threshold yet (default: 3 consecutive failures)
+
+**Problem**: Want to inspect failed investigation artifacts
+- Set `UPLOAD_FAILED_INVESTIGATIONS=true` to upload failed attempts to storage
+- Failed investigations remain in local workspace: `./incidents/<incident-id>/`
 
 ### Azure Storage Issues
 

@@ -108,6 +108,10 @@ func run(cmd *cobra.Command, args []string) error {
 		slog.Info("slack notifications enabled")
 	}
 
+	// Create circuit breaker with configured threshold
+	circuitBreaker := reporting.NewCircuitBreaker(cfg.FailureThresholdForAlert)
+	slog.Info("circuit breaker initialized", "threshold", cfg.FailureThresholdForAlert)
+
 	// Initialize storage backend based on configuration
 	storageBackend, err := storage.NewStorage(cfg)
 	if err != nil {
@@ -149,14 +153,14 @@ func run(cmd *cobra.Command, args []string) error {
 				slog.Info("event channel closed")
 				return nil
 			}
-			if err := processEvent(ctx, event, workspaceMgr, executor, slackNotifier, storageBackend); err != nil {
+			if err := processEvent(ctx, event, workspaceMgr, executor, slackNotifier, storageBackend, circuitBreaker, cfg); err != nil {
 				slog.Error("failed to process event", "error", err)
 			}
 		}
 	}
 }
 
-func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *agent.WorkspaceManager, executor *agent.Executor, slackNotifier *reporting.SlackNotifier, storageBackend storage.Storage) error {
+func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *agent.WorkspaceManager, executor *agent.Executor, slackNotifier *reporting.SlackNotifier, storageBackend storage.Storage, circuitBreaker *reporting.CircuitBreaker, cfg *config.Config) error {
 	// Create incident from event
 	incidentID := uuid.New().String()
 	inc := incident.NewFromEvent(incidentID, event)
@@ -193,6 +197,80 @@ func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *a
 	// Update incident with completion info
 	inc.MarkCompleted(exitCode, execErr)
 
+	// Detect agent failures (exit code 0 but missing or invalid output)
+	agentFailed, failureReason := detectAgentFailure(workspacePath, exitCode, execErr)
+	if agentFailed {
+		inc.Status = incident.StatusAgentFailed
+		inc.FailureReason = failureReason
+		slog.Warn("agent execution failed validation",
+			"incident_id", incidentID,
+			"reason", failureReason)
+
+		// Record failure in circuit breaker
+		circuitBreaker.RecordFailure(failureReason)
+		slog.Debug("circuit breaker: recorded failure",
+			"failure_count", circuitBreaker.GetFailureCount(),
+			"state", circuitBreaker.GetState())
+
+		// Check if we should send a system degraded alert
+		if circuitBreaker.ShouldAlert() {
+			stats := circuitBreaker.GetStats()
+			slog.Warn("circuit breaker threshold reached, system degraded",
+				"failure_count", stats.Count,
+				"duration", stats.Duration,
+				"recent_reasons", stats.RecentReasons)
+
+			// Send system degraded alert to Slack if configured and enabled
+			if slackNotifier != nil && cfg.NotifyOnAgentFailure {
+				if err := slackNotifier.SendSystemDegradedAlert(ctx, stats); err != nil {
+					slog.Error("failed to send system degraded alert", "error", err)
+				} else {
+					slog.Info("system degraded alert sent to slack",
+						"failure_count", stats.Count,
+						"duration", stats.Duration)
+				}
+			} else {
+				if slackNotifier == nil {
+					slog.Debug("slack not configured, skipping system degraded alert")
+				} else {
+					slog.Debug("system degraded alert disabled by configuration",
+						"config", "notify_on_agent_failure=false")
+				}
+			}
+		}
+	} else {
+		// Record success in circuit breaker and get stats before reset
+		stats := circuitBreaker.GetStats()
+		needsRecoveryAlert := circuitBreaker.RecordSuccess()
+		slog.Debug("circuit breaker: recorded success",
+			"needs_recovery_alert", needsRecoveryAlert)
+
+		// Send recovery alert if needed
+		if needsRecoveryAlert {
+			slog.Info("circuit breaker recovered, system returned to healthy state",
+				"total_failures", stats.Count,
+				"total_downtime", stats.Duration)
+
+			// Send system recovered alert to Slack if configured and enabled
+			if slackNotifier != nil && cfg.NotifyOnAgentFailure {
+				if err := slackNotifier.SendSystemRecoveredAlert(ctx, stats); err != nil {
+					slog.Error("failed to send system recovered alert", "error", err)
+				} else {
+					slog.Info("system recovered alert sent to slack",
+						"total_failures", stats.Count,
+						"total_downtime", stats.Duration)
+				}
+			} else {
+				if slackNotifier == nil {
+					slog.Debug("slack not configured, skipping system recovered alert")
+				} else {
+					slog.Debug("system recovered alert disabled by configuration",
+						"config", "notify_on_agent_failure=false")
+				}
+			}
+		}
+	}
+
 	// Write updated incident.json with completion info
 	if err := inc.WriteToFile(incidentPath); err != nil {
 		return fmt.Errorf("failed to update incident: %w", err)
@@ -204,21 +282,29 @@ func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *a
 	// Save incident artifacts to storage
 	var reportURL string
 	if storageBackend != nil {
-		// Read the generated artifacts and convert markdown to HTML
-		artifacts, err := readIncidentArtifacts(workspacePath, incidentID)
-		if err != nil {
-			slog.Warn("failed to read incident artifacts for storage", "error", err)
+		// Skip storage upload for agent failures (missing/invalid output) unless configured otherwise
+		if inc.Status == incident.StatusAgentFailed && !cfg.UploadFailedInvestigations {
+			slog.Info("skipping storage upload due to agent failure",
+				"incident_id", incidentID,
+				"reason", inc.FailureReason,
+				"config", "upload_failed_investigations=false")
 		} else {
-			// Upload artifacts to storage (Azure or filesystem)
-			saveResult, err := storageBackend.SaveIncident(ctx, incidentID, artifacts)
+			// Read the generated artifacts and convert markdown to HTML
+			artifacts, err := readIncidentArtifacts(workspacePath, incidentID)
 			if err != nil {
-				slog.Error("failed to save incident to storage", "error", err)
+				slog.Warn("failed to read incident artifacts for storage", "error", err)
 			} else {
-				reportURL = saveResult.ReportURL
-				slog.Info("incident artifacts saved to storage",
-					"incident_id", incidentID,
-					"artifact_count", len(saveResult.ArtifactURLs),
-					"report_url", reportURL)
+				// Upload artifacts to storage (Azure or filesystem)
+				saveResult, err := storageBackend.SaveIncident(ctx, incidentID, artifacts)
+				if err != nil {
+					slog.Error("failed to save incident to storage", "error", err)
+				} else {
+					reportURL = saveResult.ReportURL
+					slog.Info("incident artifacts saved to storage",
+						"incident_id", incidentID,
+						"artifact_count", len(saveResult.ArtifactURLs),
+						"report_url", reportURL)
+				}
 			}
 		}
 	}
@@ -231,40 +317,86 @@ func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *a
 
 	// Send Slack notification if configured
 	if slackNotifier != nil {
-		rootCause, confidence, err := reporting.ExtractSummaryFromReport(workspacePath)
-		if err != nil {
-			slog.Warn("failed to extract report summary for slack", "error", err)
-			rootCause = "See investigation report"
-			confidence = "UNKNOWN"
-		}
-
-		summary := &reporting.IncidentSummary{
-			IncidentID: incidentID,
-			Cluster:    inc.Cluster,
-			Namespace:  inc.Namespace,
-			Resource:   fmt.Sprintf("%s/%s", inc.Resource.Kind, inc.Resource.Name),
-			Reason:     inc.FaultType,
-			Status:     inc.Status,
-			RootCause:  rootCause,
-			Confidence: confidence,
-			Duration:   duration,
-			ReportPath: filepath.Join(workspacePath, "output", "investigation.md"),
-			ReportURL:  reportURL,
-		}
-
-		slog.Info("sending slack notification",
-			"incident_id", incidentID,
-			"report_url", reportURL,
-			"has_url", reportURL != "")
-
-		if err := slackNotifier.SendIncidentNotification(summary); err != nil {
-			slog.Error("failed to send slack notification", "error", err)
+		// Always skip individual notifications for agent failures to prevent spam
+		// Circuit breaker will send aggregated alerts if configured
+		if inc.Status == incident.StatusAgentFailed {
+			slog.Info("skipping slack notification due to agent failure",
+				"incident_id", incidentID,
+				"reason", inc.FailureReason,
+				"note", "circuit breaker will send aggregated alert if threshold reached")
 		} else {
-			slog.Info("slack notification sent", "incident_id", incidentID)
+			rootCause, confidence, err := reporting.ExtractSummaryFromReport(workspacePath)
+			if err != nil {
+				slog.Warn("failed to extract report summary for slack", "error", err)
+				rootCause = "See investigation report"
+				confidence = "UNKNOWN"
+			}
+
+			summary := &reporting.IncidentSummary{
+				IncidentID: incidentID,
+				Cluster:    inc.Cluster,
+				Namespace:  inc.Namespace,
+				Resource:   fmt.Sprintf("%s/%s", inc.Resource.Kind, inc.Resource.Name),
+				Reason:     inc.FaultType,
+				Status:     inc.Status,
+				RootCause:  rootCause,
+				Confidence: confidence,
+				Duration:   duration,
+				ReportPath: filepath.Join(workspacePath, "output", "investigation.md"),
+				ReportURL:  reportURL,
+			}
+
+			slog.Info("sending slack notification",
+				"incident_id", incidentID,
+				"report_url", reportURL,
+				"has_url", reportURL != "")
+
+			if err := slackNotifier.SendIncidentNotification(summary); err != nil {
+				slog.Error("failed to send slack notification", "error", err)
+			} else {
+				slog.Info("slack notification sent", "incident_id", incidentID)
+			}
 		}
 	}
 
 	return nil
+}
+
+// detectAgentFailure validates agent execution and returns whether the agent failed and a reason string.
+// It checks:
+// 1. Exit code is 0
+// 2. output/investigation.md file exists
+// 3. investigation.md file size is > 100 bytes
+//
+// Returns (failed bool, reason string)
+func detectAgentFailure(workspacePath string, exitCode int, err error) (bool, string) {
+	// Check if there was an execution error
+	if err != nil {
+		return true, fmt.Sprintf("agent execution error: %v", err)
+	}
+
+	// Check exit code
+	if exitCode != 0 {
+		return true, fmt.Sprintf("agent exited with non-zero code: %d", exitCode)
+	}
+
+	// Check if investigation.md exists
+	investigationPath := filepath.Join(workspacePath, "output", "investigation.md")
+	info, err := os.Stat(investigationPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, "investigation.md file not found"
+		}
+		return true, fmt.Sprintf("error checking investigation.md: %v", err)
+	}
+
+	// Check file size
+	if info.Size() <= 100 {
+		return true, fmt.Sprintf("investigation.md too small: %d bytes (expected > 100)", info.Size())
+	}
+
+	// All checks passed
+	return false, ""
 }
 
 func setupLogging(level string) {

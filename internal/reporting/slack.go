@@ -2,6 +2,7 @@ package reporting
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -164,6 +165,139 @@ func (s *SlackNotifier) SendIncidentNotification(summary *IncidentSummary) error
 			{
 				Color:  statusColor,
 				Footer: footer,
+			},
+		},
+	}
+
+	return s.send(msg)
+}
+
+// SendSystemDegradedAlert sends a system-level degradation alert to Slack
+func (s *SlackNotifier) SendSystemDegradedAlert(ctx context.Context, stats FailureStats) error {
+	if s.WebhookURL == "" {
+		return nil // No webhook configured, skip silently
+	}
+
+	// Format the time window
+	timeWindow := "N/A"
+	if stats.Duration > 0 {
+		timeWindow = stats.Duration.Round(time.Second).String()
+	}
+
+	// Format the failure count
+	failureCount := fmt.Sprintf("%d", stats.Count)
+
+	// Get the last 3 failure reasons
+	sampleReasons := stats.RecentReasons
+	if len(sampleReasons) > 3 {
+		sampleReasons = sampleReasons[len(sampleReasons)-3:]
+	}
+
+	// Format sample reasons as a bullet list
+	reasonsText := ""
+	if len(sampleReasons) > 0 {
+		var reasonsList []string
+		for _, reason := range sampleReasons {
+			reasonsList = append(reasonsList, fmt.Sprintf("• %s", reason))
+		}
+		reasonsText = strings.Join(reasonsList, "\n")
+	} else {
+		reasonsText = "No failure details available"
+	}
+
+	// Build the blocks
+	blocks := []SlackBlock{
+		{
+			Type: "header",
+			Text: &SlackText{
+				Type: "plain_text",
+				Text: "AI Agent System Degraded",
+			},
+		},
+		{
+			Type: "section",
+			Fields: []SlackText{
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Failure Count:*\n%s", failureCount)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Time Window:*\n%s", timeWindow)},
+			},
+		},
+		{
+			Type: "section",
+			Text: &SlackText{
+				Type: "mrkdwn",
+				Text: fmt.Sprintf("*Sample Failure Reasons (last 3):*\n%s", reasonsText),
+			},
+		},
+		{
+			Type: "context",
+			Elements: []interface{}{
+				SlackElement{Type: "mrkdwn", Text: fmt.Sprintf("First failure: %s | Last failure: %s",
+					stats.FirstFailureTime.Format("15:04:05"),
+					stats.LastFailureTime.Format("15:04:05"))},
+			},
+		},
+	}
+
+	// Build the message with warning color
+	msg := SlackMessage{
+		Blocks: blocks,
+		Attachments: []SlackAttachment{
+			{
+				Color:  "warning", // Yellow/orange color for warning level
+				Footer: "System degradation threshold reached. AI agent may be experiencing issues.",
+			},
+		},
+	}
+
+	return s.send(msg)
+}
+
+// SendSystemRecoveredAlert sends a system recovery alert to Slack
+func (s *SlackNotifier) SendSystemRecoveredAlert(ctx context.Context, stats FailureStats) error {
+	if s.WebhookURL == "" {
+		return nil // No webhook configured, skip silently
+	}
+
+	// Format the downtime duration
+	downtime := "N/A"
+	if stats.Duration > 0 {
+		downtime = stats.Duration.Round(time.Second).String()
+	}
+
+	// Format the failure count
+	failureCount := fmt.Sprintf("%d", stats.Count)
+
+	// Build the blocks
+	blocks := []SlackBlock{
+		{
+			Type: "header",
+			Text: &SlackText{
+				Type: "plain_text",
+				Text: "AI Agent System Recovered",
+			},
+		},
+		{
+			Type: "section",
+			Fields: []SlackText{
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Total Downtime:*\n%s", downtime)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Total Failures:*\n%s", failureCount)},
+			},
+		},
+		{
+			Type: "context",
+			Elements: []interface{}{
+				SlackElement{Type: "mrkdwn", Text: "System has returned to healthy state. All agents operating normally."},
+			},
+		},
+	}
+
+	// Build the message with success color (green)
+	msg := SlackMessage{
+		Blocks: blocks,
+		Attachments: []SlackAttachment{
+			{
+				Color:  "good", // Green color for success
+				Footer: "System recovery detected. AI agent system is now healthy.",
 			},
 		},
 	}

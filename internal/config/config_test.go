@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -671,4 +672,196 @@ func containsHelper(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestCircuitBreakerConfig tests circuit breaker configuration options
+func TestCircuitBreakerConfig(t *testing.T) {
+	resetViper()
+
+	tests := []struct {
+		name    string
+		config  string
+		wantCfg func(*Config) bool
+	}{
+		{
+			name: "default values",
+			config: `
+mcp_endpoint: "http://localhost:8080/mcp"
+anthropic_api_key: "test-key"
+`,
+			wantCfg: func(cfg *Config) bool {
+				return cfg.NotifyOnAgentFailure == true &&
+					cfg.FailureThresholdForAlert == 3 &&
+					cfg.UploadFailedInvestigations == false
+			},
+		},
+		{
+			name: "custom values",
+			config: `
+mcp_endpoint: "http://localhost:8080/mcp"
+anthropic_api_key: "test-key"
+notify_on_agent_failure: false
+failure_threshold_for_alert: 5
+upload_failed_investigations: true
+`,
+			wantCfg: func(cfg *Config) bool {
+				return cfg.NotifyOnAgentFailure == false &&
+					cfg.FailureThresholdForAlert == 5 &&
+					cfg.UploadFailedInvestigations == true
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetViper()
+
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+			if err := os.WriteFile(configPath, []byte(tt.config), 0644); err != nil {
+				t.Fatalf("failed to write config file: %v", err)
+			}
+
+			cfg, err := LoadWithConfigFile(configPath)
+			if err != nil {
+				t.Fatalf("LoadWithConfigFile() failed: %v", err)
+			}
+
+			if !tt.wantCfg(cfg) {
+				t.Errorf("config values mismatch: NotifyOnAgentFailure=%v, FailureThresholdForAlert=%d, UploadFailedInvestigations=%v",
+					cfg.NotifyOnAgentFailure, cfg.FailureThresholdForAlert, cfg.UploadFailedInvestigations)
+			}
+		})
+	}
+}
+
+// TestCircuitBreakerConfigFromEnv tests circuit breaker configuration from environment variables
+func TestCircuitBreakerConfigFromEnv(t *testing.T) {
+	resetViper()
+
+	// Set env vars
+	os.Setenv("K8S_CLUSTER_MCP_ENDPOINT", "http://localhost:8080/mcp")
+	os.Setenv("NOTIFY_ON_AGENT_FAILURE", "false")
+	os.Setenv("FAILURE_THRESHOLD_FOR_ALERT", "10")
+	os.Setenv("UPLOAD_FAILED_INVESTIGATIONS", "true")
+	defer setTestAPIKey(t)()
+
+	defer func() {
+		os.Unsetenv("K8S_CLUSTER_MCP_ENDPOINT")
+		os.Unsetenv("NOTIFY_ON_AGENT_FAILURE")
+		os.Unsetenv("FAILURE_THRESHOLD_FOR_ALERT")
+		os.Unsetenv("UPLOAD_FAILED_INVESTIGATIONS")
+	}()
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	if cfg.NotifyOnAgentFailure != false {
+		t.Errorf("NotifyOnAgentFailure = %v, want false", cfg.NotifyOnAgentFailure)
+	}
+	if cfg.FailureThresholdForAlert != 10 {
+		t.Errorf("FailureThresholdForAlert = %d, want 10", cfg.FailureThresholdForAlert)
+	}
+	if cfg.UploadFailedInvestigations != true {
+		t.Errorf("UploadFailedInvestigations = %v, want true", cfg.UploadFailedInvestigations)
+	}
+}
+
+// TestValidation_FailureThresholdRange tests failure threshold validation
+func TestValidation_FailureThresholdRange(t *testing.T) {
+	resetViper()
+
+	tests := []struct {
+		name      string
+		threshold int
+		wantErr   bool
+	}{
+		{"valid threshold 1", 1, false},
+		{"valid threshold 3", 3, false},
+		{"valid threshold 10", 10, false},
+		{"invalid threshold 0", 0, true},
+		{"invalid threshold -1", -1, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetViper()
+
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+			configContent := fmt.Sprintf(`
+mcp_endpoint: "http://localhost:8080/mcp"
+failure_threshold_for_alert: %d
+anthropic_api_key: "test-key"
+`, tt.threshold)
+			if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+				t.Fatalf("failed to write config file: %v", err)
+			}
+
+			_, err := LoadWithConfigFile(configPath)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("LoadWithConfigFile() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestCircuitBreakerConfig_IntegrationTest tests that circuit breaker config works with other config options
+func TestCircuitBreakerConfig_IntegrationTest(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := `
+mcp_endpoint: "http://localhost:8080/mcp"
+workspace_root: "/tmp/incidents"
+log_level: "debug"
+agent_timeout: 600
+severity_threshold: "WARNING"
+max_concurrent_agents: 10
+
+# Circuit breaker settings
+notify_on_agent_failure: false
+failure_threshold_for_alert: 5
+upload_failed_investigations: true
+
+# Azure storage
+azure_storage_account: "teststorage"
+azure_storage_key: "testkey"
+azure_storage_container: "incidents"
+
+anthropic_api_key: "test-key"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	// Verify circuit breaker settings
+	if cfg.NotifyOnAgentFailure != false {
+		t.Errorf("NotifyOnAgentFailure = %v, want false", cfg.NotifyOnAgentFailure)
+	}
+	if cfg.FailureThresholdForAlert != 5 {
+		t.Errorf("FailureThresholdForAlert = %d, want 5", cfg.FailureThresholdForAlert)
+	}
+	if cfg.UploadFailedInvestigations != true {
+		t.Errorf("UploadFailedInvestigations = %v, want true", cfg.UploadFailedInvestigations)
+	}
+
+	// Verify other settings still work
+	if cfg.MCPEndpoint != "http://localhost:8080/mcp" {
+		t.Errorf("MCPEndpoint = %q, want %q", cfg.MCPEndpoint, "http://localhost:8080/mcp")
+	}
+	if cfg.MaxConcurrentAgents != 10 {
+		t.Errorf("MaxConcurrentAgents = %d, want 10", cfg.MaxConcurrentAgents)
+	}
+	if cfg.AzureStorageAccount != "teststorage" {
+		t.Errorf("AzureStorageAccount = %q, want %q", cfg.AzureStorageAccount, "teststorage")
+	}
 }
