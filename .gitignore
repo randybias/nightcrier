@@ -27,6 +27,7 @@ scratch/
 
 # Runtime logs
 *.log
+logs/
 
 # Temp files
 unwedge.txt
