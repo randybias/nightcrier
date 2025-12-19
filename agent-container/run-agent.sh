@@ -29,7 +29,7 @@ GOOGLE_API_KEY="${GOOGLE_API_KEY:-}"
 
 # Workspace configuration
 # IMPORTANT: Workspace should be an INCIDENT directory, not source code!
-# event.json and output/ from this directory are mounted into the container.
+# incident.json and output/ from this directory are mounted into the container.
 WORKSPACE_DIR="${WORKSPACE_DIR:-}"  # Required - must be specified
 
 # Output configuration
@@ -85,7 +85,7 @@ OPTIONS:
   -d, --debug                   Enable debug output
 
 Workspace:
-  -w, --workspace DIR           Host incident directory containing event.json
+  -w, --workspace DIR           Host incident directory containing incident.json
 
 Output:
   --output-dir DIR              Directory for output files (default: workspace/output)
@@ -156,10 +156,10 @@ EXAMPLES:
   ./run-agent.sh -a gemini "Check cluster health"
 
   # Claude with specific model and tools
-  ./run-agent.sh -a claude -m opus -t "Read,Grep,Glob,Bash" "Deep analysis of event.json"
+  ./run-agent.sh -a claude -m opus -t "Read,Grep,Glob,Bash" "Deep analysis of incident.json"
 
   # With specific workspace and output directory
-  ./run-agent.sh -w ./incidents/abc123 --output-dir ./reports "Analyze event.json"
+  ./run-agent.sh -w ./incidents/abc123 --output-dir ./reports "Analyze incident.json"
 
   # Read-only kubectl investigation
   ./run-agent.sh -t "Read,Grep,Glob,Bash" \
@@ -349,7 +349,7 @@ fi
 if [[ -z "$WORKSPACE_DIR" ]]; then
     echo "Error: Workspace directory is required (-w flag or WORKSPACE_DIR env)" >&2
     echo "The workspace should be an INCIDENT directory, not source code." >&2
-    echo "Example: ./run-agent.sh -w ./incidents/inc-123 \"Investigate event.json\"" >&2
+    echo "Example: ./run-agent.sh -w ./incidents/inc-123 \"Investigate incident.json\"" >&2
     exit 1
 fi
 
@@ -429,9 +429,9 @@ fi
 # This keeps skills, config files, and incident data all in one place
 AGENT_HOME="/home/agent"
 
-# Mount event.json directly into agent home
-if [[ -f "${WORKSPACE_DIR}/event.json" ]]; then
-    DOCKER_ARGS+=("-v" "${WORKSPACE_DIR}/event.json:${AGENT_HOME}/event.json:ro")
+# Mount incident.json directly into agent home
+if [[ -f "${WORKSPACE_DIR}/incident.json" ]]; then
+    DOCKER_ARGS+=("-v" "${WORKSPACE_DIR}/incident.json:${AGENT_HOME}/incident.json:ro")
 fi
 
 # Mount output directory into agent home (read-write for agent to write results)

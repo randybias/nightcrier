@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -113,6 +115,10 @@ func parseFaultEvent(data any) (*FaultEvent, error) {
 	if err := json.Unmarshal(jsonData, &faultEvent); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal fault event: %w", err)
 	}
+
+	// Generate EventID and set ReceivedAt on receipt
+	faultEvent.EventID = uuid.New().String()
+	faultEvent.ReceivedAt = time.Now()
 
 	return &faultEvent, nil
 }

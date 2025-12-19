@@ -183,8 +183,8 @@ func TestSaveIncident_EmptyArtifacts(t *testing.T) {
 
 	ctx := context.Background()
 	artifacts := &IncidentArtifacts{
-		EventJSON:       []byte{},
-		ResultJSON:      []byte{},
+		IncidentJSON:       []byte{},
+		InvestigationHTML:      []byte{},
 		InvestigationMD: []byte{},
 	}
 

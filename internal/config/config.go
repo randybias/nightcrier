@@ -32,6 +32,7 @@ type Config struct {
 	AgentTimeout          int    `mapstructure:"agent_timeout"` // seconds
 	AgentCLI              string `mapstructure:"agent_cli"`     // claude, codex, goose, gemini
 	AgentImage            string `mapstructure:"agent_image"`   // Docker image for agent container
+	AgentPrompt           string `mapstructure:"agent_prompt"`  // Prompt sent to agent
 
 	// LLM API Keys (optional - can also be set via environment)
 	AnthropicAPIKey string `mapstructure:"anthropic_api_key"`
@@ -83,6 +84,7 @@ func setDefaults() {
 	viper.SetDefault("agent_timeout", 300)
 	viper.SetDefault("agent_cli", "claude")
 	viper.SetDefault("agent_image", "k8s-triage-agent:latest")
+	viper.SetDefault("agent_prompt", "Production incident detected. Incident context is in incident.json. Perform immediate triage and root cause analysis. Write findings to output/investigation.md")
 
 	// Event processing defaults (from design.md)
 	viper.SetDefault("severity_threshold", "ERROR")
@@ -119,6 +121,7 @@ func bindEnvVars() {
 		"agent_timeout":                   "AGENT_TIMEOUT",
 		"agent_cli":                       "AGENT_CLI",
 		"agent_image":                     "AGENT_IMAGE",
+		"agent_prompt":                    "AGENT_PROMPT",
 		"anthropic_api_key":               "ANTHROPIC_API_KEY",
 		"openai_api_key":                  "OPENAI_API_KEY",
 		"gemini_api_key":                  "GEMINI_API_KEY",

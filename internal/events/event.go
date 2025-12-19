@@ -1,12 +1,14 @@
 package events
 
+import "time"
+
 // FaultEvent represents a fault event received from kubernetes-mcp-server
 // Supports BOTH subscription modes:
 // - "faults" mode: uses nested Event struct with InvolvedObject
 // - "resource-faults" mode: uses flat Resource struct with context/faultType/severity
 type FaultEvent struct {
-	// IncidentID is set by the runner when processing begins (not from MCP)
-	IncidentID     string         `json:"incidentId,omitempty"`
+	EventID        string         `json:"eventId,omitempty"`        // UUID generated on receipt
+	ReceivedAt     time.Time      `json:"-"`                        // Time event was received (not serialized)
 	SubscriptionID string         `json:"subscriptionId"`
 	Cluster        string         `json:"cluster"`
 	Event          *EventData     `json:"event,omitempty"`          // Used by "faults" mode (pointer so omitempty works)
@@ -156,4 +158,15 @@ func (f *FaultEvent) GetReason() string {
 // IsResourceFaultsMode returns true if this event came from resource-faults subscription
 func (f *FaultEvent) IsResourceFaultsMode() bool {
 	return f.Resource != nil
+}
+
+// DeduplicationKey returns a unique key for deduplication across both subscription modes
+// Format: "{cluster}/{namespace}/{kind}/{name}/{reason}"
+func (f *FaultEvent) DeduplicationKey() string {
+	cluster := f.Cluster
+	namespace := f.GetNamespace()
+	kind := f.GetResourceKind()
+	name := f.GetResourceName()
+	reason := f.GetReason()
+	return cluster + "/" + namespace + "/" + kind + "/" + name + "/" + reason
 }

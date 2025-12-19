@@ -21,7 +21,7 @@ func NewFilesystemStorage(workspaceRoot string) *FilesystemStorage {
 }
 
 // SaveIncident persists all incident artifacts to the local filesystem.
-// It creates a directory structure: <workspace-root>/<incident-id>/ containing event.json, result.json, and investigation.md
+// It creates a directory structure: <workspace-root>/<incident-id>/ containing incident.json and investigation files
 // For filesystem storage, it returns filesystem paths (not URLs) and a zero ExpiresAt time.
 func (fs *FilesystemStorage) SaveIncident(ctx context.Context, incidentID string, artifacts *IncidentArtifacts) (*SaveResult, error) {
 	if artifacts == nil {
@@ -35,16 +35,10 @@ func (fs *FilesystemStorage) SaveIncident(ctx context.Context, incidentID string
 		return nil, fmt.Errorf("failed to create incident directory: %w", err)
 	}
 
-	// Write event.json
-	eventPath := filepath.Join(incidentDir, "event.json")
-	if err := os.WriteFile(eventPath, artifacts.EventJSON, 0600); err != nil {
-		return nil, fmt.Errorf("failed to write event.json: %w", err)
-	}
-
-	// Write result.json
-	resultPath := filepath.Join(incidentDir, "result.json")
-	if err := os.WriteFile(resultPath, artifacts.ResultJSON, 0600); err != nil {
-		return nil, fmt.Errorf("failed to write result.json: %w", err)
+	// Write incident.json
+	incidentPath := filepath.Join(incidentDir, "incident.json")
+	if err := os.WriteFile(incidentPath, artifacts.IncidentJSON, 0600); err != nil {
+		return nil, fmt.Errorf("failed to write incident.json: %w", err)
 	}
 
 	// Write investigation.md
@@ -63,8 +57,7 @@ func (fs *FilesystemStorage) SaveIncident(ctx context.Context, incidentID string
 	return &SaveResult{
 		ReportURL: investigationHTMLPath,
 		ArtifactURLs: map[string]string{
-			"event.json":          eventPath,
-			"result.json":         resultPath,
+			"incident.json":       incidentPath,
 			"investigation.md":    investigationPath,
 			"investigation.html":  investigationHTMLPath,
 		},

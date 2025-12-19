@@ -72,6 +72,11 @@ agent_cli: "claude"
 # Environment variable: AGENT_IMAGE
 agent_image: "k8s-triage-agent:latest"
 
+# Prompt sent to the agent for triage
+# This can be customized to change how the agent approaches incidents
+# Environment variable: AGENT_PROMPT
+agent_prompt: "Production incident detected. Incident context is in incident.json. Perform immediate triage and root cause analysis. Write findings to output/investigation.md"
+
 # =============================================================================
 # LLM API Keys (Optional)
 # =============================================================================

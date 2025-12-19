@@ -19,11 +19,11 @@ make build
 
 # Create an incident workspace (container is sandboxed to this directory)
 mkdir -p ./incidents/test-incident
-echo '{"alert": "test"}' > ./incidents/test-incident/event.json
+echo '{"incidentId":"test-001","cluster":"test","namespace":"default","resource":"test-pod","faultType":"CrashLoopBackOff","severity":"critical","context":{},"timestamp":"2025-01-01T00:00:00Z"}' > ./incidents/test-incident/incident.json
 
 # Run an investigation with Claude (default)
 export ANTHROPIC_API_KEY="your-key"
-./run-agent.sh -w ./incidents/test-incident "Investigate the alert in event.json"
+./run-agent.sh -w ./incidents/test-incident "Investigate the incident in incident.json"
 
 # Run with Codex
 export OPENAI_API_KEY="your-key"
@@ -39,7 +39,7 @@ export GEMINI_API_KEY="your-key"
 ```
 Host:
   ./incidents/inc-123/          <-- Incident workspace (REQUIRED)
-    event.json                  <-- Input data
+    incident.json               <-- Input data with incident context
     context/                    <-- Additional context files
   ./incidents/inc-123/output/   <-- Agent output
     triage_claude_YYYYMMDD_HHMMSS.log
@@ -111,7 +111,7 @@ The container includes the [k8s-troubleshooter](https://github.com/randybias/k8s
 ### Basic Investigation with Claude
 
 ```bash
-./run-agent.sh -w ./incidents/inc-123 "Analyze the pod failure in event.json and suggest fixes"
+./run-agent.sh -w ./incidents/inc-123 "Analyze the pod failure in incident.json and suggest fixes"
 ```
 
 ### Use Different AI Agent
@@ -136,7 +136,7 @@ The container includes the [k8s-troubleshooter](https://github.com/randybias/k8s
 ### With Custom Output Directory
 
 ```bash
-./run-agent.sh -w ./incidents/inc-123 --output-dir ./reports "Investigate event.json"
+./run-agent.sh -w ./incidents/inc-123 --output-dir ./reports "Investigate incident.json"
 ```
 
 ### Debug Mode
@@ -199,9 +199,9 @@ The event runner calls this script like:
   -m sonnet \
   -w "$INCIDENT_WORKSPACE" \
   -t "Read,Grep,Glob,Bash,Skill" \
-  -s "Investigate the Kubernetes fault. Read event.json for context." \
+  -s "Investigate the Kubernetes incident. Read incident.json for context." \
   --output-dir "$REPORTS_DIR" \
-  "Analyze the fault event and provide a root cause analysis"
+  "Analyze the incident and provide a root cause analysis"
 ```
 
 ## Makefile Targets

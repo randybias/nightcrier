@@ -18,6 +18,7 @@ type ExecutorConfig struct {
 	Model            string
 	Timeout          int    // seconds
 	AgentCLI         string // claude, codex, goose, gemini
+	Prompt           string // Prompt to send to the agent
 }
 
 // Executor runs the agent script in a workspace directory.
@@ -34,6 +35,7 @@ func NewExecutor(scriptPath string) *Executor {
 		AllowedTools: "Read,Write,Grep,Glob,Bash,Skill",
 		Model:        "sonnet",
 		Timeout:      300,
+		Prompt:       "Production incident detected. Incident context is in incident.json. Perform immediate triage and root cause analysis. Write findings to output/investigation.md",
 	})
 }
 
@@ -61,12 +63,8 @@ func NewExecutorWithConfig(config ExecutorConfig) *Executor {
 // Execute runs the agent script with the given incident ID in the workspace directory.
 // It returns the exit code and any error encountered.
 func (e *Executor) Execute(ctx context.Context, workspacePath string, incidentID string) (int, error) {
-	// Build the prompt
-	prompt := "Production incident detected. Fault event details are in event.json. " +
-		"Perform immediate triage and root cause analysis. " +
-		"Write findings to output/investigation.md"
-
-	return e.ExecuteWithPrompt(ctx, workspacePath, incidentID, prompt)
+	// Use the configured prompt
+	return e.ExecuteWithPrompt(ctx, workspacePath, incidentID, e.config.Prompt)
 }
 
 // ExecuteWithPrompt runs the agent with a custom prompt

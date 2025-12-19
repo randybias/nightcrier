@@ -28,14 +28,14 @@ func TestFilesystemStorageSaveIncidentSuccess(t *testing.T) {
 	fs := NewFilesystemStorage(tmpDir)
 
 	incidentID := "test-incident-001"
-	eventJSON := []byte(`{"event":"test"}`)
-	resultJSON := []byte(`{"result":"passed"}`)
+	incidentJSON := []byte(`{"incidentId":"test-001","status":"resolved"}`)
 	investigationMD := []byte(`# Investigation Report\nAll systems healthy.`)
+	investigationHTML := []byte(`<h1>Investigation Report</h1><p>All systems healthy.</p>`)
 
 	artifacts := &IncidentArtifacts{
-		EventJSON:      eventJSON,
-		ResultJSON:     resultJSON,
-		InvestigationMD: investigationMD,
+		IncidentJSON:      incidentJSON,
+		InvestigationMD:   investigationMD,
+		InvestigationHTML: investigationHTML,
 	}
 
 	ctx := context.Background()
@@ -56,22 +56,13 @@ func TestFilesystemStorageSaveIncidentSuccess(t *testing.T) {
 	}
 
 	// Verify files were written correctly
-	eventPath := filepath.Join(incidentDir, "event.json")
-	eventData, err := os.ReadFile(eventPath)
+	incidentPath := filepath.Join(incidentDir, "incident.json")
+	incidentData, err := os.ReadFile(incidentPath)
 	if err != nil {
-		t.Fatalf("failed to read event.json: %v", err)
+		t.Fatalf("failed to read incident.json: %v", err)
 	}
-	if string(eventData) != string(eventJSON) {
-		t.Fatalf("event.json content mismatch: expected %q, got %q", string(eventJSON), string(eventData))
-	}
-
-	resultPath := filepath.Join(incidentDir, "result.json")
-	resultData, err := os.ReadFile(resultPath)
-	if err != nil {
-		t.Fatalf("failed to read result.json: %v", err)
-	}
-	if string(resultData) != string(resultJSON) {
-		t.Fatalf("result.json content mismatch: expected %q, got %q", string(resultJSON), string(resultData))
+	if string(incidentData) != string(incidentJSON) {
+		t.Fatalf("incident.json content mismatch: expected %q, got %q", string(incidentJSON), string(incidentData))
 	}
 
 	investigationPath := filepath.Join(incidentDir, "investigation.md")
@@ -82,6 +73,15 @@ func TestFilesystemStorageSaveIncidentSuccess(t *testing.T) {
 	if string(investigationData) != string(investigationMD) {
 		t.Fatalf("investigation.md content mismatch: expected %q, got %q", string(investigationMD), string(investigationData))
 	}
+
+	investigationHTMLPath := filepath.Join(incidentDir, "investigation.html")
+	investigationHTMLData, err := os.ReadFile(investigationHTMLPath)
+	if err != nil {
+		t.Fatalf("failed to read investigation.html: %v", err)
+	}
+	if string(investigationHTMLData) != string(investigationHTML) {
+		t.Fatalf("investigation.html content mismatch: expected %q, got %q", string(investigationHTML), string(investigationHTMLData))
+	}
 }
 
 // TestFilesystemStorageSaveResultContent verifies the SaveResult contains correct paths and URLs.
@@ -91,8 +91,8 @@ func TestFilesystemStorageSaveResultContent(t *testing.T) {
 
 	incidentID := "test-incident-002"
 	artifacts := &IncidentArtifacts{
-		EventJSON:      []byte(`{}`),
-		ResultJSON:     []byte(`{}`),
+		IncidentJSON:      []byte(`{}`),
+		InvestigationHTML:     []byte(`{}`),
 		InvestigationMD: []byte(`# Report`),
 	}
 
@@ -104,18 +104,18 @@ func TestFilesystemStorageSaveResultContent(t *testing.T) {
 	}
 
 	expectedIncidentDir := filepath.Join(tmpDir, incidentID)
-	expectedInvestigationPath := filepath.Join(expectedIncidentDir, "investigation.md")
+	expectedReportPath := filepath.Join(expectedIncidentDir, "investigation.html")
 
-	// Verify ReportURL points to investigation.md
-	if result.ReportURL != expectedInvestigationPath {
-		t.Fatalf("ReportURL mismatch: expected %q, got %q", expectedInvestigationPath, result.ReportURL)
+	// Verify ReportURL points to investigation.html
+	if result.ReportURL != expectedReportPath {
+		t.Fatalf("ReportURL mismatch: expected %q, got %q", expectedReportPath, result.ReportURL)
 	}
 
 	// Verify ArtifactURLs map contains all three artifacts
 	expectedArtifacts := map[string]string{
-		"event.json":       filepath.Join(expectedIncidentDir, "event.json"),
-		"result.json":      filepath.Join(expectedIncidentDir, "result.json"),
-		"investigation.md": expectedInvestigationPath,
+		"incident.json":       filepath.Join(expectedIncidentDir, "incident.json"),
+		"investigation.html":  filepath.Join(expectedIncidentDir, "investigation.html"),
+		"investigation.md":    filepath.Join(expectedIncidentDir, "investigation.md"),
 	}
 
 	if len(result.ArtifactURLs) != len(expectedArtifacts) {
@@ -161,8 +161,8 @@ func TestFilesystemStorageSaveIncidentMultipleIncidents(t *testing.T) {
 
 	for _, incidentID := range incidents {
 		artifacts := &IncidentArtifacts{
-			EventJSON:      []byte(`{"incident":"` + incidentID + `"}`),
-			ResultJSON:     []byte(`{"status":"ok"}`),
+			IncidentJSON:      []byte(`{"incident":"` + incidentID + `"}`),
+			InvestigationHTML:     []byte(`{"status":"ok"}`),
 			InvestigationMD: []byte(`# Report for ` + incidentID),
 		}
 
@@ -188,8 +188,8 @@ func TestFilesystemStorageSaveIncidentFilePermissions(t *testing.T) {
 
 	incidentID := "test-incident-perms"
 	artifacts := &IncidentArtifacts{
-		EventJSON:      []byte(`{}`),
-		ResultJSON:     []byte(`{}`),
+		IncidentJSON:      []byte(`{}`),
+		InvestigationHTML:     []byte(`{}`),
 		InvestigationMD: []byte(`# Report`),
 	}
 
@@ -201,8 +201,8 @@ func TestFilesystemStorageSaveIncidentFilePermissions(t *testing.T) {
 	}
 
 	incidentDir := filepath.Join(tmpDir, incidentID)
-	eventPath := filepath.Join(incidentDir, "event.json")
-	resultPath := filepath.Join(incidentDir, "result.json")
+	eventPath := filepath.Join(incidentDir, "incident.json")
+	resultPath := filepath.Join(incidentDir, "investigation.html")
 	investigationPath := filepath.Join(incidentDir, "investigation.md")
 
 	// Check file permissions are 0600 (owner read/write only)
@@ -244,8 +244,8 @@ func TestFilesystemStorageSaveIncidentBinaryContent(t *testing.T) {
 	binaryContent := []byte{0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD}
 
 	artifacts := &IncidentArtifacts{
-		EventJSON:      binaryContent,
-		ResultJSON:     binaryContent,
+		IncidentJSON:      binaryContent,
+		InvestigationHTML:     binaryContent,
 		InvestigationMD: binaryContent,
 	}
 
@@ -257,7 +257,7 @@ func TestFilesystemStorageSaveIncidentBinaryContent(t *testing.T) {
 	}
 
 	// Verify binary content was written correctly
-	eventPath := result.ArtifactURLs["event.json"]
+	eventPath := result.ArtifactURLs["incident.json"]
 	readContent, err := os.ReadFile(eventPath)
 	if err != nil {
 		t.Fatalf("failed to read event.json: %v", err)
@@ -289,8 +289,8 @@ func TestFilesystemStorageSaveIncidentExistingDirectory(t *testing.T) {
 
 	// Save incident should succeed even if directory already exists
 	artifacts := &IncidentArtifacts{
-		EventJSON:      []byte(`{}`),
-		ResultJSON:     []byte(`{}`),
+		IncidentJSON:      []byte(`{}`),
+		InvestigationHTML:     []byte(`{}`),
 		InvestigationMD: []byte(`# Report`),
 	}
 
@@ -302,7 +302,7 @@ func TestFilesystemStorageSaveIncidentExistingDirectory(t *testing.T) {
 	}
 
 	// Verify files were written
-	eventPath := filepath.Join(incidentDir, "event.json")
+	eventPath := filepath.Join(incidentDir, "incident.json")
 	if _, err := os.Stat(eventPath); os.IsNotExist(err) {
 		t.Fatalf("event.json not created")
 	}
@@ -322,8 +322,8 @@ func TestFilesystemStorageSaveIncidentLargeContent(t *testing.T) {
 	}
 
 	artifacts := &IncidentArtifacts{
-		EventJSON:      largeContent,
-		ResultJSON:     largeContent,
+		IncidentJSON:      largeContent,
+		InvestigationHTML:     largeContent,
 		InvestigationMD: largeContent,
 	}
 
@@ -335,7 +335,7 @@ func TestFilesystemStorageSaveIncidentLargeContent(t *testing.T) {
 	}
 
 	// Verify large content was written correctly
-	eventPath := result.ArtifactURLs["event.json"]
+	eventPath := result.ArtifactURLs["incident.json"]
 	readContent, err := os.ReadFile(eventPath)
 	if err != nil {
 		t.Fatalf("failed to read large event.json: %v", err)
@@ -354,8 +354,8 @@ func TestFilesystemStorageSaveIncidentContextCancellation(t *testing.T) {
 
 	incidentID := "test-incident-cancel"
 	artifacts := &IncidentArtifacts{
-		EventJSON:      []byte(`{}`),
-		ResultJSON:     []byte(`{}`),
+		IncidentJSON:      []byte(`{}`),
+		InvestigationHTML:     []byte(`{}`),
 		InvestigationMD: []byte(`# Report`),
 	}
 
@@ -379,8 +379,8 @@ func TestFilesystemStorageSaveIncidentEmptyArtifacts(t *testing.T) {
 
 	incidentID := "test-incident-empty"
 	artifacts := &IncidentArtifacts{
-		EventJSON:      []byte{},
-		ResultJSON:     []byte{},
+		IncidentJSON:      []byte{},
+		InvestigationHTML:     []byte{},
 		InvestigationMD: []byte{},
 	}
 
@@ -412,8 +412,8 @@ func TestFilesystemStorageSaveIncidentZeroExpiresAt(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		incidentID := filepath.Join("test-incident", "zero-expires", "incident-"+string(rune('0'+i)))
 		artifacts := &IncidentArtifacts{
-			EventJSON:      []byte(`{}`),
-			ResultJSON:     []byte(`{}`),
+			IncidentJSON:      []byte(`{}`),
+			InvestigationHTML:     []byte(`{}`),
 			InvestigationMD: []byte(`# Report`),
 		}
 

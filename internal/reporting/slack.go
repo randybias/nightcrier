@@ -90,10 +90,11 @@ func (s *SlackNotifier) SendIncidentNotification(summary *IncidentSummary) error
 		return nil // No webhook configured, skip silently
 	}
 
-	// Determine status emoji and color
+	// Determine status emoji and color based on incident status
 	statusEmoji := ":white_check_mark:"
 	statusColor := "good"
-	if summary.Status != "success" {
+	// Check for resolved status (successful completion)
+	if summary.Status != "resolved" {
 		statusEmoji = ":x:"
 		statusColor = "danger"
 	}

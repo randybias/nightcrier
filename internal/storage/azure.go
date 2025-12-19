@@ -296,12 +296,11 @@ func generateIndexHTML(incidentID string, artifactURLs map[string]string, expire
 	}{
 		"investigation.html": {"Investigation Report", "Formatted HTML report with root cause analysis", "primary"},
 		"investigation.md":   {"Investigation Report (Raw)", "Markdown source for programmatic access", "secondary"},
-		"event.json":         {"Event Data", "Original Kubernetes event that triggered the investigation", "success"},
-		"result.json":        {"Result Metadata", "Investigation results, timestamps, and presigned URLs", "success"},
+		"incident.json":      {"Incident Data", "Complete incident context including event, status, and result metadata", "success"},
 	}
 
 	// Sort files for consistent display
-	orderedFiles := []string{"investigation.html", "investigation.md", "event.json", "result.json"}
+	orderedFiles := []string{"investigation.html", "investigation.md", "incident.json"}
 	for _, filename := range orderedFiles {
 		if url, exists := artifactURLs[filename]; exists {
 			desc := fileDescriptions[filename]
@@ -373,8 +372,7 @@ func (a *AzureStorage) SaveIncident(ctx context.Context, incidentID string, arti
 
 	// Define artifact mappings
 	artifactFiles := map[string][]byte{
-		"event.json":           artifacts.EventJSON,
-		"result.json":          artifacts.ResultJSON,
+		"incident.json":        artifacts.IncidentJSON,
 		"investigation.md":     artifacts.InvestigationMD,
 		"investigation.html":   artifacts.InvestigationHTML,
 	}

@@ -16,10 +16,8 @@ type Storage interface {
 
 // IncidentArtifacts contains all files generated during incident investigation.
 type IncidentArtifacts struct {
-	// EventJSON is the serialized event that triggered the investigation
-	EventJSON []byte
-	// ResultJSON is the JSON result from the agent investigation
-	ResultJSON []byte
+	// IncidentJSON is the serialized incident (combines event context and result)
+	IncidentJSON []byte
 	// InvestigationMD is the markdown investigation report
 	InvestigationMD []byte
 	// InvestigationHTML is the HTML-rendered version of the investigation report
@@ -31,7 +29,7 @@ type SaveResult struct {
 	// ReportURL is the authenticated URL to the investigation report (investigation.md)
 	ReportURL string
 	// ArtifactURLs maps artifact names to their authenticated URLs
-	// Common keys: "event.json", "result.json", "investigation.md"
+	// Common keys: "incident.json", "investigation.md"
 	ArtifactURLs map[string]string
 	// ExpiresAt is when the URLs expire (relevant for cloud storage with SAS tokens)
 	ExpiresAt time.Time

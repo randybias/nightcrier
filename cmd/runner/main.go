@@ -14,6 +14,7 @@ import (
 	"github.com/rbias/kubernetes-mcp-alerts-event-runner/internal/agent"
 	"github.com/rbias/kubernetes-mcp-alerts-event-runner/internal/config"
 	"github.com/rbias/kubernetes-mcp-alerts-event-runner/internal/events"
+	"github.com/rbias/kubernetes-mcp-alerts-event-runner/internal/incident"
 	"github.com/rbias/kubernetes-mcp-alerts-event-runner/internal/reporting"
 	"github.com/rbias/kubernetes-mcp-alerts-event-runner/internal/storage"
 	"github.com/spf13/cobra"
@@ -97,6 +98,7 @@ func run(cmd *cobra.Command, args []string) error {
 		Model:            cfg.AgentModel,
 		Timeout:          cfg.AgentTimeout,
 		AgentCLI:         cfg.AgentCLI,
+		Prompt:           cfg.AgentPrompt,
 	})
 
 	// Create Slack notifier (optional - only if webhook URL configured)
@@ -155,14 +157,13 @@ func run(cmd *cobra.Command, args []string) error {
 }
 
 func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *agent.WorkspaceManager, executor *agent.Executor, slackNotifier *reporting.SlackNotifier, storageBackend storage.Storage) error {
+	// Create incident from event
 	incidentID := uuid.New().String()
-	startedAt := time.Now()
-
-	// Set the incident ID on the event so it flows through to event.json and storage
-	event.IncidentID = incidentID
+	inc := incident.NewFromEvent(incidentID, event)
 
 	slog.Info("processing fault event",
 		"incident_id", incidentID,
+		"event_id", event.EventID,
 		"cluster", event.Cluster,
 		"namespace", event.GetNamespace(),
 		"resource", fmt.Sprintf("%s/%s", event.GetResourceKind(), event.GetResourceName()),
@@ -176,32 +177,29 @@ func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *a
 	}
 	slog.Info("created workspace", "path", workspacePath)
 
-	// Write event context (now includes incidentId)
-	if err := agent.WriteEventContext(workspacePath, event); err != nil {
-		return fmt.Errorf("failed to write event context: %w", err)
+	// Write incident.json with investigating status
+	incidentPath := filepath.Join(workspacePath, "incident.json")
+	if err := inc.WriteToFile(incidentPath); err != nil {
+		return fmt.Errorf("failed to write incident context: %w", err)
 	}
+
+	// Mark agent start time
+	startedAt := time.Now()
+	inc.StartedAt = &startedAt
 
 	// Execute agent
-	exitCode, err := executor.Execute(ctx, workspacePath, incidentID)
-	completedAt := time.Now()
+	exitCode, execErr := executor.Execute(ctx, workspacePath, incidentID)
 
-	// Determine status
-	status := "success"
-	if err != nil {
-		status = "error"
-		slog.Error("agent execution error", "error", err)
-	} else if exitCode != 0 {
-		status = "failed"
+	// Update incident with completion info
+	inc.MarkCompleted(exitCode, execErr)
+
+	// Write updated incident.json with completion info
+	if err := inc.WriteToFile(incidentPath); err != nil {
+		return fmt.Errorf("failed to update incident: %w", err)
 	}
 
-	// Write result
-	result := &reporting.Result{
-		IncidentID:  incidentID,
-		ExitCode:    exitCode,
-		StartedAt:   startedAt,
-		CompletedAt: completedAt,
-		Status:      status,
-	}
+	// Calculate duration
+	duration := inc.CompletedAt.Sub(startedAt)
 
 	// Save incident artifacts to storage
 	var reportURL string
@@ -216,11 +214,6 @@ func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *a
 			if err != nil {
 				slog.Error("failed to save incident to storage", "error", err)
 			} else {
-				// Populate result with presigned URLs
-				result.PresignedURLs = saveResult.ArtifactURLs
-				if !saveResult.ExpiresAt.IsZero() {
-					result.PresignedURLsExpireAt = &saveResult.ExpiresAt
-				}
 				reportURL = saveResult.ReportURL
 				slog.Info("incident artifacts saved to storage",
 					"incident_id", incidentID,
@@ -230,15 +223,9 @@ func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *a
 		}
 	}
 
-	if err := reporting.WriteResult(workspacePath, result); err != nil {
-		return fmt.Errorf("failed to write result: %w", err)
-	}
-
-	duration := completedAt.Sub(startedAt)
-
 	slog.Info("event processed",
 		"incident_id", incidentID,
-		"status", status,
+		"status", inc.Status,
 		"exit_code", exitCode,
 		"duration", duration)
 
@@ -253,11 +240,11 @@ func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *a
 
 		summary := &reporting.IncidentSummary{
 			IncidentID: incidentID,
-			Cluster:    event.Cluster,
-			Namespace:  event.GetNamespace(),
-			Resource:   fmt.Sprintf("%s/%s", event.GetResourceKind(), event.GetResourceName()),
-			Reason:     event.GetReason(),
-			Status:     status,
+			Cluster:    inc.Cluster,
+			Namespace:  inc.Namespace,
+			Resource:   fmt.Sprintf("%s/%s", inc.Resource.Kind, inc.Resource.Name),
+			Reason:     inc.FaultType,
+			Status:     inc.Status,
 			RootCause:  rootCause,
 			Confidence: confidence,
 			Duration:   duration,
@@ -302,19 +289,11 @@ func setupLogging(level string) {
 // readIncidentArtifacts reads the generated artifacts from the workspace for storage upload.
 // It also converts the markdown report to HTML for better browser rendering.
 func readIncidentArtifacts(workspacePath, incidentID string) (*storage.IncidentArtifacts, error) {
-	// Read event.json
-	eventPath := filepath.Join(workspacePath, "event.json")
-	eventJSON, err := os.ReadFile(eventPath)
+	// Read incident.json
+	incidentPath := filepath.Join(workspacePath, "incident.json")
+	incidentJSON, err := os.ReadFile(incidentPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read event.json: %w", err)
-	}
-
-	// Read result.json (will be updated after this function returns)
-	resultPath := filepath.Join(workspacePath, "result.json")
-	resultJSON, err := os.ReadFile(resultPath)
-	if err != nil {
-		// Result may not exist yet, use empty JSON
-		resultJSON = []byte("{}")
+		return nil, fmt.Errorf("failed to read incident.json: %w", err)
 	}
 
 	// Read investigation.md
@@ -328,8 +307,7 @@ func readIncidentArtifacts(workspacePath, incidentID string) (*storage.IncidentA
 	investigationHTML := reporting.ConvertMarkdownToHTML(investigationMD, incidentID)
 
 	return &storage.IncidentArtifacts{
-		EventJSON:         eventJSON,
-		ResultJSON:        resultJSON,
+		IncidentJSON:      incidentJSON,
 		InvestigationMD:   investigationMD,
 		InvestigationHTML: investigationHTML,
 	}, nil

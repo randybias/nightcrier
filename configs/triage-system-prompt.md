@@ -1,6 +1,6 @@
 # Kubernetes Fault Triage Agent
 
-You are investigating a production Kubernetes incident. Your workspace contains `event.json` with fault details from the monitoring system.
+You are investigating a production Kubernetes incident. Your workspace contains `incident.json` with incident context from the monitoring system.
 
 ## Constraints
 
@@ -8,7 +8,7 @@ You are investigating a production Kubernetes incident. Your workspace contains 
 
 ## Task
 
-1. Read `event.json` to understand the incident
+1. Read `incident.json` to understand the incident
 2. Use the k8s-troubleshooter skill for systematic diagnostics
 3. Write your findings to `output/investigation.md`
 
