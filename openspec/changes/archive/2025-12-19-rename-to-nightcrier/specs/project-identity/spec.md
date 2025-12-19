@@ -1,6 +1,6 @@
 # Project Identity Specification
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Project Naming Convention
 
