@@ -1,6 +1,6 @@
 # Roadmap
 
-This document tracks future enhancements and features planned for the Kubernetes MCP Alerts Event Runner.
+This document tracks future enhancements and features planned for Nightcrier.
 
 ## Future Enhancements
 

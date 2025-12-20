@@ -2,7 +2,7 @@
 
 ## Context
 
-The Kubernetes MCP Alerts Event Runner needs production-grade resilience and observability to operate reliably in production environments. This design addresses three critical operational concerns:
+Nightcrier needs production-grade resilience and observability to operate reliably in production environments. This design addresses three critical operational concerns:
 
 1. **Resource Management**: Prevent runaway agent processes and memory exhaustion from stale queued events
 2. **Connection Resilience**: Handle SSE connection failures gracefully with proper reconnection logic

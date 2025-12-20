@@ -168,5 +168,5 @@ ENTRYPOINT ["/bin/bash", "-c"]
 CMD ["echo 'Use run-agent.sh to invoke this container'"]
 
 # Labels
-LABEL maintainer="kubernetes-mcp-alerts-event-runner"
+LABEL maintainer="nightcrier"
 LABEL description="Triage agent container with kubectl, helm, and multiple AI CLIs (Claude, Codex, Goose, Gemini) for Kubernetes incident investigation"

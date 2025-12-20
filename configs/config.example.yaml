@@ -9,7 +9,7 @@
 # IMPORTANT: All fields marked as "Required" MUST be provided through one of these sources.
 # There are no default values for required fields.
 #
-# The runner searches for config.yaml in:
+# Nightcrier searches for config.yaml in:
 # - Current directory (.)
 # - ./configs/
 # - /etc/nightcrier/

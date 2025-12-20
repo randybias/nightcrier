@@ -31,3 +31,4 @@ logs/
 
 # Temp files
 unwedge.txt
+bin/

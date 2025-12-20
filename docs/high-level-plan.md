@@ -1,10 +1,8 @@
-# Kubernetes MCP Alerts Event Runner – High-Level Plan
+# Nightcrier – High-Level Plan
 
 ## Vision and Value Proposition
 
-The Kubernetes MCP Alerts and Event Runner, is an MCP client that listens for events on a number of MCP servers simultaneously.  It waits for events to occur in Kubernetes clusters and then takes action based on those events, usually in the form of spawning an AI agent in a sandbox, which evaluates and takes action on the event the runner received.
-
-NOTE: The name of this codebase and tool WILL CHANGE SOON.  Plan ahead to minimize downstream changes.
+Nightcrier is an MCP client that listens for events on a number of MCP servers simultaneously.  It waits for events to occur in Kubernetes clusters and then takes action based on those events, usually in the form of spawning an AI agent in a sandbox, which evaluates and takes action on the event the runner received.
 
 ## Context and Positioning
 - Prototype / proof-of-concept: first milestone is to prove the value of AI-led triage on real Kubernetes faults; future expansion is optional.

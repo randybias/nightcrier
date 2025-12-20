@@ -14,7 +14,7 @@ All advanced resilience and observability features: reconnection with backoff, q
 
 ## Why
 
-The Kubernetes MCP Alerts Event Runner currently lacks production-grade resilience mechanisms and operational visibility. Without these capabilities, the system is vulnerable to:
+Nightcrier currently lacks production-grade resilience mechanisms and operational visibility. Without these capabilities, the system is vulnerable to:
 
 - **Resource Exhaustion**: Long-running or hung agent processes can consume unbounded CPU and memory
 - **Queue Memory Leaks**: Stale events accumulate indefinitely in per-cluster queues
