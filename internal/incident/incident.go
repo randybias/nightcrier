@@ -54,8 +54,7 @@ type ResourceInfo struct {
 	Namespace  string `json:"namespace,omitempty"`
 }
 
-// NewFromEvent creates a new Incident from a FaultEvent, flattening event data
-// Handles both "faults" and "resource-faults" subscription modes
+// NewFromEvent creates a new Incident from a FaultEvent
 func NewFromEvent(incidentID string, event *events.FaultEvent) *Incident {
 	now := time.Now()
 
@@ -79,9 +78,7 @@ func NewFromEvent(incidentID string, event *events.FaultEvent) *Incident {
 }
 
 // extractResourceInfo extracts ResourceInfo from a FaultEvent
-// Handles both "faults" and "resource-faults" modes
 func extractResourceInfo(event *events.FaultEvent) *ResourceInfo {
-	// Prefer resource-faults mode (flat structure)
 	if event.Resource != nil {
 		return &ResourceInfo{
 			APIVersion: event.Resource.APIVersion,
@@ -91,18 +88,7 @@ func extractResourceInfo(event *events.FaultEvent) *ResourceInfo {
 		}
 	}
 
-	// Fall back to faults mode (nested structure)
-	if event.Event != nil && event.Event.InvolvedObject != nil {
-		obj := event.Event.InvolvedObject
-		return &ResourceInfo{
-			APIVersion: obj.APIVersion,
-			Kind:       obj.Kind,
-			Name:       obj.Name,
-			Namespace:  obj.Namespace,
-		}
-	}
-
-	// Minimal resource info if neither mode has valid data
+	// Fallback if resource is nil
 	return &ResourceInfo{
 		Kind: "Unknown",
 		Name: "Unknown",

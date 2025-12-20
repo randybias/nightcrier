@@ -31,32 +31,23 @@ The system SHALL connect to kubernetes-mcp-server via MCP StreamableHTTP protoco
 #### Scenario: Successful MCP connection
 - **GIVEN** a valid `K8S_CLUSTER_MCP_ENDPOINT` URL
 - **WHEN** the runner starts
-- **THEN** it connects via StreamableHTTP, initializes a session, and subscribes with `events_subscribe(mode=<configured-mode>)`
+- **THEN** it connects via StreamableHTTP, initializes a session, and subscribes with `events_subscribe(mode="resource-faults")`
 
-#### Scenario: Event reception (faults mode)
-- **GIVEN** an active MCP subscription with mode="faults"
-- **WHEN** a fault occurs in the cluster
-- **THEN** the runner receives a `logging/message` notification with `logger="kubernetes/faults"` containing FaultEvent data with nested event structure
-
-#### Scenario: Event reception (resource-faults mode)
-- **GIVEN** an active MCP subscription with mode="resource-faults"
+#### Scenario: Event reception
+- **GIVEN** an active MCP subscription
 - **WHEN** a fault occurs in the cluster
 - **THEN** the runner receives a `logging/message` notification with `logger="kubernetes/resource-faults"` containing FaultEvent data with flat structure (resource, context, faultType, severity, timestamp)
 
-#### Scenario: Event parsing (faults mode)
-- **GIVEN** a fault notification from faults mode
+#### Scenario: Event parsing
+- **GIVEN** a fault notification
 - **WHEN** the event is received
-- **THEN** the JSON is parsed into a FaultEvent struct with nested event object (subscriptionId, cluster, event.namespace, event.reason, event.message, event.involvedObject)
+- **THEN** the JSON is parsed into a FaultEvent struct with flat structure (faultId, subscriptionId, cluster, resource.kind, resource.name, resource.namespace, context, faultType, severity, timestamp)
+- **AND** a unique faultId (UUID) is generated for tracing
 
-#### Scenario: Event parsing (resource-faults mode)
-- **GIVEN** a fault notification from resource-faults mode
-- **WHEN** the event is received
-- **THEN** the JSON is parsed into a FaultEvent struct with flat structure (subscriptionId, cluster, resource.kind, resource.name, resource.namespace, context, faultType, severity, timestamp)
-
-#### Scenario: Helper method compatibility
-- **GIVEN** a parsed FaultEvent from either subscription mode
-- **WHEN** helper methods (GetResourceName, GetResourceKind, GetNamespace, GetSeverity) are called
-- **THEN** the correct values are returned regardless of which mode was used
+#### Scenario: Helper method access
+- **GIVEN** a parsed FaultEvent
+- **WHEN** helper methods (GetResourceName, GetResourceKind, GetNamespace, GetSeverity, GetContext, GetTimestamp, GetReason) are called
+- **THEN** the correct values are returned from the flat structure
 
 ### Requirement: Incident Workspace Creation
 
@@ -159,7 +150,7 @@ The system SHALL track incident status through its lifecycle.
 | `ANTHROPIC_API_KEY` | Conditional | - | Claude API key (required if AGENT_CLI=claude) |
 | `OPENAI_API_KEY` | Conditional | - | OpenAI API key (required if AGENT_CLI=codex) |
 | `WORKSPACE_ROOT` | No | `./incidents` | Incident workspace directory |
-| `SUBSCRIBE_MODE` | No | `faults` | Subscription mode: `faults` or `resource-faults` |
+| `SUBSCRIBE_MODE` | No | `resource-faults` | Subscription mode (always `resource-faults`) |
 | `AGENT_SCRIPT_PATH` | No | `./agent-container/run-agent.sh` | Path to agent script |
 | `AGENT_SYSTEM_PROMPT_FILE` | No | `./configs/triage-system-prompt.md` | System prompt for agent |
 | `AGENT_ALLOWED_TOOLS` | No | `Read,Write,Grep,Glob,Bash,Skill` | Tools available to agent |
@@ -176,7 +167,7 @@ See `cloud-storage` spec for Azure Blob Storage configuration.
 - `cmd/runner/main.go` - CLI entrypoint with Cobra
 - `internal/config/config.go` - Configuration loading
 - `internal/events/client.go` - MCP client with StreamableHTTP
-- `internal/events/event.go` - FaultEvent struct (dual-mode support)
+- `internal/events/event.go` - FaultEvent struct
 - `internal/agent/workspace.go` - Workspace creation
 - `internal/agent/context.go` - Event context writing
 - `internal/agent/executor.go` - Agent execution

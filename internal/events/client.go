@@ -118,8 +118,8 @@ func parseFaultEvent(data any) (*FaultEvent, error) {
 		return nil, fmt.Errorf("failed to unmarshal fault event: %w", err)
 	}
 
-	// Generate EventID and set ReceivedAt on receipt
-	faultEvent.EventID = uuid.New().String()
+	// Generate FaultID and set ReceivedAt on receipt
+	faultEvent.FaultID = uuid.New().String()
 	faultEvent.ReceivedAt = time.Now()
 
 	return &faultEvent, nil

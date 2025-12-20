@@ -2,6 +2,43 @@
 
 An AI-powered incident triage system that automatically investigates Kubernetes faults using Claude AI agents through the Model Context Protocol (MCP).
 
+## Purpose and Architecture Philosophy
+
+**Nightcrier is a specialized incident management system, NOT a general Kubernetes event processor.**
+
+### What Nightcrier Does
+
+Nightcrier subscribes to **high-quality fault events only** from 100s to 1000s of kubernetes-mcp-servers and treats each fault as a serious incident requiring investigation:
+
+1. **One fault subscription per MCP server** - Each kubernetes-mcp-server connection maintains a single fault event subscription
+2. **Treats faults as incidents** - Every fault event is a serious incident requiring AI-powered investigation
+3. **Launches AI triage agents** - Spawns containerized AI agents for full root cause analysis
+4. **Reports to operations teams** - Delivers investigation reports via Slack with storage links
+5. **End-to-end incident tracking** - Tracks each incident from detection through investigation to reporting
+
+### What Nightcrier is NOT
+
+- **NOT a general event subscriber** - Would be overwhelmed by raw Kubernetes events at scale
+- **NOT responsible for event filtering** - Signal-to-noise filtering happens upstream in kubernetes-mcp-server
+- **NOT a high-volume event processing system** - Designed for pre-filtered, high-signal faults only
+
+### Design Decisions
+
+**Event Types:**
+- **General Events**: Raw Kubernetes events (handled by kubernetes-mcp-server)
+- **Fault Events**: Pre-filtered, high-signal events indicating problems (from kubernetes-mcp-server to nightcrier)
+- **Incidents**: Fault events under active AI investigation (nightcrier's domain)
+
+**Filtering Philosophy:**
+- Signal-to-noise filtering happens in kubernetes-mcp-server, NOT in nightcrier
+- kubernetes-mcp-server uses sophisticated logic to identify true faults worth investigating
+- This design prevents nightcrier from being overwhelmed at scale
+- Ensures AI agents only investigate genuine incidents, not noise
+
+**Future Scale-Out (not implemented):**
+- If needed: High-performance queue with worker pools for pre-qualification
+- Current architecture keeps filtering in MCP servers to maintain simplicity
+
 ## Overview
 
 This system listens for fault events from a Kubernetes MCP server and spawns AI agents to autonomously investigate and triage incidents. It provides automated root cause analysis with configurable storage backends (filesystem or Azure Blob Storage) and Slack notifications.
