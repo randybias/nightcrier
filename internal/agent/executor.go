@@ -22,6 +22,7 @@ type ExecutorConfig struct {
 	AgentCLI         string // claude, codex, goose, gemini
 	AgentImage       string // Docker image for agent container
 	Prompt           string // Prompt to send to the agent
+	Debug            bool   // Enable debug output in run-agent.sh
 }
 
 // Executor runs the agent script in a workspace directory.
@@ -112,6 +113,11 @@ func (e *Executor) ExecuteWithPrompt(ctx context.Context, workspacePath string, 
 		fmt.Sprintf("OUTPUT_FORMAT=%s", "text"),
 		fmt.Sprintf("CONTAINER_NETWORK=%s", "host"),
 	)
+
+	// Enable debug output in run-agent.sh when running in debug mode
+	if e.config.Debug {
+		cmd.Env = append(cmd.Env, "DEBUG=true")
+	}
 
 	// Add optional config values if set
 	if e.config.SystemPromptFile != "" {
