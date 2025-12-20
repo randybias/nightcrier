@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -12,8 +14,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rbias/nightcrier/internal/agent"
+	"github.com/rbias/nightcrier/internal/cluster"
 	"github.com/rbias/nightcrier/internal/config"
 	"github.com/rbias/nightcrier/internal/events"
+	"github.com/rbias/nightcrier/internal/health"
 	"github.com/rbias/nightcrier/internal/incident"
 	"github.com/rbias/nightcrier/internal/reporting"
 	"github.com/rbias/nightcrier/internal/storage"
@@ -33,6 +37,7 @@ var (
 	scriptPath    string
 	logLevel      string
 	agentTimeout  int
+	healthPort    int
 )
 
 func main() {
@@ -62,6 +67,9 @@ func init() {
 	rootCmd.Flags().StringVar(&scriptPath, "script-path", "", "Path to agent script")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "", "Log level: debug, info, warn, error (overrides config file and LOG_LEVEL env var)")
 	rootCmd.Flags().IntVar(&agentTimeout, "agent-timeout", 0, "Agent execution timeout in seconds (overrides config file and AGENT_TIMEOUT env var)")
+
+	// Health monitoring flags
+	rootCmd.Flags().IntVar(&healthPort, "health-port", 8080, "Port for health monitoring HTTP endpoint (0 to disable)")
 
 	// Bind flags to viper for precedence handling
 	config.BindFlags(rootCmd.Flags())
@@ -113,20 +121,51 @@ func run(cmd *cobra.Command, args []string) error {
 		cfg.AgentSystemPromptFile = ""
 	}
 
-	// Create components
-	mcpClient := events.NewClient(cfg.MCPEndpoint, cfg.SubscribeMode, tuning)
+	// Create ConnectionManager for multi-cluster support
+	mgrConfig := &cluster.ManagerConfig{
+		Clusters:                   cfg.Clusters,
+		SubscribeMode:              cfg.SubscribeMode,
+		GlobalQueueSize:            cfg.GlobalQueueSize,
+		QueueOverflowPolicy:        cfg.QueueOverflowPolicy,
+		SSEReconnectInitialBackoff: cfg.SSEReconnectInitialBackoff,
+	}
+	connectionMgr, err := cluster.NewConnectionManager(mgrConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create connection manager: %w", err)
+	}
+
+	// Create and inject MCP clients for each cluster
+	for _, clusterCfg := range cfg.Clusters {
+		mcpClient := events.NewClient(clusterCfg.MCP.Endpoint, cfg.SubscribeMode, tuning)
+		if err := connectionMgr.SetClusterClient(clusterCfg.Name, mcpClient); err != nil {
+			return fmt.Errorf("failed to set client for cluster %s: %w", clusterCfg.Name, err)
+		}
+		slog.Info("mcp client created for cluster",
+			"cluster", clusterCfg.Name,
+			"endpoint", clusterCfg.MCP.Endpoint)
+	}
+
 	workspaceMgr := agent.NewWorkspaceManager(cfg.WorkspaceRoot)
-	executor := agent.NewExecutorWithConfig(agent.ExecutorConfig{
-		ScriptPath:       agentScript,
-		SystemPromptFile: cfg.AgentSystemPromptFile,
-		AllowedTools:     cfg.AgentAllowedTools,
-		Model:            cfg.AgentModel,
-		Timeout:          cfg.AgentTimeout,
-		AgentCLI:         cfg.AgentCLI,
-		AgentImage:       cfg.AgentImage,
-		Prompt:           cfg.AgentPrompt,
-		Debug:            cfg.LogLevel == "debug",
-	}, tuning)
+
+	// Create executors per cluster (each cluster has its own kubeconfig)
+	executors := make(map[string]*agent.Executor)
+	for _, clusterCfg := range cfg.Clusters {
+		executors[clusterCfg.Name] = agent.NewExecutorWithConfig(agent.ExecutorConfig{
+			ScriptPath:       agentScript,
+			SystemPromptFile: cfg.AgentSystemPromptFile,
+			AllowedTools:     cfg.AgentAllowedTools,
+			Model:            cfg.AgentModel,
+			Timeout:          cfg.AgentTimeout,
+			AgentCLI:         cfg.AgentCLI,
+			AgentImage:       cfg.AgentImage,
+			Prompt:           cfg.AgentPrompt,
+			Debug:            cfg.LogLevel == "debug",
+			Kubeconfig:       clusterCfg.Triage.Kubeconfig,
+		}, tuning)
+		slog.Info("executor created for cluster",
+			"cluster", clusterCfg.Name,
+			"kubeconfig", clusterCfg.Triage.Kubeconfig)
+	}
 
 	// Create Slack notifier (optional - only if webhook URL configured)
 	var slackNotifier *reporting.SlackNotifier
@@ -163,43 +202,138 @@ func run(cmd *cobra.Command, args []string) error {
 		cancel()
 	}()
 
-	// Subscribe to fault events via MCP
-	eventChan, err := mcpClient.Subscribe(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to MCP events: %w", err)
+	// Phase 3: Initialize connection manager (validates cluster permissions)
+	// This runs kubectl auth can-i checks for all clusters with triage enabled
+	slog.Info("initializing connection manager - validating permissions")
+	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer initCancel()
+	if err := connectionMgr.Initialize(initCtx); err != nil {
+		return fmt.Errorf("failed to initialize connection manager: %w", err)
 	}
 
-	// Process events
+	// Phase 4: Start health monitoring server if enabled
+	if healthPort > 0 {
+		healthServer := health.NewServer(connectionMgr, healthPort)
+		go func() {
+			slog.Info("starting health monitoring server",
+				"port", healthPort,
+				"endpoint", fmt.Sprintf("http://localhost:%d/health/clusters", healthPort))
+			if err := healthServer.Start(); err != nil && err != http.ErrServerClosed {
+				slog.Error("health server failed", "error", err)
+			}
+		}()
+	} else {
+		slog.Info("health monitoring server disabled", "reason", "health-port=0")
+	}
+
+	// Start the ConnectionManager and get event channel
+	eventChan := connectionMgr.Start(ctx)
+	defer connectionMgr.Stop()
+
+	slog.Info("connection manager started, processing events",
+		"cluster_count", len(cfg.Clusters))
+
+	// Event processing loop
 	for {
 		select {
 		case <-ctx.Done():
 			slog.Info("shutting down...")
 			return nil
+
 		case event, ok := <-eventChan:
 			if !ok {
 				slog.Info("event channel closed")
 				return nil
 			}
-			if err := processEvent(ctx, event, workspaceMgr, executor, slackNotifier, storageBackend, circuitBreaker, cfg, tuning); err != nil {
-				slog.Error("failed to process event", "error", err)
+
+			// Type assert event from interface{} to map[string]interface{}
+			clusterEvent, ok := event.(map[string]interface{})
+			if !ok {
+				slog.Error("invalid event type received", "type", fmt.Sprintf("%T", event))
+				continue
+			}
+
+			// Extract cluster context
+			clusterName, ok := clusterEvent["ClusterName"].(string)
+			if !ok {
+				slog.Error("missing or invalid ClusterName in event")
+				continue
+			}
+
+			kubeconfig, ok := clusterEvent["Kubeconfig"].(string)
+			if !ok {
+				slog.Error("missing or invalid Kubeconfig in event", "cluster", clusterName)
+				continue
+			}
+
+			// Phase 3: Extract cluster permissions (may be nil if triage disabled)
+			permissions, _ := clusterEvent["Permissions"].(*cluster.ClusterPermissions)
+
+			// Extract the FaultEvent
+			faultEvent, ok := clusterEvent["Event"].(*events.FaultEvent)
+			if !ok {
+				slog.Error("missing or invalid Event in cluster event",
+					"cluster", clusterName,
+					"type", fmt.Sprintf("%T", clusterEvent["Event"]))
+				continue
+			}
+
+			// Get the executor for this cluster
+			executor, ok := executors[clusterName]
+			if !ok {
+				slog.Error("no executor found for cluster", "cluster", clusterName)
+				continue
+			}
+
+			// Process the event with cluster context (including permissions)
+			if err := processEvent(ctx, faultEvent, clusterName, kubeconfig, permissions, workspaceMgr, executor, slackNotifier, storageBackend, circuitBreaker, cfg, tuning); err != nil {
+				slog.Error("failed to process event",
+					"cluster", clusterName,
+					"fault_id", faultEvent.FaultID,
+					"error", err)
 			}
 		}
 	}
+
+	return nil
 }
 
-func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *agent.WorkspaceManager, executor *agent.Executor, slackNotifier *reporting.SlackNotifier, storageBackend storage.Storage, circuitBreaker *reporting.CircuitBreaker, cfg *config.Config, tuning *config.TuningConfig) error {
+func processEvent(ctx context.Context, event *events.FaultEvent, clusterName string, kubeconfig string, permissions *cluster.ClusterPermissions, workspaceMgr *agent.WorkspaceManager, executor *agent.Executor, slackNotifier *reporting.SlackNotifier, storageBackend storage.Storage, circuitBreaker *reporting.CircuitBreaker, cfg *config.Config, tuning *config.TuningConfig) error {
 	// Create incident from event
 	incidentID := uuid.New().String()
 	inc := incident.NewFromEvent(incidentID, event)
 
+	// Override cluster name with the one from ClusterEvent (Phase 2: multi-cluster support)
+	inc.Cluster = clusterName
+
 	slog.Info("processing fault event",
 		"incident_id", incidentID,
 		"fault_id", event.FaultID,
-		"cluster", event.Cluster,
+		"cluster", clusterName,
 		"namespace", event.GetNamespace(),
 		"resource", fmt.Sprintf("%s/%s", event.GetResourceKind(), event.GetResourceName()),
 		"reason", event.GetReason(),
 		"severity", event.GetSeverity())
+
+	// Phase 3: Check if triage is enabled for this cluster
+	// If permissions are nil, triage is disabled (triage.enabled=false in config)
+	if permissions == nil {
+		slog.Info("triage disabled for cluster - skipping agent execution",
+			"incident_id", incidentID,
+			"cluster", clusterName,
+			"reason", "triage.enabled=false or no kubeconfig")
+		// Event is logged but no investigation is performed
+		return nil
+	}
+
+	// Phase 3: Check if cluster has minimum permissions for triage
+	if !permissions.MinimumPermissionsMet() {
+		slog.Warn("cluster has insufficient permissions for triage - proceeding anyway",
+			"incident_id", incidentID,
+			"cluster", clusterName,
+			"warnings", permissions.Warnings)
+		// We log a warning but still attempt triage - agent will see limited permissions
+	}
 
 	// Create workspace
 	workspacePath, err := workspaceMgr.Create(incidentID)
@@ -212,6 +346,30 @@ func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *a
 	incidentPath := filepath.Join(workspacePath, "incident.json")
 	if err := inc.WriteToFile(incidentPath); err != nil {
 		return fmt.Errorf("failed to write incident context: %w", err)
+	}
+
+	// Phase 3: Write incident_cluster_permissions.json if permissions are available
+	// This informs the agent about what cluster access it has
+	if permissions != nil {
+		permsPath := filepath.Join(workspacePath, "incident_cluster_permissions.json")
+		permsFile, err := os.Create(permsPath)
+		if err != nil {
+			return fmt.Errorf("failed to create permissions file: %w", err)
+		}
+		defer permsFile.Close()
+
+		encoder := json.NewEncoder(permsFile)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(permissions); err != nil {
+			return fmt.Errorf("failed to write permissions file: %w", err)
+		}
+		slog.Info("wrote cluster permissions to workspace",
+			"path", permsPath,
+			"cluster", clusterName,
+			"minimum_met", permissions.MinimumPermissionsMet())
+	} else {
+		slog.Info("no cluster permissions available (triage may be disabled)",
+			"cluster", clusterName)
 	}
 
 	// Mark agent start time
@@ -501,7 +659,7 @@ func printStartupBanner(cfg *config.Config, configFile string) {
 	fmt.Println("╠═══════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║  Config File:    %-45s ║\n", truncateString(configSource, 45))
 	fmt.Println("╠═══════════════════════════════════════════════════════════════╣")
-	fmt.Printf("║  MCP Endpoint:   %-45s ║\n", truncateString(cfg.MCPEndpoint, 45))
+	fmt.Printf("║  Clusters:       %-45s ║\n", fmt.Sprintf("%d configured", len(cfg.Clusters)))
 	fmt.Printf("║  Subscribe Mode: %-45s ║\n", cfg.SubscribeMode)
 	fmt.Println("╠═══════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║  Agent CLI:      %-45s ║\n", cfg.AgentCLI)

@@ -7,13 +7,15 @@ import (
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+
+	"github.com/rbias/nightcrier/internal/cluster"
 )
 
 // Config holds the application configuration.
 type Config struct {
-	// MCP Connection
-	MCPEndpoint   string `mapstructure:"mcp_endpoint"`
-	SubscribeMode string `mapstructure:"subscribe_mode"` // events, faults
+	// Cluster Configuration
+	Clusters      []cluster.ClusterConfig `mapstructure:"clusters"`
+	SubscribeMode string                  `mapstructure:"subscribe_mode"` // events, faults
 
 	// Workspace
 	WorkspaceRoot string `mapstructure:"workspace_root"`
@@ -72,11 +74,10 @@ type Config struct {
 
 
 // bindEnvVars binds environment variables to viper keys.
-// Environment variables use uppercase with underscores (e.g., K8S_CLUSTER_MCP_ENDPOINT).
+// Environment variables use uppercase with underscores (e.g., WORKSPACE_ROOT).
 func bindEnvVars() {
 	// Map config keys to environment variable names
 	envBindings := map[string]string{
-		"mcp_endpoint":                    "K8S_CLUSTER_MCP_ENDPOINT",
 		"subscribe_mode":                  "SUBSCRIBE_MODE",
 		"workspace_root":                  "WORKSPACE_ROOT",
 		"log_level":                       "LOG_LEVEL",
@@ -124,7 +125,6 @@ func bindEnvVars() {
 func BindFlags(flags *pflag.FlagSet) {
 	// Bind flags that match config keys
 	flagBindings := map[string]string{
-		"mcp-endpoint":                  "mcp_endpoint",
 		"workspace-root":                "workspace_root",
 		"log-level":                     "log_level",
 		"config":                        "config_file",
@@ -200,9 +200,27 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("required field %q is missing (environment variable: %s). Please set it via environment variable, config file, or command-line flag. See configs/config.example.yaml for details", fieldName, envVar)
 	}
 
-	// Required: MCP Connection
-	if c.MCPEndpoint == "" {
-		return missingFieldError("mcp_endpoint", "K8S_CLUSTER_MCP_ENDPOINT")
+	// Required: Clusters
+	if len(c.Clusters) == 0 {
+		return fmt.Errorf("at least one cluster must be configured in the 'clusters' array")
+	}
+
+	// Validate cluster name uniqueness and individual cluster configs
+	clusterNames := make(map[string]bool)
+	for i, cluster := range c.Clusters {
+		if cluster.Name == "" {
+			return fmt.Errorf("cluster[%d]: name is required", i)
+		}
+
+		if clusterNames[cluster.Name] {
+			return fmt.Errorf("duplicate cluster name: %s", cluster.Name)
+		}
+		clusterNames[cluster.Name] = true
+
+		// Validate individual cluster config
+		if err := cluster.Validate(); err != nil {
+			return fmt.Errorf("cluster[%d] (%s): %w", i, cluster.Name, err)
+		}
 	}
 
 	if c.SubscribeMode == "" {

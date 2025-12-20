@@ -486,6 +486,11 @@ if [[ -f "${WORKSPACE_DIR}/incident.json" ]]; then
     DOCKER_ARGS+=("-v" "${WORKSPACE_DIR}/incident.json:${AGENT_HOME}/incident.json:ro")
 fi
 
+# Mount incident_cluster_permissions.json (Phase 3: multi-cluster support)
+if [[ -f "${WORKSPACE_DIR}/incident_cluster_permissions.json" ]]; then
+    DOCKER_ARGS+=("-v" "${WORKSPACE_DIR}/incident_cluster_permissions.json:${AGENT_HOME}/incident_cluster_permissions.json:ro")
+fi
+
 # Mount output directory into agent home (read-write for agent to write results)
 mkdir -p "${OUTPUT_DIR}"
 DOCKER_ARGS+=("-v" "${OUTPUT_DIR}:${AGENT_HOME}/output")

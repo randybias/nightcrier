@@ -16,11 +16,28 @@
 # Or specify explicitly with: nightcrier --config /path/to/config.yaml
 
 # =============================================================================
-# MCP Connection (Required)
+# Cluster Configuration (Required)
 # =============================================================================
-# REQUIRED: The MCP server endpoint URL for kubernetes-mcp-server
-# Environment variable: K8S_CLUSTER_MCP_ENDPOINT
-mcp_endpoint: "http://kubernetes-mcp-server:8080/mcp"
+# REQUIRED: Array of clusters to monitor. Each cluster has its own MCP server
+# endpoint and optional triage configuration.
+clusters:
+  - name: prod-us-east-1
+    environment: production
+
+    # MCP server connection settings
+    mcp:
+      endpoint: "http://kubernetes-mcp-server:8080/mcp"
+      # API key placeholder for future MCP server authentication
+      api_key: "THIS_IS_A_PLACEHOLDER_TO_REMIND_US_TO_MAKE_AUTH_WORK_ON_THE_MCP_SERVER"
+
+    # Triage agent configuration
+    triage:
+      enabled: true
+      kubeconfig: "./kubeconfigs/prod-us-east-1-readonly.yaml"
+      # Allow agent to read secrets/configmaps for Helm debugging
+      # Default: false (disabled for security - secrets may contain credentials)
+      # When enabled, agent can run helm_release_debug.sh and access Helm release data
+      allow_secrets_access: false
 
 # REQUIRED: Subscription mode for events_subscribe tool: "events" or "faults"
 # - "faults": Only receive fault/warning events (recommended)

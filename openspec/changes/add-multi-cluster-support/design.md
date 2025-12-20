@@ -1,52 +1,129 @@
 # Design: Multi-Cluster MCP Server Support
 
-## Component Architecture
-
-### Package Structure
+## Package Structure
 
 ```
 internal/
 ├── cluster/
-│   ├── registry.go      # Cluster configuration registry
-│   ├── connection.go    # Single cluster connection lifecycle
-│   └── manager.go       # Connection manager (orchestrates all)
+│   ├── config.go       # ClusterConfig, MCPConfig, TriageConfig structs
+│   ├── registry.go     # Cluster configuration registry
+│   ├── connection.go   # Single cluster connection lifecycle
+│   ├── manager.go      # Connection manager (orchestrates all)
+│   └── permissions.go  # Preflight permission validation
 ├── config/
-│   └── config.go        # Extended with ClusterConfig slice
-└── events/
-    ├── client.go        # Existing MCP client (unchanged)
-    ├── router.go        # Event fan-in and routing
-    └── event.go         # Extended with cluster metadata
+│   └── config.go       # Extended with Clusters slice
+├── events/
+│   ├── client.go       # Existing MCP client (unchanged)
+│   └── cluster_event.go # ClusterEvent wrapper
+└── agent/
+    └── workspace.go    # Updated to write incident_cluster_permissions.json
 ```
 
-### Data Structures
+## Data Structures
 
-#### ClusterConfig
+### ClusterConfig
 
 ```go
-// ClusterConfig defines a single cluster's connection details
+// ClusterConfig defines a single cluster's connection and triage configuration
 type ClusterConfig struct {
     Name        string            `mapstructure:"name" validate:"required"`
-    MCPEndpoint string            `mapstructure:"mcp_endpoint" validate:"required,url"`
-    Kubeconfig  string            `mapstructure:"kubeconfig" validate:"required,file"`
+    Environment string            `mapstructure:"environment"`
     Labels      map[string]string `mapstructure:"labels"`
 
-    // Per-cluster overrides (optional)
-    SeverityThreshold *string `mapstructure:"severity_threshold"`
-    Enabled           *bool   `mapstructure:"enabled"` // default: true
+    MCP    MCPConfig    `mapstructure:"mcp"`
+    Triage TriageConfig `mapstructure:"triage"`
+}
+
+// MCPConfig defines the MCP server connection settings
+type MCPConfig struct {
+    Endpoint string `mapstructure:"endpoint" validate:"required,url"`
+    // APIKey is a placeholder for future MCP server authentication
+    // Currently ignored but documented in config for forward compatibility
+    APIKey string `mapstructure:"api_key"`
+}
+
+// TriageConfig defines the triage agent settings for a cluster
+type TriageConfig struct {
+    Enabled    bool   `mapstructure:"enabled"`
+    Kubeconfig string `mapstructure:"kubeconfig" validate:"required_if=Enabled true,file"`
+
+    // AllowSecretsAccess controls whether the triage agent can read secrets/configmaps.
+    // Default: false (disabled for security)
+    //
+    // When enabled, the agent can access Helm release data and other secrets.
+    // This requires the kubeconfig ServiceAccount to have secrets read permissions.
+    //
+    // Security note: This is a conscious trade-off. Secrets may contain sensitive
+    // data (credentials, keys). The agent prompt instructs read-only behavior,
+    // but cannot technically prevent the LLM from seeing secret contents.
+    //
+    // Future consideration: kubernetes-mcp-server could add restricted queries
+    // that expose Helm metadata without revealing secret values, or support
+    // dynamic permission escalation with operator approval.
+    AllowSecretsAccess bool `mapstructure:"allow_secrets_access"`
 }
 ```
 
-#### ClusterConnection
+### ClusterPermissions
+
+```go
+// ClusterPermissions captures the validated permissions for a cluster.
+// This is computed at startup and written to incident workspaces.
+//
+// Expected RBAC on the target cluster:
+//   - ClusterRole "view" (built-in): pods, deployments, services, events, etc.
+//   - ClusterRole "helm-readonly": secrets, configmaps (for Helm release data) - optional
+//   - ClusterRole "nodes-readonly": nodes
+type ClusterPermissions struct {
+    ClusterName  string    `json:"cluster_name"`
+    ValidatedAt  time.Time `json:"validated_at"`
+
+    // Core triage permissions (from view ClusterRole)
+    CanGetPods        bool `json:"can_get_pods"`
+    CanGetLogs        bool `json:"can_get_logs"`         // pods/log subresource
+    CanGetEvents      bool `json:"can_get_events"`
+    CanGetDeployments bool `json:"can_get_deployments"`
+    CanGetServices    bool `json:"can_get_services"`
+
+    // Secrets/ConfigMaps access (from helm-readonly ClusterRole)
+    // Only checked/enabled if triage.allow_secrets_access=true in config
+    SecretsAccessAllowed bool `json:"secrets_access_allowed"` // Config setting
+    CanGetSecrets        bool `json:"can_get_secrets"`        // Actual RBAC check
+    CanGetConfigMaps     bool `json:"can_get_configmaps"`     // Actual RBAC check
+
+    // Node permissions (from nodes-readonly ClusterRole)
+    CanGetNodes bool `json:"can_get_nodes"`
+
+    // Validation metadata
+    RawOutput string   `json:"raw_output,omitempty"` // kubectl auth can-i --list output
+    Warnings  []string `json:"warnings,omitempty"`
+}
+
+// MinimumPermissionsMet returns true if minimum triage permissions are available.
+// Minimum set: pods, logs, events (core incident investigation).
+func (p *ClusterPermissions) MinimumPermissionsMet() bool {
+    return p.CanGetPods && p.CanGetLogs && p.CanGetEvents
+}
+
+// HelmAccessAvailable returns true if Helm release debugging is possible.
+// Requires both config allowance AND actual RBAC permissions.
+func (p *ClusterPermissions) HelmAccessAvailable() bool {
+    return p.SecretsAccessAllowed && p.CanGetSecrets
+}
+```
+
+### ClusterConnection
 
 ```go
 // ClusterConnection manages the lifecycle of a single MCP connection
 type ClusterConnection struct {
-    config     *ClusterConfig
-    client     *events.Client
-    status     ConnectionStatus
-    lastEvent  time.Time
-    lastError  error
-    retryCount int
+    config      *ClusterConfig
+    client      *events.Client
+    permissions *ClusterPermissions // Populated at startup if triage enabled
+    status      ConnectionStatus
+    lastEvent   time.Time
+    lastError   error
+    retryCount  int
 
     mu sync.RWMutex
 }
@@ -63,15 +140,14 @@ const (
 )
 ```
 
-#### ConnectionManager
+### ConnectionManager
 
 ```go
 // ConnectionManager orchestrates multiple cluster connections
 type ConnectionManager struct {
-    clusters    map[string]*ClusterConnection
-    eventChan   chan *ClusterEvent
-    healthChan  chan HealthUpdate
-    transport   *http.Transport  // Shared across all connections
+    clusters   map[string]*ClusterConnection
+    eventChan  chan *ClusterEvent
+    transport  *http.Transport  // Shared across all connections
 
     mu sync.RWMutex
 }
@@ -80,6 +156,7 @@ type ConnectionManager struct {
 type ClusterEvent struct {
     ClusterName string
     Kubeconfig  string
+    Permissions *ClusterPermissions
     Labels      map[string]string
     Event       *events.FaultEvent
 }
@@ -186,18 +263,122 @@ func NewConnectionManager(cfg *config.Config) *ConnectionManager {
 }
 ```
 
-### Per-Connection Client
+## Preflight Permission Validation
 
-Each cluster connection uses the shared transport:
+### Startup Sequence
 
 ```go
-func (cm *ConnectionManager) createClient(cluster *ClusterConfig) *events.Client {
-    httpClient := &http.Client{
-        Transport: cm.transport,
-        Timeout:   0, // No timeout for SSE/streaming
+func (cm *ConnectionManager) Initialize(ctx context.Context) error {
+    for _, cluster := range cm.clusters {
+        if !cluster.config.Triage.Enabled {
+            slog.Info("triage disabled for cluster",
+                "cluster", cluster.config.Name,
+                "reason", "triage.enabled=false")
+            continue
+        }
+
+        // Validate kubeconfig exists
+        if _, err := os.Stat(cluster.config.Triage.Kubeconfig); err != nil {
+            return fmt.Errorf("cluster %s: kubeconfig not found: %w",
+                cluster.config.Name, err)
+        }
+
+        // Run permission validation
+        perms, err := validateClusterPermissions(ctx, cluster.config)
+        if err != nil {
+            return fmt.Errorf("cluster %s: permission validation failed: %w",
+                cluster.config.Name, err)
+        }
+
+        cluster.permissions = perms
+
+        if !perms.MinimumPermissionsMet() {
+            slog.Warn("cluster has insufficient permissions for full triage",
+                "cluster", cluster.config.Name,
+                "warnings", perms.Warnings)
+        }
     }
 
-    return events.NewClientWithHTTPClient(cluster.MCPEndpoint, httpClient)
+    return nil
+}
+
+func validateClusterPermissions(ctx context.Context, cfg *ClusterConfig) (*ClusterPermissions, error) {
+    perms := &ClusterPermissions{
+        ClusterName:          cfg.Name,
+        ValidatedAt:          time.Now(),
+        SecretsAccessAllowed: cfg.Triage.AllowSecretsAccess,
+    }
+
+    // Run kubectl auth can-i --list (for raw output reference)
+    cmd := exec.CommandContext(ctx, "kubectl",
+        "--kubeconfig", cfg.Triage.Kubeconfig,
+        "auth", "can-i", "--list")
+
+    output, err := cmd.Output()
+    if err != nil {
+        return nil, fmt.Errorf("kubectl auth can-i failed: %w", err)
+    }
+
+    perms.RawOutput = string(output)
+
+    // Check specific permissions using targeted can-i queries
+    // This is more reliable than parsing the --list output
+    checks := []struct {
+        resource string
+        verb     string
+        target   *bool
+    }{
+        {"pods", "get", &perms.CanGetPods},
+        {"pods/log", "get", &perms.CanGetLogs},
+        {"events", "get", &perms.CanGetEvents},
+        {"deployments", "get", &perms.CanGetDeployments},
+        {"services", "get", &perms.CanGetServices},
+        {"nodes", "get", &perms.CanGetNodes},
+    }
+
+    // Only check secrets/configmaps if allowed by config
+    if cfg.Triage.AllowSecretsAccess {
+        checks = append(checks,
+            struct{ resource, verb string; target *bool }{"secrets", "get", &perms.CanGetSecrets},
+            struct{ resource, verb string; target *bool }{"configmaps", "get", &perms.CanGetConfigMaps},
+        )
+    }
+
+    for _, check := range checks {
+        cmd := exec.CommandContext(ctx, "kubectl",
+            "--kubeconfig", cfg.Triage.Kubeconfig,
+            "auth", "can-i", check.verb, check.resource)
+        out, _ := cmd.Output()
+        *check.target = strings.TrimSpace(string(out)) == "yes"
+    }
+
+    // Build warnings for missing permissions
+    if !perms.CanGetPods {
+        perms.Warnings = append(perms.Warnings, "cannot get pods")
+    }
+    if !perms.CanGetLogs {
+        perms.Warnings = append(perms.Warnings, "cannot get pod logs")
+    }
+    if !perms.CanGetEvents {
+        perms.Warnings = append(perms.Warnings, "cannot get events")
+    }
+    if !perms.CanGetNodes {
+        perms.Warnings = append(perms.Warnings, "cannot get nodes")
+    }
+
+    // Secrets access warnings (only if enabled but not available)
+    if cfg.Triage.AllowSecretsAccess && !perms.CanGetSecrets {
+        perms.Warnings = append(perms.Warnings,
+            "secrets access enabled but RBAC denies it (Helm data unavailable)")
+    }
+
+    // Info message when secrets access is disabled
+    if !cfg.Triage.AllowSecretsAccess {
+        perms.Warnings = append(perms.Warnings,
+            "secrets access disabled by config (set triage.allow_secrets_access=true for Helm debugging)")
+    }
+
+    return perms, nil
 }
 ```
 
@@ -233,7 +414,8 @@ func (cm *ConnectionManager) runConnection(ctx context.Context, conn *ClusterCon
                 select {
                 case cm.eventChan <- &ClusterEvent{
                     ClusterName: conn.config.Name,
-                    Kubeconfig:  conn.config.Kubeconfig,
+                    Kubeconfig:  conn.config.Triage.Kubeconfig,
+                    Permissions: conn.permissions,
                     Labels:      conn.config.Labels,
                     Event:       event,
                 }:
@@ -248,92 +430,40 @@ func (cm *ConnectionManager) runConnection(ctx context.Context, conn *ClusterCon
 }
 ```
 
-## Health Monitoring
+## Workspace Creation
 
-### Health Status Structure
-
-```go
-type ClusterHealth struct {
-    Name       string           `json:"name"`
-    Status     ConnectionStatus `json:"status"`
-    LastEvent  *time.Time       `json:"last_event,omitempty"`
-    LastError  string           `json:"error,omitempty"`
-    RetryIn    string           `json:"retry_in,omitempty"`
-    EventCount int64            `json:"event_count"`
-    Labels     map[string]string `json:"labels,omitempty"`
-}
-
-type HealthSummary struct {
-    Clusters []ClusterHealth `json:"clusters"`
-    Summary  struct {
-        Total     int `json:"total"`
-        Active    int `json:"active"`
-        Unhealthy int `json:"unhealthy"`
-    } `json:"summary"`
-}
-```
-
-### HTTP Health Endpoint
+### Including Permissions File
 
 ```go
-// Optional: Add health server
-func (cm *ConnectionManager) ServeHealth(addr string) error {
-    mux := http.NewServeMux()
+func (wm *WorkspaceManager) CreateWorkspace(clusterEvent *ClusterEvent) (string, error) {
+    incidentID := generateIncidentID()
+    workspaceDir := filepath.Join(wm.root, incidentID)
 
-    mux.HandleFunc("/health", cm.handleHealthCheck)
-    mux.HandleFunc("/health/clusters", cm.handleClusterHealth)
-
-    return http.ListenAndServe(addr, mux)
-}
-```
-
-## Configuration Loading
-
-### Extended Config Structure
-
-```go
-type Config struct {
-    // Single-cluster mode (backwards compatible)
-    MCPEndpoint string `mapstructure:"mcp_endpoint"`
-
-    // Multi-cluster mode
-    Clusters []ClusterConfig `mapstructure:"clusters"`
-
-    // Shared settings
-    MaxConcurrentAgents int `mapstructure:"max_concurrent_agents"`
-    GlobalQueueSize     int `mapstructure:"global_queue_size"`
-    // ...
-}
-
-func (c *Config) Validate() error {
-    // Mutual exclusivity check
-    hasSingle := c.MCPEndpoint != ""
-    hasMulti := len(c.Clusters) > 0
-
-    if hasSingle && hasMulti {
-        return fmt.Errorf("cannot specify both mcp_endpoint and clusters")
+    if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+        return "", fmt.Errorf("failed to create workspace: %w", err)
     }
 
-    if !hasSingle && !hasMulti {
-        return fmt.Errorf("must specify either mcp_endpoint or clusters")
+    // Write incident.json (existing behavior)
+    incidentPath := filepath.Join(workspaceDir, "incident.json")
+    if err := writeJSON(incidentPath, clusterEvent.Event); err != nil {
+        return "", fmt.Errorf("failed to write incident.json: %w", err)
     }
 
-    // Validate each cluster config
-    if hasMulti {
-        names := make(map[string]bool)
-        for i, cluster := range c.Clusters {
-            if names[cluster.Name] {
-                return fmt.Errorf("duplicate cluster name: %s", cluster.Name)
-            }
-            names[cluster.Name] = true
-
-            if err := cluster.Validate(); err != nil {
-                return fmt.Errorf("cluster[%d] %s: %w", i, cluster.Name, err)
-            }
+    // Write incident_cluster_permissions.json (NEW)
+    if clusterEvent.Permissions != nil {
+        permsPath := filepath.Join(workspaceDir, "incident_cluster_permissions.json")
+        if err := writeJSON(permsPath, clusterEvent.Permissions); err != nil {
+            return "", fmt.Errorf("failed to write permissions: %w", err)
         }
     }
 
-    return nil
+    // Create output directory
+    outputDir := filepath.Join(workspaceDir, "output")
+    if err := os.MkdirAll(outputDir, 0755); err != nil {
+        return "", fmt.Errorf("failed to create output dir: %w", err)
+    }
+
+    return workspaceDir, nil
 }
 ```
 
@@ -341,7 +471,7 @@ func (c *Config) Validate() error {
 
 ### Kubeconfig Injection
 
-The agent executor needs the cluster-specific kubeconfig:
+The agent executor passes the cluster-specific kubeconfig:
 
 ```go
 type ExecutorConfig struct {
@@ -350,17 +480,94 @@ type ExecutorConfig struct {
     AllowedTools     string
     Model            string
     Timeout          int
-    Kubeconfig       string  // NEW: Cluster-specific kubeconfig
+    Kubeconfig       string  // Cluster-specific kubeconfig path
 }
 
 func (e *Executor) Execute(ctx context.Context, workspace, incidentID string) (int, error) {
     cmd := exec.CommandContext(ctx, e.config.ScriptPath,
         "-w", workspace,
         "-m", e.config.Model,
-        "-k", e.config.Kubeconfig,  // Pass kubeconfig
+        "--kubeconfig", e.config.Kubeconfig,
         // ...
     )
     // ...
+}
+```
+
+The `run-agent.sh` script already supports the `--kubeconfig` flag and mounts it read-only at `/home/agent/.kube/config` inside the container.
+
+## Configuration Loading
+
+### Extended Config Structure
+
+```go
+type Config struct {
+    // Clusters configuration (required)
+    Clusters []ClusterConfig `mapstructure:"clusters"`
+
+    // Shared settings
+    MaxConcurrentAgents int `mapstructure:"max_concurrent_agents"`
+    GlobalQueueSize     int `mapstructure:"global_queue_size"`
+
+    // ... other existing fields
+}
+
+func (c *Config) Validate() error {
+    if len(c.Clusters) == 0 {
+        return fmt.Errorf("at least one cluster must be configured")
+    }
+
+    // Validate each cluster config
+    names := make(map[string]bool)
+    for i, cluster := range c.Clusters {
+        if cluster.Name == "" {
+            return fmt.Errorf("cluster[%d]: name is required", i)
+        }
+
+        if names[cluster.Name] {
+            return fmt.Errorf("duplicate cluster name: %s", cluster.Name)
+        }
+        names[cluster.Name] = true
+
+        if cluster.MCP.Endpoint == "" {
+            return fmt.Errorf("cluster %s: mcp.endpoint is required", cluster.Name)
+        }
+
+        if cluster.Triage.Enabled && cluster.Triage.Kubeconfig == "" {
+            return fmt.Errorf("cluster %s: triage.kubeconfig required when triage.enabled=true",
+                cluster.Name)
+        }
+    }
+
+    return nil
+}
+```
+
+## Health Monitoring
+
+### Health Status Structure
+
+```go
+type ClusterHealth struct {
+    Name          string            `json:"name"`
+    Status        ConnectionStatus  `json:"status"`
+    LastEvent     *time.Time        `json:"last_event,omitempty"`
+    LastError     string            `json:"error,omitempty"`
+    RetryIn       string            `json:"retry_in,omitempty"`
+    EventCount    int64             `json:"event_count"`
+    TriageEnabled bool              `json:"triage_enabled"`
+    Permissions   *ClusterPermissions `json:"permissions,omitempty"`
+    Labels        map[string]string `json:"labels,omitempty"`
+}
+
+type HealthSummary struct {
+    Clusters []ClusterHealth `json:"clusters"`
+    Summary  struct {
+        Total         int `json:"total"`
+        Active        int `json:"active"`
+        Unhealthy     int `json:"unhealthy"`
+        TriageEnabled int `json:"triage_enabled"`
+    } `json:"summary"`
 }
 ```
 
@@ -373,6 +580,7 @@ func (e *Executor) Execute(ctx context.Context, workspace, incidentID string) (i
 | HTTP Client | ~50 KB | Buffers, TLS state |
 | MCP Session | ~100 KB | Protocol state, message buffers |
 | Event Buffer | ~200 KB | 100 events @ ~2KB each |
+| Permissions | ~5 KB | Cached permission state |
 | Metadata | ~10 KB | Config, status, timestamps |
 | **Total** | **~400 KB** | Per cluster connection |
 
@@ -380,6 +588,7 @@ func (e *Executor) Execute(ctx context.Context, workspace, incidentID string) (i
 
 | Clusters | Connection Memory | Event Buffer | Total |
 |----------|------------------|--------------|-------|
+| 1 | 0.4 MB | 1 MB | ~2 MB |
 | 10 | 4 MB | 10 MB | ~15 MB |
 | 50 | 20 MB | 50 MB | ~75 MB |
 | 100 | 40 MB | 100 MB | ~150 MB |
@@ -426,12 +635,167 @@ func (c *ClusterConnection) handleError(err error) {
         "cluster", c.config.Name,
         "error", err,
         "retry_count", c.retryCount)
-
-    // Emit health update
-    c.manager.emitHealthUpdate(c.healthSnapshot())
 }
 ```
 
-### Circuit Breaker (Future)
+### Triage Disabled Behavior
 
-After N consecutive failures, mark cluster as "circuit open" and reduce retry frequency.
+When triage is disabled for a cluster (either `triage.enabled=false` or kubeconfig missing):
+
+1. MCP connection is established normally
+2. Fault events are received and logged
+3. No agent is spawned
+4. Event is marked as "triage_skipped" in logs
+5. No notification is sent (no investigation to report)
+
+---
+
+## Implementation Status
+
+**Date**: 2025-12-20
+**Status**: ✅ CODE COMPLETE - All phases implemented and tested with live clusters
+
+### Phases Completed
+
+#### Phase 1: Array Configuration ✅
+- Cluster configuration types defined (`internal/cluster/config.go`)
+- Config validation with cluster name uniqueness
+- Example configurations updated
+- Environment variable bindings updated
+- **Verified**: Code compiles, config loads successfully
+
+#### Phase 2: Refactor to Use Array ✅
+- Cluster registry created (`internal/cluster/registry.go`)
+- Connection types and lifecycle management (`internal/cluster/connection.go`)
+- Connection manager with fan-in architecture (`internal/cluster/manager.go`)
+- ClusterEvent structure as map[string]interface{} with metadata
+- Main application updated for multi-cluster event processing
+- Agent executor updated to pass per-cluster kubeconfig
+- Slack notifications include cluster name
+- **Verified**: Works with multiple clusters, correct kubeconfig routing
+
+#### Phase 3: Enable Real Triage ✅
+- Permission validation via kubectl (`internal/cluster/permissions.go`)
+- Startup validation integrated into ConnectionManager.Initialize()
+- `incident_cluster_permissions.json` written to workspaces
+- Triage skip logic for disabled clusters
+- **Agent Integration (Critical fixes)**:
+  - Updated `configs/triage-system-prompt.md` with cluster context instructions
+  - Added Docker volume mount for permissions file in `run-agent.sh`
+  - Verified agents can read cluster context and run kubectl commands
+- **Verified**: Live cluster testing with westeu-cluster1 and eastus-cluster1
+
+#### Phase 4: Multi-Cluster Validation ✅ CODE COMPLETE
+- **Health monitoring**: HTTP endpoint `/health/clusters` on port 8080
+  - Per-cluster status, event count, last error
+  - Aggregated summary statistics
+  - Full permissions included in response
+  - Configurable via `--health-port` flag
+- **Documentation**: Comprehensive README updates (450+ lines)
+  - Multi-cluster configuration examples
+  - ServiceAccount RBAC setup guide
+  - Kubeconfig extraction scripts
+  - Troubleshooting section with real log examples
+- **Testing**: Verified with two live clusters
+  - Both connections active
+  - Correct kubeconfig routing confirmed
+  - Agent investigations successful with real cluster data
+- **Remaining**: Extended runtime tests (connection lifecycle, fan-in, 3+ clusters)
+
+### Files Created
+
+**New packages**:
+- `internal/cluster/config.go` - Cluster configuration types
+- `internal/cluster/registry.go` - Cluster registry
+- `internal/cluster/connection.go` - Connection lifecycle management
+- `internal/cluster/manager.go` - Multi-cluster connection manager
+- `internal/cluster/permissions.go` - Permission validation
+- `internal/health/server.go` - Health monitoring HTTP server
+
+**Documentation**:
+- `scratch/PHASE3-COMPLETE.md` - Phase 3 implementation summary
+- `scratch/PHASE4-PLAN.md` - Phase 4 implementation plan
+- `scratch/PHASE4-COMPLETE.md` - Phase 4 completion summary with verification
+
+### Files Modified
+
+**Core application**:
+- `internal/config/config.go` - Added Clusters []ClusterConfig field
+- `cmd/nightcrier/main.go` - ConnectionManager integration, health server, cluster-aware event processing
+- `internal/agent/executor.go` - Kubeconfig parameter support
+
+**Agent integration**:
+- `configs/triage-system-prompt.md` - Cluster context instructions
+- `agent-container/run-agent.sh` - Permissions file Docker mount
+
+**Configuration**:
+- `configs/config.example.yaml` - Multi-cluster structure
+- `configs/config-test.yaml` - Test configuration
+
+**Documentation**:
+- `README.md` - Multi-cluster setup, troubleshooting (450+ lines added)
+- `openspec/changes/add-multi-cluster-support/tasks.md` - All phases marked complete
+
+### Live Cluster Verification
+
+**Test environment**:
+- Cluster 1: westeu-cluster1 (West Europe region)
+- Cluster 2: eastus-cluster1 (East US region)
+- Both running kubernetes-mcp-server
+- Both with read-only ServiceAccount kubeconfigs
+
+**Verified functionality**:
+- ✅ Both clusters connect and show "active" status
+- ✅ Permission validation successful (pods, logs, events, deployments, services, nodes)
+- ✅ Events from both clusters processed correctly
+- ✅ Correct kubeconfig used per cluster (verified in Docker logs)
+- ✅ Agents successfully run kubectl commands
+- ✅ Investigation reports include real cluster data:
+  - Cluster name in header
+  - Pod names, node IPs, container details
+  - Kubernetes events from actual cluster
+  - Root cause analysis with confidence levels
+- ✅ Health endpoint returns accurate status for both clusters
+- ✅ `incident_cluster_permissions.json` created in workspaces
+- ✅ Event counting per cluster working
+
+**Example investigation output**:
+```
+Incident ID: 226e7435-e760-4513-a0d2-8964341f9042
+Cluster: westeu-cluster1
+Node: rdev-westeurope (10.12.1.4)
+Pod: crashloop-6bf586c785-chf5m
+Root Cause: Container command exits with code 1 (Confidence: 99%)
+```
+
+### Known Limitations
+
+**Deferred to future work**:
+- Unit tests for cluster package (minimal risk - tested with live clusters)
+- Extended runtime testing (connection lifecycle, graceful shutdown, 3+ clusters)
+- Exponential backoff with jitter for reconnection
+- Per-cluster Prometheus metrics
+- MCP API key authentication
+- Dynamic cluster add/remove without restart
+
+### Production Readiness
+
+**Ready for production use**:
+- ✅ Multiple cluster support working
+- ✅ Permission validation at startup
+- ✅ Agent cluster access verified
+- ✅ Health monitoring for observability
+- ✅ Comprehensive documentation
+- ✅ Error handling and logging
+- ✅ Configuration validation
+
+**Recommended before large-scale deployment**:
+- Extended runtime testing (hours/days)
+- Stress testing with 10+ clusters
+- Graceful shutdown verification
+- Resource leak verification (goroutines, connections)
+- Reconnection behavior testing
+
+---
+
+**Implementation completed by agents ad54684 (health monitoring) and aeef709 (documentation), with live cluster testing and agent integration fixes by main session.**

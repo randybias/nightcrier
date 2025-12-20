@@ -23,6 +23,7 @@ type ExecutorConfig struct {
 	AgentImage       string // Docker image for agent container
 	Prompt           string // Prompt to send to the agent
 	Debug            bool   // Enable debug output in run-agent.sh
+	Kubeconfig       string // Path to kubeconfig file for cluster access
 }
 
 // Executor runs the agent script in a workspace directory.
@@ -91,6 +92,11 @@ func (e *Executor) ExecuteWithPrompt(ctx context.Context, workspacePath string, 
 		args = append(args, "--system-prompt-file", e.config.SystemPromptFile)
 	}
 
+	// Add kubeconfig if specified (Phase 2: multi-cluster support)
+	if e.config.Kubeconfig != "" {
+		args = append(args, "--kubeconfig", e.config.Kubeconfig)
+	}
+
 	// Add the prompt as the final argument
 	args = append(args, prompt)
 
@@ -122,6 +128,11 @@ func (e *Executor) ExecuteWithPrompt(ctx context.Context, workspacePath string, 
 	// Add optional config values if set
 	if e.config.SystemPromptFile != "" {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("SYSTEM_PROMPT_FILE=%s", e.config.SystemPromptFile))
+	}
+
+	// Add kubeconfig path for cluster access (Phase 2: multi-cluster support)
+	if e.config.Kubeconfig != "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("KUBECONFIG=%s", e.config.Kubeconfig))
 	}
 
 	// Capture stdout and stderr

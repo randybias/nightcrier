@@ -1,185 +1,228 @@
 # Implementation Tasks: Multi-Cluster MCP Server Support
 
-## Phase 1: Foundation
+## Phase 1: Array Configuration ✅ COMPLETE
 
-### 1. Configuration Extension
-- [ ] 1.1 Define `ClusterConfig` struct in `internal/config/cluster.go`
-- [ ] 1.2 Add `Clusters []ClusterConfig` field to main `Config` struct
-- [ ] 1.3 Add validation for cluster config (name uniqueness, required fields)
-- [ ] 1.4 Add mutual exclusivity check (mcp_endpoint XOR clusters)
-- [ ] 1.5 Add cluster config defaults (enabled=true, etc.)
-- [ ] 1.6 Update `configs/config.example.yaml` with clusters section
-- [ ] 1.7 Write unit tests for cluster config validation
-- [ ] 1.8 Write unit tests for mutual exclusivity validation
+**Goal**: Config parses clusters array correctly but behavior is unchanged.
 
-### 2. Cluster Registry
-- [ ] 2.1 Create `internal/cluster/registry.go`
-- [ ] 2.2 Implement `Registry` struct to hold cluster configurations
-- [ ] 2.3 Implement `Registry.Load(cfg *config.Config)` to populate from config
-- [ ] 2.4 Implement `Registry.Get(name string) *ClusterConfig`
-- [ ] 2.5 Implement `Registry.List() []*ClusterConfig`
-- [ ] 2.6 Implement `Registry.GetEnabled() []*ClusterConfig` (filter disabled)
-- [ ] 2.7 Write unit tests for registry operations
+### 1.1 Define Cluster Configuration Types
+- [x] Create `internal/cluster/config.go` with `ClusterConfig`, `MCPConfig`, `TriageConfig` structs
+- [x] Add mapstructure tags for YAML parsing
+- [x] Add `Validate()` method to `ClusterConfig`
+- [ ] Write unit tests for cluster config validation (deferred)
 
-### 3. Connection Lifecycle
-- [ ] 3.1 Create `internal/cluster/connection.go`
-- [ ] 3.2 Define `ConnectionStatus` enum (disconnected, connecting, connected, subscribing, active, failed)
-- [ ] 3.3 Define `ClusterConnection` struct with status, timestamps, error tracking
-- [ ] 3.4 Implement `NewClusterConnection(cfg *ClusterConfig)` constructor
-- [ ] 3.5 Implement `ClusterConnection.Connect(ctx)` method
-- [ ] 3.6 Implement `ClusterConnection.Subscribe(ctx)` method
-- [ ] 3.7 Implement `ClusterConnection.Close()` method
-- [ ] 3.8 Implement `ClusterConnection.Status()` method
-- [ ] 3.9 Implement `ClusterConnection.HealthSnapshot()` for monitoring
-- [ ] 3.10 Write unit tests for connection state transitions
+### 1.2 Extend Main Config
+- [x] Add `Clusters []cluster.ClusterConfig` field to `internal/config/config.go`
+- [x] Remove `MCPEndpoint` field from Config (no backwards compatibility)
+- [x] Update `Validate()` to require at least one cluster
+- [x] Add validation for cluster name uniqueness
+- [x] Add validation for required fields (name, mcp.endpoint)
+- [x] Add validation for triage.kubeconfig when triage.enabled=true
+- [ ] Write unit tests for new config validation rules (deferred)
 
-### 4. Reconnection Logic
-- [ ] 4.1 Define `ReconnectConfig` struct (initial backoff, max backoff, multiplier, jitter)
-- [ ] 4.2 Implement exponential backoff calculation with jitter
-- [ ] 4.3 Implement `ClusterConnection.reconnectLoop(ctx)` goroutine
-- [ ] 4.4 Add logging for reconnection attempts with backoff duration
-- [ ] 4.5 Add retry counter and last error tracking
-- [ ] 4.6 Write unit tests for backoff calculation
-- [ ] 4.7 Write integration test for reconnection behavior
+### 1.3 Update Example Configuration
+- [x] Create `kubeconfigs/` directory with `.gitkeep`
+- [x] Update `configs/config.example.yaml` with clusters array structure
+- [x] Update `configs/config-test.yaml` with clusters array structure
+- [x] Add placeholder MCP API key comments explaining future use
+- [x] Document kubeconfig path conventions
 
-### 5. Connection Manager
-- [ ] 5.1 Create `internal/cluster/manager.go`
-- [ ] 5.2 Define `ConnectionManager` struct
-- [ ] 5.3 Implement shared `http.Transport` with connection pooling settings
-- [ ] 5.4 Implement `NewConnectionManager(cfg *config.Config)` constructor
-- [ ] 5.5 Implement `ConnectionManager.Start(ctx) <-chan *ClusterEvent`
-- [ ] 5.6 Implement per-connection goroutine management
-- [ ] 5.7 Implement `ConnectionManager.Stop()` for graceful shutdown
-- [ ] 5.8 Implement `ConnectionManager.GetHealth() HealthSummary`
-- [ ] 5.9 Write unit tests for manager lifecycle
-- [ ] 5.10 Write integration test with multiple mock MCP servers
+### 1.4 Update Environment Variable Bindings
+- [x] Update `bindEnvVars()` to handle nested cluster config (or document that clusters must come from file)
+- [x] Update `BindFlags()` to remove single-endpoint flag
+- [x] Update flag help text
 
-### 6. Event Routing
-- [ ] 6.1 Define `ClusterEvent` struct (wraps FaultEvent with cluster metadata)
-- [ ] 6.2 Modify event channel to use `ClusterEvent` instead of `FaultEvent`
-- [ ] 6.3 Implement fan-in logic in connection goroutines
-- [ ] 6.4 Apply overflow policy (drop/reject) at fan-in point
-- [ ] 6.5 Add cluster name and labels to event logging
-- [ ] 6.6 Update deduplication key to include cluster name
-- [ ] 6.7 Write unit tests for event routing
-- [ ] 6.8 Write tests for overflow handling
-
-### 7. MCP Client Updates
-- [ ] 7.1 Add `NewClientWithHTTPClient(endpoint, httpClient)` constructor to `events.Client`
-- [ ] 7.2 Update `Client` to accept external HTTP client (for shared transport)
-- [ ] 7.3 Ensure backward compatibility with `NewClient(endpoint)` constructor
-- [ ] 7.4 Write unit tests for new constructor
-
-### 8. Agent Executor Updates
-- [ ] 8.1 Add `Kubeconfig` field to `ExecutorConfig`
-- [ ] 8.2 Pass kubeconfig path to agent script via `-k` flag
-- [ ] 8.3 Update `run-agent.sh` to accept and use kubeconfig argument
-- [ ] 8.4 Update agent Dockerfile if needed for kubeconfig handling
-- [ ] 8.5 Write integration test with cluster-specific kubeconfig
-
-### 9. Main Application Integration
-- [ ] 9.1 Update `cmd/nightcrier/main.go` to detect single vs multi-cluster mode
-- [ ] 9.2 Create `ConnectionManager` when multi-cluster mode is enabled
-- [ ] 9.3 Create single `events.Client` when single-cluster mode (backwards compat)
-- [ ] 9.4 Update event processing loop to handle `ClusterEvent`
-- [ ] 9.5 Pass cluster kubeconfig to agent executor
-- [ ] 9.6 Update logging to include cluster context
-- [ ] 9.7 Update Slack notifications to include cluster name
-- [ ] 9.8 Write integration test for single-cluster mode
-- [ ] 9.9 Write integration test for multi-cluster mode
-
-### 10. Health Monitoring
-- [ ] 10.1 Define `ClusterHealth` struct for per-cluster status
-- [ ] 10.2 Define `HealthSummary` struct for aggregate health
-- [ ] 10.3 Implement `/health/clusters` HTTP endpoint
-- [ ] 10.4 Add health server startup (optional, config-driven)
-- [ ] 10.5 Add health port configuration option
-- [ ] 10.6 Write unit tests for health endpoint
+### 1.5 Verification
+- [x] Run `go build ./...` to verify compilation
+- [x] Run existing tests to verify they still pass (with updated test configs)
+- [x] Manually test config loading with new structure
 
 ---
 
-## Phase 2: Operations (Future)
+## Phase 2: Refactor to Use Array ✅ COMPLETE
 
-### 11. Config Hot-Reload
-- [ ] 11.1 Implement SIGHUP handler for config reload
-- [ ] 11.2 Implement cluster diff (add/remove/modify detection)
-- [ ] 11.3 Add new connections for added clusters
-- [ ] 11.4 Remove connections for deleted clusters
-- [ ] 11.5 Update config for modified clusters (reconnect if needed)
-- [ ] 11.6 Write integration test for hot-reload
+**Goal**: Works with array of 1 cluster, behavior identical to before.
 
-### 12. Per-Cluster Metrics
-- [ ] 12.1 Add event counter per cluster
-- [ ] 12.2 Add connection uptime per cluster
-- [ ] 12.3 Add error counter per cluster
-- [ ] 12.4 Expose metrics via Prometheus endpoint
-- [ ] 12.5 Write unit tests for metrics
+### 2.1 Create Cluster Package Foundation
+- [x] Create `internal/cluster/registry.go` with `Registry` struct
+- [x] Implement `Registry.Load(clusters []ClusterConfig)`
+- [x] Implement `Registry.Get(name string) *ClusterConfig`
+- [x] Implement `Registry.List() []*ClusterConfig`
+- [ ] Write unit tests for registry operations (deferred)
 
-### 13. Cluster-Specific Overrides
-- [ ] 13.1 Support per-cluster severity threshold
-- [ ] 13.2 Support per-cluster agent model override
-- [ ] 13.3 Support per-cluster enabled/disabled toggle
-- [ ] 13.4 Write unit tests for override behavior
+### 2.2 Create Connection Types
+- [x] Create `internal/cluster/connection.go`
+- [x] Define `ConnectionStatus` enum (disconnected, connecting, connected, subscribing, active, failed)
+- [x] Define `ClusterConnection` struct with status tracking
+- [x] Implement `NewClusterConnection(cfg *ClusterConfig)`
+- [ ] Write unit tests for connection state (deferred)
 
----
+### 2.3 Create ClusterEvent Type
+- [x] ClusterEvent implemented as map[string]interface{} with cluster metadata
+- [x] Add cluster name, kubeconfig path, permissions, labels fields
 
-## Phase 3: Scale (Future)
+### 2.4 Create Connection Manager
+- [x] Create `internal/cluster/manager.go`
+- [x] Implement `NewConnectionManager(cfg *config.Config)`
+- [x] Implement shared `http.Transport` with pooling settings
+- [x] Implement `Start(ctx) <-chan interface{}`
+- [x] Implement per-connection goroutine that fans-in events
+- [x] Implement `Stop()` for graceful shutdown
+- [ ] Write unit tests for manager lifecycle (deferred)
 
-### 14. Connection Optimization
-- [ ] 14.1 Tune HTTP transport settings for 100+ connections
-- [ ] 14.2 Add connection health check (ping/keepalive)
-- [ ] 14.3 Implement connection prioritization
-- [ ] 14.4 Add OS file descriptor limit documentation
+### 2.5 Update Main Application
+- [x] Update `cmd/nightcrier/main.go` to create `ConnectionManager`
+- [x] Update event loop to receive `ClusterEvent` map instead of `FaultEvent`
+- [x] Add cluster name to all event logging
+- [x] Pass cluster kubeconfig to agent executor
+- [x] Update startup banner to show cluster count
 
-### 15. Sharded Processing
-- [ ] 15.1 Design worker pool for parallel event processing
-- [ ] 15.2 Implement event sharding by cluster
-- [ ] 15.3 Add per-shard circuit breakers
-- [ ] 15.4 Write load tests for 100 clusters
+### 2.6 Update Agent Executor
+- [x] Add `Kubeconfig` field to `ExecutorConfig`
+- [x] Update `Execute()` to pass `--kubeconfig` flag to run-agent.sh
+- [x] Update executor creation to receive kubeconfig from cluster config
+- [ ] Write unit test for kubeconfig parameter passing (deferred)
 
----
+### 2.7 Update Slack Notifications
+- [x] Add cluster name to Slack notification messages
+- [x] Update notification formatting to include cluster context
 
-## Documentation
-
-### 16. User Documentation
-- [ ] 16.1 Document multi-cluster configuration in README
-- [ ] 16.2 Document kubeconfig distribution patterns
-- [ ] 16.3 Document health endpoint usage
-- [ ] 16.4 Document resource requirements at scale
-- [ ] 16.5 Add troubleshooting guide for connection issues
-
-### 17. Operations Guide
-- [ ] 17.1 Document recommended OS tuning (file descriptors, etc.)
-- [ ] 17.2 Document monitoring and alerting patterns
-- [ ] 17.3 Document graceful rollout procedures
-
----
-
-## Verification
-
-### 18. Testing
-- [ ] 18.1 Run all unit tests: `go test ./...`
-- [ ] 18.2 Run integration tests with mock MCP servers
-- [ ] 18.3 Test with 2 real kubernetes-mcp-server instances
-- [ ] 18.4 Test with 10 mock MCP servers (scale test)
-- [ ] 18.5 Test reconnection under network failures
-- [ ] 18.6 Test graceful shutdown with active connections
-- [ ] 18.7 Verify backwards compatibility (single endpoint mode)
-
-### 19. Cleanup
-- [ ] 19.1 Run `go fmt` and `go vet`
-- [ ] 19.2 Review all new code for error handling
-- [ ] 19.3 Update CHANGELOG
-- [ ] 19.4 Archive this change proposal
+### 2.8 Verification
+- [x] Run full test suite
+- [x] Test with multiple cluster config
+- [x] Verify logs include cluster name
+- [x] Verified with live clusters (westeu-cluster1, eastus-cluster1)
 
 ---
 
-## Parallelization Notes
+## Phase 3: Enable Real Triage ✅ COMPLETE
 
-- Tasks 1-2 (config, registry) can proceed in parallel
-- Tasks 3-4 (connection lifecycle) depend on task 2
-- Task 5 (manager) depends on tasks 3-4
-- Task 6 (routing) can proceed in parallel with tasks 3-5
-- Task 7 (client updates) can proceed independently
-- Tasks 8-9 depend on tasks 5-7
-- Task 10 (health) can proceed after task 5
+**Goal**: Triage agents produce meaningful output by connecting to actual clusters.
+
+### 3.1 Implement Permission Validation
+- [x] Create `internal/cluster/permissions.go`
+- [x] Define `ClusterPermissions` struct with permission flags
+- [x] Implement `validateClusterPermissions(ctx, cfg)` using `kubectl auth can-i --list`
+- [x] Parse kubectl output to determine specific permissions
+- [x] Implement `MinimumPermissionsMet()` check
+- [x] Build warnings list for missing permissions
+- [ ] Write unit tests with mock kubectl output (deferred)
+
+### 3.2 Integrate Permission Validation at Startup
+- [x] Add permissions field to `ClusterConnection`
+- [x] Call `validateClusterPermissions()` during `ConnectionManager.Initialize()`
+- [x] Skip validation if `triage.enabled=false`
+- [x] Log warning if minimum permissions not met
+- [x] Fail startup if kubeconfig file doesn't exist (when triage enabled)
+
+### 3.3 Update Workspace Creation
+- [x] Add `ClusterPermissions` to `ClusterEvent` (passed as map field)
+- [x] Update processEvent to write `incident_cluster_permissions.json` to workspace
+- [x] Include cluster name in incident.json metadata (already done in Phase 2)
+
+### 3.4 Update Triage Skip Logic
+- [x] Check `triage.enabled` before spawning agent (via permissions==nil check)
+- [x] Log "triage disabled for cluster" when skipping
+- [x] Skip notification when triage not performed (return early from processEvent)
+- [ ] Add metrics/counter for skipped triage (optional - deferred)
+
+### 3.5 Agent Integration (Critical Fix)
+- [x] Update `configs/triage-system-prompt.md` to instruct agent about permissions file
+- [x] Add Docker volume mount for `incident_cluster_permissions.json` in run-agent.sh
+- [x] Verify agent can read cluster context and permissions
+- [x] Verify agent successfully runs kubectl commands with provided kubeconfig
+- [x] Confirmed working with live clusters (westeu-cluster1, eastus-cluster1)
+
+### 3.6 Runtime Verification (Completed with Live Clusters)
+- [x] Verify `incident_cluster_permissions.json` is created in workspaces
+- [x] Verify agent can read pods, logs, events from cluster
+- [x] Verify triage output references actual cluster resources
+- [x] Verify investigation.md contains real cluster data (pod names, node IPs, etc.)
+- [x] Verify cluster name appears in investigation report header
+
+---
+
+## Phase 4: Multi-Cluster Validation ✅ CODE COMPLETE
+
+**Goal**: Production-ready multi-cluster support.
+
+### 4.1 Test with Two Clusters ✅ VERIFIED
+- [x] Configure Nightcrier with two clusters (westeu-cluster1, eastus-cluster1)
+- [x] Verify both connections establish (both show "active" status)
+- [x] Trigger fault on each cluster
+- [x] Verify correct kubeconfig used for each (confirmed in investigation reports)
+- [x] Verify event counting per cluster (health endpoint shows event_count)
+
+### 4.2 Verify Independent Connection Lifecycle
+- [ ] Stop one kubernetes-mcp-server (user runtime test)
+- [ ] Verify other cluster continues receiving events (user runtime test)
+- [ ] Verify reconnection attempts on failed cluster (user runtime test)
+- [ ] Restart the stopped server (user runtime test)
+- [ ] Verify reconnection succeeds (user runtime test)
+
+### 4.3 Verify Event Fan-In
+- [ ] Generate faults on both clusters simultaneously (user runtime test)
+- [ ] Verify both events are processed (user runtime test)
+- [ ] Verify each event uses correct cluster kubeconfig (user runtime test)
+- [ ] Verify deduplication works per-cluster (user runtime test)
+
+### 4.4 Add Health Monitoring ✅ COMPLETE
+- [x] Implement `/health/clusters` endpoint (internal/health/server.go)
+- [x] Return per-cluster status, event count, last error
+- [x] Return summary with total/active/unhealthy counts
+- [x] Include triage enabled status per cluster
+- [x] Include full permissions in health response
+- [x] Add --health-port flag (default 8080, 0 to disable)
+- [x] Verified working with live clusters
+
+### 4.5 Test with Three Clusters
+- [ ] Add third cluster configuration (user runtime test)
+- [ ] Verify all three connections work (user runtime test)
+- [ ] Stress test with concurrent faults (user runtime test)
+
+### 4.6 Documentation ✅ COMPLETE
+- [x] Update README with multi-cluster configuration
+- [x] Document kubeconfig creation and placement
+- [x] Document triage enable/disable behavior
+- [x] Add troubleshooting section for connection issues
+- [x] Add ServiceAccount RBAC examples
+- [x] Add kubeconfig extraction script
+- [x] Document health monitoring endpoint
+
+### 4.7 Final Verification
+- [x] Verify basic functionality with two live clusters
+- [ ] Test graceful shutdown with multiple active connections (user runtime test)
+- [ ] Verify no resource leaks (goroutines, connections) (user runtime test)
+- [ ] Extended runtime testing (hours) (user runtime test)
+
+---
+
+## Task Dependencies
+
+```
+Phase 1: Configuration
+    1.1 → 1.2 → 1.3 → 1.4 → 1.5
+
+Phase 2: Refactor (depends on Phase 1)
+    2.1 ─┐
+    2.2 ─┼→ 2.4 → 2.5 → 2.6 → 2.7 → 2.8
+    2.3 ─┘
+
+Phase 3: Triage (depends on Phase 2)
+    3.1 → 3.2 ─┐
+               ├→ 3.4 → 3.5 → 3.6 → 3.7
+    3.3 ───────┘
+
+Phase 4: Multi-Cluster (depends on Phase 3)
+    4.1 → 4.2 → 4.3 → 4.4 → 4.5 → 4.6 → 4.7
+```
+
+---
+
+## Out of Scope (Future Work)
+
+- Config hot-reload (SIGHUP)
+- Per-cluster Prometheus metrics
+- Per-cluster overrides (severity threshold, agent model)
+- MCP API key authentication
+- Scale testing (100+ clusters)
+- Cluster discovery / auto-registration
