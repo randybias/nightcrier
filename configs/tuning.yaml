@@ -1,0 +1,111 @@
+# Nightcrier Tuning Configuration
+#
+# This file contains tunable operational parameters that control system behavior.
+# These values can be adjusted to optimize performance for your environment without
+# requiring code changes.
+#
+# All parameters have sensible defaults. If this file is missing or a parameter
+# is not specified, the application will use the default value shown below.
+
+# HTTP Configuration
+# These parameters control HTTP client behavior for external integrations.
+http:
+  # Timeout for Slack webhook HTTP requests (in seconds).
+  # Default: 10 seconds
+  #
+  # Increase this value if your Slack webhook is slow to respond or if you
+  # experience frequent timeout errors. Decrease it if you want faster failure
+  # detection for unreachable webhooks.
+  #
+  # Valid range: >= 1
+  slack_timeout_seconds: 10
+
+# Agent Configuration
+# These parameters control agent runtime behavior and output validation.
+agent:
+  # Additional buffer time beyond the configured agent timeout (in seconds).
+  # Default: 60 seconds
+  #
+  # This provides extra time for the agent to perform graceful shutdown,
+  # cleanup operations, and finalize its output before being forcefully terminated.
+  # The actual timeout = agent_timeout + timeout_buffer_seconds.
+  #
+  # Valid range: >= 0
+  timeout_buffer_seconds: 60
+
+  # Minimum size threshold for investigation output (in bytes).
+  # Default: 100 bytes
+  #
+  # Investigations smaller than this size are considered potentially incomplete
+  # or failed. This helps detect cases where the agent terminated early without
+  # producing meaningful output.
+  #
+  # Valid range: >= 0
+  investigation_min_size_bytes: 100
+
+# Reporting Configuration
+# These parameters control how investigation results are formatted and displayed.
+reporting:
+  # Maximum length of root cause text in Slack notifications (in characters).
+  # Default: 300 characters
+  #
+  # Root cause summaries longer than this will be truncated with "..."
+  # This prevents excessively long Slack messages that may be difficult to read
+  # or may hit Slack's message length limits.
+  #
+  # Valid range: >= 1
+  root_cause_truncation_length: 300
+
+  # Number of failure reasons to display in reports and notifications.
+  # Default: 3
+  #
+  # When multiple failures occur, only the most recent N failure reasons
+  # will be shown to keep reports concise and readable.
+  #
+  # Valid range: >= 1
+  failure_reasons_display_count: 3
+
+  # Maximum number of failure reasons to track internally.
+  # Default: 5
+  #
+  # The system maintains a history of recent failure reasons for analysis.
+  # This value must be >= failure_reasons_display_count.
+  #
+  # Valid range: >= failure_reasons_display_count
+  max_failure_reasons_tracked: 5
+
+# Event Processing Configuration
+# These parameters control internal event processing and queuing behavior.
+events:
+  # Buffer size for event processing channels.
+  # Default: 100 events
+  #
+  # This controls the size of internal Go channels used for event processing.
+  # Larger buffers can handle bursts of events better but use more memory.
+  # Smaller buffers reduce memory usage but may cause blocking under high load.
+  #
+  # Valid range: >= 1
+  channel_buffer_size: 100
+
+# I/O Configuration
+# These parameters control buffer sizes for capturing agent output.
+io:
+  # Buffer size for capturing agent stdout (in bytes).
+  # Default: 1024 bytes
+  #
+  # This is the size of the buffer used to read stdout from agent processes.
+  # Larger buffers can improve performance for agents that produce lots of output,
+  # but use more memory. Smaller buffers reduce memory usage but may require
+  # more read operations.
+  #
+  # Valid range: >= 1
+  stdout_buffer_size: 1024
+
+  # Buffer size for capturing agent stderr (in bytes).
+  # Default: 1024 bytes
+  #
+  # This is the size of the buffer used to read stderr from agent processes.
+  # Similar considerations as stdout_buffer_size apply.
+  #
+  # Valid range: >= 1
+  stderr_buffer_size: 1024

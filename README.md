@@ -154,21 +154,81 @@ docker build -t k8s-triage-agent:latest .
 
 ## Configuration
 
-### Environment Variables
+Nightcrier uses explicit configuration with no hardcoded defaults. All required parameters must be provided via configuration file, environment variables, or command-line flags.
 
-#### Required
+### Configuration Files
 
-- `K8S_CLUSTER_MCP_ENDPOINT` - MCP server endpoint URL (e.g., `http://localhost:8080`)
+- **`configs/config.yaml`** - Main configuration file (copy from `configs/config.example.yaml`)
+- **`configs/tuning.yaml`** - Optional tuning parameters for operational adjustments (rarely changed)
 
-#### Optional - Core Settings
+### Configuration Precedence
 
-- `WORKSPACE_ROOT` - Directory for incident artifacts (default: `./incidents`)
-- `LOG_LEVEL` - Logging level: `debug`, `info`, `warn`, `error` (default: `info`)
-- `AGENT_SCRIPT_PATH` - Path to agent execution script (default: `./agent-container/run-agent.sh`)
-- `AGENT_SYSTEM_PROMPT_FILE` - Path to system prompt file (default: `./configs/triage-system-prompt.md`)
-- `AGENT_ALLOWED_TOOLS` - Comma-separated list of allowed tools (default: `Read,Write,Grep,Glob,Bash,Skill`)
-- `AGENT_MODEL` - Claude model to use: `sonnet`, `opus`, `haiku` (default: `sonnet`)
-- `AGENT_TIMEOUT` - Agent timeout in seconds (default: `300`)
+Configuration values are loaded in the following order (highest to lowest priority):
+1. Command-line flags (e.g., `--mcp-endpoint`)
+2. Environment variables (e.g., `K8S_CLUSTER_MCP_ENDPOINT`)
+3. Configuration file (`config.yaml`)
+4. Tuning file (`tuning.yaml`, optional)
+
+### Required Configuration
+
+The following parameters **must** be provided. The application will fail fast on startup if any are missing:
+
+- `K8S_CLUSTER_MCP_ENDPOINT` - MCP server endpoint URL (e.g., `http://localhost:8080/mcp`)
+- `SUBSCRIBE_MODE` - Event subscription mode: `events` or `faults` (recommended: `faults`)
+- `WORKSPACE_ROOT` - Directory for incident artifacts (e.g., `./incidents`)
+- `AGENT_SCRIPT_PATH` - Path to agent execution script (e.g., `./agent-container/run-agent.sh`)
+- `AGENT_MODEL` - LLM model to use (e.g., `sonnet`, `opus`, `haiku`, `gpt-4o`)
+- `AGENT_TIMEOUT` - Agent timeout in seconds (e.g., `300`)
+- `AGENT_CLI` - AI CLI tool to use: `claude`, `codex`, `goose`, or `gemini`
+- `AGENT_IMAGE` - Docker image for agent container (e.g., `nightcrier-agent:latest`)
+- `AGENT_PROMPT` - Prompt sent to agent for triage
+- `SEVERITY_THRESHOLD` - Minimum event severity: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
+- `MAX_CONCURRENT_AGENTS` - Maximum concurrent agent sessions
+- `GLOBAL_QUEUE_SIZE` - Global event queue size
+- `CLUSTER_QUEUE_SIZE` - Per-cluster queue size
+- `DEDUP_WINDOW_SECONDS` - Event deduplication window (0 to disable)
+- `QUEUE_OVERFLOW_POLICY` - Queue overflow policy: `drop` or `reject`
+- `SHUTDOWN_TIMEOUT` - Graceful shutdown timeout in seconds
+- `SSE_RECONNECT_INITIAL_BACKOFF` - Initial SSE reconnect backoff in seconds
+- `SSE_RECONNECT_MAX_BACKOFF` - Maximum SSE reconnect backoff in seconds
+- `SSE_READ_TIMEOUT` - SSE read timeout in seconds
+- `FAILURE_THRESHOLD_FOR_ALERT` - Failures before system degraded alert
+- At least one LLM API key: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`
+
+### Optional Configuration
+
+- `LOG_LEVEL` - Logging level: `debug`, `info`, `warn`, `error`
+- `AGENT_SYSTEM_PROMPT_FILE` - Path to system prompt file
+- `AGENT_ALLOWED_TOOLS` - Comma-separated list of allowed tools
+- `NOTIFY_ON_AGENT_FAILURE` - Send system degraded alerts (default: true)
+- `UPLOAD_FAILED_INVESTIGATIONS` - Upload failed investigations (default: false)
+
+### Tuning Configuration
+
+The `configs/tuning.yaml` file contains operational parameters that rarely need adjustment. This file is **optional** - if not present, the application uses sensible defaults.
+
+Tunable parameters include:
+- **HTTP timeouts** - Slack webhook timeout (default: 10s)
+- **Agent behavior** - Timeout buffer, minimum investigation size
+- **Reporting** - Root cause truncation length, failure display count
+- **Event processing** - Channel buffer sizes
+- **I/O** - stdout/stderr buffer sizes
+
+See `configs/tuning.yaml` for full documentation and default values.
+
+### Migration from Previous Versions
+
+**Breaking Change:** Nightcrier now requires explicit configuration for all operational parameters.
+
+If upgrading from a version with implicit defaults:
+
+1. Copy `configs/config.example.yaml` to `configs/config.yaml`
+2. Fill in all required fields (see Required Configuration above)
+3. Optionally create `configs/tuning.yaml` if you need to adjust operational parameters
+4. Review environment variables - many previously optional parameters are now required
+5. The application will fail fast on startup with clear error messages for any missing required fields
+
+**Agent-Agnostic Design:** Environment variables now use generic names (`LLM_MODEL`, `AGENT_ALLOWED_TOOLS`) instead of Claude-specific names. Legacy Claude-specific variables are supported for backward compatibility but should be migrated.
 
 #### Optional - Slack Notifications
 

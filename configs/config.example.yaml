@@ -1,85 +1,90 @@
-# Kubernetes MCP Alerts Event Runner Configuration
+# Nightcrier Configuration
 # Copy this file to config.yaml and customize as needed.
 #
 # Configuration Precedence (highest to lowest):
 # 1. Command-line flags (e.g., --mcp-endpoint)
 # 2. Environment variables (e.g., K8S_CLUSTER_MCP_ENDPOINT)
 # 3. This configuration file
-# 4. Default values
+#
+# IMPORTANT: All fields marked as "Required" MUST be provided through one of these sources.
+# There are no default values for required fields.
 #
 # The runner searches for config.yaml in:
 # - Current directory (.)
 # - ./configs/
-# - /etc/runner/
-# Or specify explicitly with: runner --config /path/to/config.yaml
+# - /etc/nightcrier/
+# Or specify explicitly with: nightcrier --config /path/to/config.yaml
 
 # =============================================================================
 # MCP Connection (Required)
 # =============================================================================
-# The MCP server endpoint URL for kubernetes-mcp-server
+# REQUIRED: The MCP server endpoint URL for kubernetes-mcp-server
 # Environment variable: K8S_CLUSTER_MCP_ENDPOINT
 mcp_endpoint: "http://kubernetes-mcp-server:8080/mcp"
 
-# Subscription mode for events_subscribe tool: "events" or "faults"
-# - "faults": Only receive fault/warning events (default)
+# REQUIRED: Subscription mode for events_subscribe tool: "events" or "faults"
+# - "faults": Only receive fault/warning events (recommended)
 # - "events": Receive all Kubernetes events
 # Environment variable: SUBSCRIBE_MODE
 subscribe_mode: "faults"
 
 # =============================================================================
-# Workspace Configuration
+# Workspace Configuration (Required)
 # =============================================================================
-# Directory where incident workspaces are created
+# REQUIRED: Directory where incident workspaces are created
 # Each incident gets a unique subdirectory with event context and results
 # Environment variable: WORKSPACE_ROOT
 workspace_root: "./incidents"
 
 # =============================================================================
-# Logging
+# Logging (Optional)
 # =============================================================================
 # Log level: debug, info, warn, error
+# Default: info
 # Environment variable: LOG_LEVEL
 log_level: "info"
 
 # =============================================================================
-# Agent Configuration
+# Agent Configuration (Required)
 # =============================================================================
-# Path to the agent execution script
+# REQUIRED: Path to the agent execution script
 # Environment variable: AGENT_SCRIPT_PATH
 agent_script_path: "./agent-container/run-agent.sh"
 
-# Path to the system prompt file for the agent
+# Optional: Path to the system prompt file for the agent
 # Environment variable: AGENT_SYSTEM_PROMPT_FILE
 agent_system_prompt_file: "./configs/triage-system-prompt.md"
 
-# Comma-separated list of tools the agent is allowed to use
+# Optional: Comma-separated list of tools the agent is allowed to use
+# Default: Read,Write,Grep,Glob,Bash,Skill
 # Environment variable: AGENT_ALLOWED_TOOLS
 agent_allowed_tools: "Read,Write,Grep,Glob,Bash,Skill"
 
-# AI model to use: sonnet, opus, haiku (Claude models)
+# REQUIRED: AI model to use: sonnet, opus, haiku (Claude models)
 # Environment variable: AGENT_MODEL
 agent_model: "sonnet"
 
-# Maximum execution time for agent in seconds
+# REQUIRED: Maximum execution time for agent in seconds
 # Environment variable: AGENT_TIMEOUT
 agent_timeout: 300
 
-# AI CLI to use: claude, codex, goose, gemini
+# REQUIRED: AI CLI to use: claude, codex, goose, gemini
 # Environment variable: AGENT_CLI
 agent_cli: "claude"
 
-# Docker image for the agent container
+# REQUIRED: Docker image for the agent container
 # Environment variable: AGENT_IMAGE
 agent_image: "nightcrier-agent:latest"
 
-# Prompt sent to the agent for triage
+# REQUIRED: Prompt sent to the agent for triage
 # This can be customized to change how the agent approaches incidents
 # Environment variable: AGENT_PROMPT
 agent_prompt: "Production incident detected. Incident context is in incident.json. Perform immediate triage and root cause analysis. Write findings to output/investigation.md"
 
 # =============================================================================
-# LLM API Keys (Optional)
+# LLM API Keys (At least one required)
 # =============================================================================
+# REQUIRED: At least one LLM API key must be provided.
 # These can also be set via environment variables.
 # Only set the key(s) for the LLM provider(s) you're using.
 # WARNING: Be careful not to commit API keys to version control!
@@ -108,52 +113,52 @@ agent_prompt: "Production incident detected. Incident context is in incident.jso
 # kubernetes_context: "my-cluster"
 
 # =============================================================================
-# Event Processing
+# Event Processing (Required)
 # =============================================================================
-# Minimum severity level to process: DEBUG, INFO, WARNING, ERROR, CRITICAL
+# REQUIRED: Minimum severity level to process: DEBUG, INFO, WARNING, ERROR, CRITICAL
 # Events below this threshold are filtered out
 # Environment variable: SEVERITY_THRESHOLD
 severity_threshold: "ERROR"
 
-# Maximum number of concurrent agent sessions across all clusters
+# REQUIRED: Maximum number of concurrent agent sessions across all clusters
 # Acts as a global circuit breaker to prevent resource exhaustion
 # Environment variable: MAX_CONCURRENT_AGENTS
 max_concurrent_agents: 5
 
-# Maximum size of the global event queue
+# REQUIRED: Maximum size of the global event queue
 # Environment variable: GLOBAL_QUEUE_SIZE
 global_queue_size: 100
 
-# Maximum size of per-cluster event queues
+# REQUIRED: Maximum size of per-cluster event queues
 # Each cluster gets its own queue to ensure fair processing
 # Environment variable: CLUSTER_QUEUE_SIZE
 cluster_queue_size: 10
 
-# Deduplication window in seconds
+# REQUIRED: Deduplication window in seconds (set to 0 to disable)
 # Events for the same resource within this window are deduplicated
 # Environment variable: DEDUP_WINDOW_SECONDS
 dedup_window_seconds: 300
 
-# Queue overflow policy: drop (remove oldest) or reject (reject new events)
+# REQUIRED: Queue overflow policy: drop (remove oldest) or reject (reject new events)
 # Environment variable: QUEUE_OVERFLOW_POLICY
 queue_overflow_policy: "drop"
 
-# Graceful shutdown timeout in seconds
+# REQUIRED: Graceful shutdown timeout in seconds
 # Environment variable: SHUTDOWN_TIMEOUT_SECONDS
 shutdown_timeout: 30
 
 # =============================================================================
-# SSE/MCP Reconnection Settings
+# SSE/MCP Reconnection Settings (Required)
 # =============================================================================
-# Initial backoff delay for reconnection attempts (seconds)
+# REQUIRED: Initial backoff delay for reconnection attempts (seconds)
 # Environment variable: SSE_RECONNECT_INITIAL_BACKOFF
 sse_reconnect_initial_backoff: 1
 
-# Maximum backoff delay for reconnection attempts (seconds)
+# REQUIRED: Maximum backoff delay for reconnection attempts (seconds)
 # Environment variable: SSE_RECONNECT_MAX_BACKOFF
 sse_reconnect_max_backoff: 60
 
-# Read timeout for SSE/MCP connections (seconds)
+# REQUIRED: Read timeout for SSE/MCP connections (seconds)
 # Environment variable: SSE_READ_TIMEOUT_SECONDS
 sse_read_timeout: 120
 
@@ -192,20 +197,22 @@ sse_read_timeout: 120
 # azure_sas_expiry: "168h"  # 7 days
 
 # =============================================================================
-# Circuit Breaker and Failure Notifications (Phase 2)
+# Circuit Breaker and Failure Notifications (Required/Optional)
 # =============================================================================
-# Whether to send notifications when agent failures occur
+# Optional: Whether to send notifications when agent failures occur
 # When true, system degraded alerts are sent after threshold is reached
+# Default: true
 # Environment variable: NOTIFY_ON_AGENT_FAILURE
 notify_on_agent_failure: true
 
-# Number of consecutive failures before triggering a system degraded alert
+# REQUIRED: Number of consecutive failures before triggering a system degraded alert
 # Lower values = more sensitive, higher values = more tolerant
 # Environment variable: FAILURE_THRESHOLD_FOR_ALERT
 failure_threshold_for_alert: 3
 
-# Whether to upload failed investigation attempts to storage
+# Optional: Whether to upload failed investigation attempts to storage
 # When true, even failed investigations are saved to Azure/filesystem storage
-# When false, only successful investigations are uploaded (default)
+# When false, only successful investigations are uploaded
+# Default: false
 # Environment variable: UPLOAD_FAILED_INVESTIGATIONS
 upload_failed_investigations: false

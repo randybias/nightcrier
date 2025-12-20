@@ -3,6 +3,8 @@ package reporting
 import (
 	"sync"
 	"time"
+
+	"github.com/rbias/nightcrier/internal/config"
 )
 
 // Notification Circuit Breaker
@@ -48,15 +50,16 @@ type FailureStats struct {
 }
 
 // NewCircuitBreaker creates a new circuit breaker with the specified failure threshold
-func NewCircuitBreaker(threshold int) *CircuitBreaker {
+func NewCircuitBreaker(threshold int, tuning *config.TuningConfig) *CircuitBreaker {
 	if threshold <= 0 {
 		threshold = 3 // Default threshold
 	}
+	maxReasons := tuning.Reporting.MaxFailureReasonsTracked
 	return &CircuitBreaker{
 		threshold:      threshold,
 		state:          StateClosed,
-		maxReasons:     5, // Keep last 5 failure reasons
-		failureReasons: make([]string, 0, 5),
+		maxReasons:     maxReasons,
+		failureReasons: make([]string, 0, maxReasons),
 	}
 }
 

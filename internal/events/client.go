@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rbias/nightcrier/internal/config"
 )
 
 const (
@@ -32,11 +33,12 @@ type Client struct {
 // NewClient creates a new MCP client for the given endpoint
 // endpoint should be the full MCP endpoint URL (e.g., "http://localhost:8383/mcp")
 // subscribeMode should be "events" or "faults" (default: "faults")
-func NewClient(endpoint, subscribeMode string) *Client {
+// tuningConfig provides tunable operational parameters, including event channel buffer size
+func NewClient(endpoint, subscribeMode string, tuningConfig *config.TuningConfig) *Client {
 	if subscribeMode == "" {
 		subscribeMode = "faults"
 	}
-	eventChan := make(chan *FaultEvent, 100)
+	eventChan := make(chan *FaultEvent, tuningConfig.Events.ChannelBufferSize)
 
 	c := &Client{
 		endpoint:      endpoint,

@@ -4,7 +4,22 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/rbias/nightcrier/internal/config"
 )
+
+func defaultTestTuning() *config.TuningConfig {
+	return &config.TuningConfig{
+		HTTP: config.HTTPTuning{
+			SlackTimeoutSeconds: 10,
+		},
+		Reporting: config.ReportingTuning{
+			RootCauseTruncationLength:  300,
+			FailureReasonsDisplayCount: 3,
+			MaxFailureReasonsTracked:   5,
+		},
+	}
+}
 
 func TestNewCircuitBreaker(t *testing.T) {
 	tests := []struct {
@@ -31,7 +46,7 @@ func TestNewCircuitBreaker(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cb := NewCircuitBreaker(tt.threshold)
+			cb := NewCircuitBreaker(tt.threshold, defaultTestTuning())
 			if cb == nil {
 				t.Fatal("NewCircuitBreaker returned nil")
 			}
@@ -49,7 +64,7 @@ func TestNewCircuitBreaker(t *testing.T) {
 }
 
 func TestRecordFailure(t *testing.T) {
-	cb := NewCircuitBreaker(3)
+	cb := NewCircuitBreaker(3, defaultTestTuning())
 
 	// Record first failure
 	cb.RecordFailure("API connection failed")
@@ -89,7 +104,7 @@ func TestRecordFailure(t *testing.T) {
 }
 
 func TestRecordSuccess(t *testing.T) {
-	cb := NewCircuitBreaker(2)
+	cb := NewCircuitBreaker(2, defaultTestTuning())
 
 	// Record failures to open circuit
 	cb.RecordFailure("failure 1")
@@ -129,7 +144,7 @@ func TestRecordSuccess(t *testing.T) {
 }
 
 func TestRecordSuccess_NoRecoveryAlertIfNotAlerted(t *testing.T) {
-	cb := NewCircuitBreaker(2)
+	cb := NewCircuitBreaker(2, defaultTestTuning())
 
 	// Record failures but don't call ShouldAlert
 	cb.RecordFailure("failure 1")
@@ -143,7 +158,7 @@ func TestRecordSuccess_NoRecoveryAlertIfNotAlerted(t *testing.T) {
 }
 
 func TestShouldAlert(t *testing.T) {
-	cb := NewCircuitBreaker(3)
+	cb := NewCircuitBreaker(3, defaultTestTuning())
 
 	// Should not alert before threshold
 	cb.RecordFailure("failure 1")
@@ -169,7 +184,7 @@ func TestShouldAlert(t *testing.T) {
 }
 
 func TestGetStats(t *testing.T) {
-	cb := NewCircuitBreaker(5)
+	cb := NewCircuitBreaker(5, defaultTestTuning())
 
 	// Record multiple failures with small delays
 	reasons := []string{"failure 1", "failure 2", "failure 3"}
@@ -208,7 +223,7 @@ func TestGetStats(t *testing.T) {
 }
 
 func TestMaxReasons(t *testing.T) {
-	cb := NewCircuitBreaker(10)
+	cb := NewCircuitBreaker(10, defaultTestTuning())
 
 	// Record more failures than maxReasons (5)
 	for i := 0; i < 8; i++ {
@@ -222,7 +237,7 @@ func TestMaxReasons(t *testing.T) {
 }
 
 func TestThreadSafety(t *testing.T) {
-	cb := NewCircuitBreaker(100)
+	cb := NewCircuitBreaker(100, defaultTestTuning())
 	var wg sync.WaitGroup
 	numGoroutines := 50
 	failuresPerGoroutine := 10
@@ -263,7 +278,7 @@ func TestThreadSafety(t *testing.T) {
 }
 
 func TestStateTransitions(t *testing.T) {
-	cb := NewCircuitBreaker(2)
+	cb := NewCircuitBreaker(2, defaultTestTuning())
 
 	// Initial state: Closed
 	if cb.GetState() != StateClosed {
@@ -290,7 +305,7 @@ func TestStateTransitions(t *testing.T) {
 }
 
 func TestReset(t *testing.T) {
-	cb := NewCircuitBreaker(2)
+	cb := NewCircuitBreaker(2, defaultTestTuning())
 
 	// Record failures and open circuit
 	cb.RecordFailure("failure 1")
@@ -321,7 +336,7 @@ func TestReset(t *testing.T) {
 }
 
 func TestMultipleCycles(t *testing.T) {
-	cb := NewCircuitBreaker(2)
+	cb := NewCircuitBreaker(2, defaultTestTuning())
 
 	// First cycle: fail -> recover
 	cb.RecordFailure("cycle 1 failure 1")

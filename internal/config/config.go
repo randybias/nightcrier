@@ -70,49 +70,6 @@ type Config struct {
 	UploadFailedInvestigations  bool `mapstructure:"upload_failed_investigations"`
 }
 
-// setDefaults configures default values for all configuration options.
-func setDefaults() {
-	// MCP defaults
-	viper.SetDefault("subscribe_mode", "faults")
-
-	// Workspace defaults
-	viper.SetDefault("workspace_root", "./incidents")
-
-	// Logging defaults
-	viper.SetDefault("log_level", "info")
-
-	// Agent defaults
-	viper.SetDefault("agent_script_path", "./agent-container/run-agent.sh")
-	viper.SetDefault("agent_system_prompt_file", "./configs/triage-system-prompt.md")
-	viper.SetDefault("agent_allowed_tools", "Read,Write,Grep,Glob,Bash,Skill")
-	viper.SetDefault("agent_model", "sonnet")
-	viper.SetDefault("agent_timeout", 300)
-	viper.SetDefault("agent_cli", "claude")
-	viper.SetDefault("agent_image", "nightcrier-agent:latest")
-	viper.SetDefault("agent_prompt", "Production incident detected. Incident context is in incident.json. Perform immediate triage and root cause analysis. Write findings to output/investigation.md")
-
-	// Event processing defaults (from design.md)
-	viper.SetDefault("severity_threshold", "ERROR")
-	viper.SetDefault("max_concurrent_agents", 5)
-	viper.SetDefault("global_queue_size", 100)
-	viper.SetDefault("cluster_queue_size", 10)
-	viper.SetDefault("dedup_window_seconds", 300)
-	viper.SetDefault("queue_overflow_policy", "drop")
-	viper.SetDefault("shutdown_timeout", 30)
-
-	// SSE/MCP reconnection defaults
-	viper.SetDefault("sse_reconnect_initial_backoff", 1)
-	viper.SetDefault("sse_reconnect_max_backoff", 60)
-	viper.SetDefault("sse_read_timeout", 120)
-
-	// Azure defaults
-	viper.SetDefault("azure_sas_expiry", "168h")
-
-	// Circuit breaker and notification defaults
-	viper.SetDefault("notify_on_agent_failure", true)
-	viper.SetDefault("failure_threshold_for_alert", 3)
-	viper.SetDefault("upload_failed_investigations", false)
-}
 
 // bindEnvVars binds environment variables to viper keys.
 // Environment variables use uppercase with underscores (e.g., K8S_CLUSTER_MCP_ENDPOINT).
@@ -190,8 +147,8 @@ func BindFlags(flags *pflag.FlagSet) {
 // Load creates a Config by loading values with the following precedence:
 // 1. Command-line flags (highest priority)
 // 2. Environment variables
-// 3. Configuration file
-// 4. Default values (lowest priority)
+// 3. Configuration file (lowest priority)
+// All required fields must be provided through one of these sources.
 func Load() (*Config, error) {
 	return LoadWithConfigFile("")
 }
@@ -199,10 +156,7 @@ func Load() (*Config, error) {
 // LoadWithConfigFile creates a Config, optionally loading from a specific config file.
 // If configFile is empty, it searches for config.yaml in standard locations.
 func LoadWithConfigFile(configFile string) (*Config, error) {
-	// Set defaults first (lowest priority)
-	setDefaults()
-
-	// Bind environment variables (overrides defaults)
+	// Bind environment variables
 	bindEnvVars()
 
 	// Load config file if specified or found (overrides env vars but under flags)
@@ -241,9 +195,95 @@ func LoadWithConfigFile(configFile string) (*Config, error) {
 
 // Validate checks the configuration for required fields and valid values.
 func (c *Config) Validate() error {
-	// Required field
+	// Helper function to format missing field errors
+	missingFieldError := func(fieldName, envVar string) error {
+		return fmt.Errorf("required field %q is missing (environment variable: %s). Please set it via environment variable, config file, or command-line flag. See configs/config.example.yaml for details", fieldName, envVar)
+	}
+
+	// Required: MCP Connection
 	if c.MCPEndpoint == "" {
-		return fmt.Errorf("mcp_endpoint (K8S_CLUSTER_MCP_ENDPOINT) is required")
+		return missingFieldError("mcp_endpoint", "K8S_CLUSTER_MCP_ENDPOINT")
+	}
+
+	if c.SubscribeMode == "" {
+		return missingFieldError("subscribe_mode", "SUBSCRIBE_MODE")
+	}
+
+	// Required: Workspace
+	if c.WorkspaceRoot == "" {
+		return missingFieldError("workspace_root", "WORKSPACE_ROOT")
+	}
+
+	// Required: Agent Configuration
+	if c.AgentScriptPath == "" {
+		return missingFieldError("agent_script_path", "AGENT_SCRIPT_PATH")
+	}
+
+	if c.AgentTimeout == 0 {
+		return missingFieldError("agent_timeout", "AGENT_TIMEOUT")
+	}
+
+	if c.AgentModel == "" {
+		return missingFieldError("agent_model", "AGENT_MODEL")
+	}
+
+	if c.AgentCLI == "" {
+		return missingFieldError("agent_cli", "AGENT_CLI")
+	}
+
+	if c.AgentImage == "" {
+		return missingFieldError("agent_image", "AGENT_IMAGE")
+	}
+
+	if c.AgentPrompt == "" {
+		return missingFieldError("agent_prompt", "AGENT_PROMPT")
+	}
+
+	// Required: Event Processing
+	if c.SeverityThreshold == "" {
+		return missingFieldError("severity_threshold", "SEVERITY_THRESHOLD")
+	}
+
+	if c.MaxConcurrentAgents == 0 {
+		return missingFieldError("max_concurrent_agents", "MAX_CONCURRENT_AGENTS")
+	}
+
+	if c.GlobalQueueSize == 0 {
+		return missingFieldError("global_queue_size", "GLOBAL_QUEUE_SIZE")
+	}
+
+	if c.ClusterQueueSize == 0 {
+		return missingFieldError("cluster_queue_size", "CLUSTER_QUEUE_SIZE")
+	}
+
+	if c.DedupWindowSeconds < 0 {
+		return missingFieldError("dedup_window_seconds", "DEDUP_WINDOW_SECONDS")
+	}
+
+	if c.QueueOverflowPolicy == "" {
+		return missingFieldError("queue_overflow_policy", "QUEUE_OVERFLOW_POLICY")
+	}
+
+	if c.ShutdownTimeout == 0 {
+		return missingFieldError("shutdown_timeout", "SHUTDOWN_TIMEOUT_SECONDS")
+	}
+
+	// Required: SSE/MCP Reconnection
+	if c.SSEReconnectInitialBackoff == 0 {
+		return missingFieldError("sse_reconnect_initial_backoff", "SSE_RECONNECT_INITIAL_BACKOFF")
+	}
+
+	if c.SSEReconnectMaxBackoff == 0 {
+		return missingFieldError("sse_reconnect_max_backoff", "SSE_RECONNECT_MAX_BACKOFF")
+	}
+
+	if c.SSEReadTimeout == 0 {
+		return missingFieldError("sse_read_timeout", "SSE_READ_TIMEOUT_SECONDS")
+	}
+
+	// Required: Circuit Breaker
+	if c.FailureThresholdForAlert == 0 {
+		return missingFieldError("failure_threshold_for_alert", "FAILURE_THRESHOLD_FOR_ALERT")
 	}
 
 	// Validate severity threshold
@@ -256,45 +296,45 @@ func (c *Config) Validate() error {
 
 	// Validate numeric ranges
 	if c.MaxConcurrentAgents < 1 {
-		return fmt.Errorf("max_concurrent_agents must be >= 1, got %d", c.MaxConcurrentAgents)
+		return fmt.Errorf("max_concurrent_agents must be >= 1, got %d. Set via MAX_CONCURRENT_AGENTS environment variable or config file", c.MaxConcurrentAgents)
 	}
 	if c.GlobalQueueSize < 1 {
-		return fmt.Errorf("global_queue_size must be >= 1, got %d", c.GlobalQueueSize)
+		return fmt.Errorf("global_queue_size must be >= 1, got %d. Set via GLOBAL_QUEUE_SIZE environment variable or config file", c.GlobalQueueSize)
 	}
 	if c.ClusterQueueSize < 1 {
-		return fmt.Errorf("cluster_queue_size must be >= 1, got %d", c.ClusterQueueSize)
+		return fmt.Errorf("cluster_queue_size must be >= 1, got %d. Set via CLUSTER_QUEUE_SIZE environment variable or config file", c.ClusterQueueSize)
 	}
 	if c.DedupWindowSeconds < 0 {
-		return fmt.Errorf("dedup_window_seconds must be >= 0, got %d", c.DedupWindowSeconds)
+		return fmt.Errorf("dedup_window_seconds must be >= 0, got %d. Set via DEDUP_WINDOW_SECONDS environment variable or config file", c.DedupWindowSeconds)
 	}
 	if c.AgentTimeout < 1 {
-		return fmt.Errorf("agent_timeout must be >= 1, got %d", c.AgentTimeout)
+		return fmt.Errorf("agent_timeout must be >= 1, got %d. Set via AGENT_TIMEOUT environment variable or config file", c.AgentTimeout)
 	}
 	if c.ShutdownTimeout < 1 {
-		return fmt.Errorf("shutdown_timeout must be >= 1, got %d", c.ShutdownTimeout)
+		return fmt.Errorf("shutdown_timeout must be >= 1, got %d. Set via SHUTDOWN_TIMEOUT_SECONDS environment variable or config file", c.ShutdownTimeout)
 	}
 
 	// Validate queue overflow policy
 	validPolicies := map[string]bool{"drop": true, "reject": true}
 	if !validPolicies[strings.ToLower(c.QueueOverflowPolicy)] {
-		return fmt.Errorf("invalid queue_overflow_policy '%s': must be 'drop' or 'reject'", c.QueueOverflowPolicy)
+		return fmt.Errorf("invalid queue_overflow_policy '%s': must be 'drop' or 'reject'. Set via QUEUE_OVERFLOW_POLICY environment variable or config file", c.QueueOverflowPolicy)
 	}
 
 	// Validate SSE reconnection settings
 	if c.SSEReconnectInitialBackoff < 1 {
-		return fmt.Errorf("sse_reconnect_initial_backoff must be >= 1, got %d", c.SSEReconnectInitialBackoff)
+		return fmt.Errorf("sse_reconnect_initial_backoff must be >= 1, got %d. Set via SSE_RECONNECT_INITIAL_BACKOFF environment variable or config file", c.SSEReconnectInitialBackoff)
 	}
 	if c.SSEReconnectMaxBackoff < c.SSEReconnectInitialBackoff {
-		return fmt.Errorf("sse_reconnect_max_backoff (%d) must be >= sse_reconnect_initial_backoff (%d)",
+		return fmt.Errorf("sse_reconnect_max_backoff (%d) must be >= sse_reconnect_initial_backoff (%d). Set via SSE_RECONNECT_MAX_BACKOFF environment variable or config file",
 			c.SSEReconnectMaxBackoff, c.SSEReconnectInitialBackoff)
 	}
 	if c.SSEReadTimeout < 1 {
-		return fmt.Errorf("sse_read_timeout must be >= 1, got %d", c.SSEReadTimeout)
+		return fmt.Errorf("sse_read_timeout must be >= 1, got %d. Set via SSE_READ_TIMEOUT_SECONDS environment variable or config file", c.SSEReadTimeout)
 	}
 
 	// Validate circuit breaker settings
 	if c.FailureThresholdForAlert < 1 {
-		return fmt.Errorf("failure_threshold_for_alert must be >= 1, got %d", c.FailureThresholdForAlert)
+		return fmt.Errorf("failure_threshold_for_alert must be >= 1, got %d. Set via FAILURE_THRESHOLD_FOR_ALERT environment variable or config file", c.FailureThresholdForAlert)
 	}
 
 	// Require at least one LLM API key

@@ -65,8 +65,15 @@ func run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	// Load tuning configuration (optional - uses defaults if not found)
+	tuning, err := config.LoadTuning()
+	if err != nil {
+		return fmt.Errorf("failed to load tuning configuration: %w", err)
+	}
+
 	// Setup structured logging
 	setupLogging(cfg.LogLevel)
+	slog.Info("tuning configuration loaded")
 
 	// Print startup banner
 	printStartupBanner(cfg, config.GetConfigFile())
@@ -89,7 +96,7 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create components
-	mcpClient := events.NewClient(cfg.MCPEndpoint, cfg.SubscribeMode)
+	mcpClient := events.NewClient(cfg.MCPEndpoint, cfg.SubscribeMode, tuning)
 	workspaceMgr := agent.NewWorkspaceManager(cfg.WorkspaceRoot)
 	executor := agent.NewExecutorWithConfig(agent.ExecutorConfig{
 		ScriptPath:       agentScript,
@@ -98,18 +105,19 @@ func run(cmd *cobra.Command, args []string) error {
 		Model:            cfg.AgentModel,
 		Timeout:          cfg.AgentTimeout,
 		AgentCLI:         cfg.AgentCLI,
+		AgentImage:       cfg.AgentImage,
 		Prompt:           cfg.AgentPrompt,
-	})
+	}, tuning)
 
 	// Create Slack notifier (optional - only if webhook URL configured)
 	var slackNotifier *reporting.SlackNotifier
 	if cfg.SlackWebhookURL != "" {
-		slackNotifier = reporting.NewSlackNotifier(cfg.SlackWebhookURL)
+		slackNotifier = reporting.NewSlackNotifier(cfg.SlackWebhookURL, tuning)
 		slog.Info("slack notifications enabled")
 	}
 
 	// Create circuit breaker with configured threshold
-	circuitBreaker := reporting.NewCircuitBreaker(cfg.FailureThresholdForAlert)
+	circuitBreaker := reporting.NewCircuitBreaker(cfg.FailureThresholdForAlert, tuning)
 	slog.Info("circuit breaker initialized", "threshold", cfg.FailureThresholdForAlert)
 
 	// Initialize storage backend based on configuration
@@ -153,14 +161,14 @@ func run(cmd *cobra.Command, args []string) error {
 				slog.Info("event channel closed")
 				return nil
 			}
-			if err := processEvent(ctx, event, workspaceMgr, executor, slackNotifier, storageBackend, circuitBreaker, cfg); err != nil {
+			if err := processEvent(ctx, event, workspaceMgr, executor, slackNotifier, storageBackend, circuitBreaker, cfg, tuning); err != nil {
 				slog.Error("failed to process event", "error", err)
 			}
 		}
 	}
 }
 
-func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *agent.WorkspaceManager, executor *agent.Executor, slackNotifier *reporting.SlackNotifier, storageBackend storage.Storage, circuitBreaker *reporting.CircuitBreaker, cfg *config.Config) error {
+func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *agent.WorkspaceManager, executor *agent.Executor, slackNotifier *reporting.SlackNotifier, storageBackend storage.Storage, circuitBreaker *reporting.CircuitBreaker, cfg *config.Config, tuning *config.TuningConfig) error {
 	// Create incident from event
 	incidentID := uuid.New().String()
 	inc := incident.NewFromEvent(incidentID, event)
@@ -198,7 +206,7 @@ func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *a
 	inc.MarkCompleted(exitCode, execErr)
 
 	// Detect agent failures (exit code 0 but missing or invalid output)
-	agentFailed, failureReason := detectAgentFailure(workspacePath, exitCode, execErr)
+	agentFailed, failureReason := detectAgentFailure(workspacePath, exitCode, execErr, tuning)
 	if agentFailed {
 		inc.Status = incident.StatusAgentFailed
 		inc.FailureReason = failureReason
@@ -366,10 +374,10 @@ func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *a
 // It checks:
 // 1. Exit code is 0
 // 2. output/investigation.md file exists
-// 3. investigation.md file size is > 100 bytes
+// 3. investigation.md file size meets minimum threshold from tuning config
 //
 // Returns (failed bool, reason string)
-func detectAgentFailure(workspacePath string, exitCode int, err error) (bool, string) {
+func detectAgentFailure(workspacePath string, exitCode int, err error, tuning *config.TuningConfig) (bool, string) {
 	// Check if there was an execution error
 	if err != nil {
 		return true, fmt.Sprintf("agent execution error: %v", err)
@@ -390,9 +398,10 @@ func detectAgentFailure(workspacePath string, exitCode int, err error) (bool, st
 		return true, fmt.Sprintf("error checking investigation.md: %v", err)
 	}
 
-	// Check file size
-	if info.Size() <= 100 {
-		return true, fmt.Sprintf("investigation.md too small: %d bytes (expected > 100)", info.Size())
+	// Check file size against tuning threshold
+	minSize := int64(tuning.Agent.InvestigationMinSizeBytes)
+	if info.Size() < minSize {
+		return true, fmt.Sprintf("investigation.md too small: %d bytes (expected >= %d)", info.Size(), minSize)
 	}
 
 	// All checks passed
