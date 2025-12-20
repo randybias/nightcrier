@@ -17,7 +17,7 @@ Nightcrier is an MCP client that listens for fault events from kubernetes-mcp-se
 - **MCP SDK**: github.com/modelcontextprotocol/go-sdk v1.1.0
 - **CLI Framework**: github.com/spf13/cobra
 - **Logging**: log/slog (structured JSON logging)
-- **UUID Generation**: github.com/google/uuid
+- **UUID Generation**: github.com/google/uuid (for incident IDs only)
 
 ## Project Conventions
 
@@ -76,9 +76,14 @@ Nightcrier is an MCP client that listens for fault events from kubernetes-mcp-se
 ### Fault Events
 
 A fault is a Warning event targeting a Pod, enriched with:
+- FaultID: Stable identifier from kubernetes-mcp-server (hex hash, not UUID)
 - Event details (reason, message, timestamp)
 - Involved object (Pod name, namespace, UID)
 - Container logs (with panic detection)
+
+**Ownership model:**
+- **FaultID**: Owned by kubernetes-mcp-server (stable, deterministic hash)
+- **IncidentID**: Owned by nightcrier (internal tracking identifier)
 
 ## Important Constraints
 

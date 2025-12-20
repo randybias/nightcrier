@@ -22,6 +22,7 @@ const (
 type Incident struct {
 	// Identity
 	IncidentID string `json:"incidentId"`
+	FaultID    string `json:"faultId"` // Stable identifier from kubernetes-mcp-server
 
 	// Lifecycle
 	Status      string     `json:"status"`      // pending, investigating, resolved, failed, agent_failed
@@ -52,6 +53,7 @@ type ResourceInfo struct {
 	Kind       string `json:"kind"`
 	Name       string `json:"name"`
 	Namespace  string `json:"namespace,omitempty"`
+	UID        string `json:"uid,omitempty"` // Kubernetes resource UID
 }
 
 // NewFromEvent creates a new Incident from a FaultEvent
@@ -60,6 +62,7 @@ func NewFromEvent(incidentID string, event *events.FaultEvent) *Incident {
 
 	incident := &Incident{
 		IncidentID:        incidentID,
+		FaultID:           event.FaultID,
 		Status:            StatusInvestigating,
 		CreatedAt:         now,
 		Cluster:           event.Cluster,
@@ -68,7 +71,7 @@ func NewFromEvent(incidentID string, event *events.FaultEvent) *Incident {
 		Severity:          event.GetSeverity(),
 		Context:           event.GetContext(),
 		Timestamp:         event.GetTimestamp(),
-		TriggeringEventID: event.SubscriptionID,
+		TriggeringEventID: event.FaultID, // Use FaultID for traceability
 	}
 
 	// Flatten resource information from event
@@ -85,6 +88,7 @@ func extractResourceInfo(event *events.FaultEvent) *ResourceInfo {
 			Kind:       event.Resource.Kind,
 			Name:       event.Resource.Name,
 			Namespace:  event.Resource.Namespace,
+			UID:        event.Resource.UID,
 		}
 	}
 

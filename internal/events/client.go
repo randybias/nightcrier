@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rbias/nightcrier/internal/config"
 )
@@ -118,9 +117,13 @@ func parseFaultEvent(data any) (*FaultEvent, error) {
 		return nil, fmt.Errorf("failed to unmarshal fault event: %w", err)
 	}
 
-	// Generate FaultID and set ReceivedAt on receipt
-	faultEvent.FaultID = uuid.New().String()
+	// Set ReceivedAt locally; FaultID comes from upstream kubernetes-mcp-server
 	faultEvent.ReceivedAt = time.Now()
+
+	// Validate FaultID is present from upstream
+	if faultEvent.FaultID == "" {
+		slog.Warn("FaultID missing from upstream event - kubernetes-mcp-server may need update")
+	}
 
 	return &faultEvent, nil
 }
