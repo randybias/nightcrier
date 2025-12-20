@@ -21,6 +21,12 @@ import (
 )
 
 var (
+	// Version information (set via ldflags at build time)
+	Version   = "dev"
+	BuildTime = "unknown"
+	GitCommit = "unknown"
+
+	// Command-line flags
 	configFile    string
 	mcpEndpoint   string
 	workspaceRoot string
@@ -37,15 +43,18 @@ func main() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "runner",
-	Short: "Kubernetes MCP Alerts Event Runner",
+	Use:   "nightcrier",
+	Short: "Nightcrier - Kubernetes Incident Triage",
 	Long:  "MCP client that listens for fault events from kubernetes-mcp-server and spawns AI agents to triage them",
 	RunE:  run,
 }
 
 func init() {
+	// Version flag
+	rootCmd.Flags().BoolP("version", "v", false, "Print version information and exit")
+
 	// Configuration file flag
-	rootCmd.Flags().StringVarP(&configFile, "config", "c", "", "Path to config file (default: searches for config.yaml in ., ./configs, /etc/runner)")
+	rootCmd.Flags().StringVarP(&configFile, "config", "c", "", "Path to config file (default: searches for config.yaml in ., ./configs, /etc/nightcrier)")
 
 	// Override flags (take precedence over config file and env vars)
 	rootCmd.Flags().StringVar(&mcpEndpoint, "mcp-endpoint", "", "MCP server endpoint URL (overrides config file and K8S_CLUSTER_MCP_ENDPOINT env var)")
@@ -59,6 +68,15 @@ func init() {
 }
 
 func run(cmd *cobra.Command, args []string) error {
+	// Handle --version flag
+	versionFlag, _ := cmd.Flags().GetBool("version")
+	if versionFlag {
+		fmt.Printf("nightcrier version %s\n", Version)
+		fmt.Printf("  Build Time: %s\n", BuildTime)
+		fmt.Printf("  Git Commit: %s\n", GitCommit)
+		return nil
+	}
+
 	// Load configuration with precedence: flags > env vars > config file > defaults
 	cfg, err := config.LoadWithConfigFile(configFile)
 	if err != nil {
@@ -107,6 +125,7 @@ func run(cmd *cobra.Command, args []string) error {
 		AgentCLI:         cfg.AgentCLI,
 		AgentImage:       cfg.AgentImage,
 		Prompt:           cfg.AgentPrompt,
+		Debug:            cfg.LogLevel == "debug",
 	}, tuning)
 
 	// Create Slack notifier (optional - only if webhook URL configured)
@@ -175,7 +194,7 @@ func processEvent(ctx context.Context, event *events.FaultEvent, workspaceMgr *a
 
 	slog.Info("processing fault event",
 		"incident_id", incidentID,
-		"event_id", event.EventID,
+		"fault_id", event.FaultID,
 		"cluster", event.Cluster,
 		"namespace", event.GetNamespace(),
 		"resource", fmt.Sprintf("%s/%s", event.GetResourceKind(), event.GetResourceName()),
@@ -476,7 +495,9 @@ func printStartupBanner(cfg *config.Config, configFile string) {
 
 	fmt.Println()
 	fmt.Println("╔═══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║         Kubernetes MCP Alerts Event Runner                    ║")
+	fmt.Println("║         Nightcrier - Kubernetes Incident Triage              ║")
+	fmt.Printf("║         Version: %-45s║\n", truncateString(Version, 45))
+	fmt.Printf("║         Built:   %-45s║\n", truncateString(BuildTime, 45))
 	fmt.Println("╠═══════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║  Config File:    %-45s ║\n", truncateString(configSource, 45))
 	fmt.Println("╠═══════════════════════════════════════════════════════════════╣")
