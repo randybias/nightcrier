@@ -7,8 +7,34 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rbias/nightcrier/internal/config"
 	"github.com/rbias/nightcrier/internal/reporting"
 )
+
+// defaultTestTuning returns a TuningConfig with default values for testing
+func defaultTestTuning() *config.TuningConfig {
+	return &config.TuningConfig{
+		HTTP: config.HTTPTuning{
+			SlackTimeoutSeconds: 10,
+		},
+		Agent: config.AgentTuning{
+			TimeoutBufferSeconds:      60,
+			InvestigationMinSizeBytes: 100,
+		},
+		Reporting: config.ReportingTuning{
+			RootCauseTruncationLength:  300,
+			FailureReasonsDisplayCount: 3,
+			MaxFailureReasonsTracked:   5,
+		},
+		Events: config.EventsTuning{
+			ChannelBufferSize: 100,
+		},
+		IO: config.IOTuning{
+			StdoutBufferSize: 1024,
+			StderrBufferSize: 1024,
+		},
+	}
+}
 
 func TestDetectAgentFailure(t *testing.T) {
 	// Create a temporary directory for test workspaces
@@ -92,33 +118,33 @@ func TestDetectAgentFailure(t *testing.T) {
 			exitCode:        0,
 			err:             nil,
 			expectFailed:    true,
-			expectReasonMsg: "investigation.md too small: 0 bytes (expected > 100)",
+			expectReasonMsg: "investigation.md too small: 0 bytes (expected >= 100)",
 		},
 		{
-			name: "failure - investigation.md too small (exactly 100 bytes)",
+			name: "failure - investigation.md too small (exactly 99 bytes)",
 			setupFunc: func(workspacePath string) error {
 				outputDir := filepath.Join(workspacePath, "output")
 				if err := os.MkdirAll(outputDir, 0755); err != nil {
 					return err
 				}
-				// Create file with exactly 100 bytes (should fail as we need > 100)
-				content := make([]byte, 100)
+				// Create file with exactly 99 bytes (should fail as we need >= 100)
+				content := make([]byte, 99)
 				return os.WriteFile(filepath.Join(outputDir, "investigation.md"), content, 0644)
 			},
 			exitCode:        0,
 			err:             nil,
 			expectFailed:    true,
-			expectReasonMsg: "investigation.md too small: 100 bytes (expected > 100)",
+			expectReasonMsg: "investigation.md too small: 99 bytes (expected >= 100)",
 		},
 		{
-			name: "success - investigation.md exactly 101 bytes (boundary test)",
+			name: "success - investigation.md exactly 100 bytes (boundary test)",
 			setupFunc: func(workspacePath string) error {
 				outputDir := filepath.Join(workspacePath, "output")
 				if err := os.MkdirAll(outputDir, 0755); err != nil {
 					return err
 				}
-				// Create file with exactly 101 bytes (should pass)
-				content := make([]byte, 101)
+				// Create file with exactly 100 bytes (should pass with >= check)
+				content := make([]byte, 100)
 				return os.WriteFile(filepath.Join(outputDir, "investigation.md"), content, 0644)
 			},
 			exitCode:        0,
@@ -153,7 +179,8 @@ func TestDetectAgentFailure(t *testing.T) {
 			}
 
 			// Call the function under test
-			failed, reason := detectAgentFailure(workspacePath, tt.exitCode, tt.err)
+			tuning := defaultTestTuning()
+			failed, reason := detectAgentFailure(workspacePath, tt.exitCode, tt.err, tuning)
 
 			// Validate results
 			if failed != tt.expectFailed {
@@ -185,7 +212,8 @@ func TestDetectAgentFailure_ExitCodeCheckedBeforeFileChecks(t *testing.T) {
 	}
 
 	// Don't create any files
-	failed, reason := detectAgentFailure(workspacePath, 1, nil)
+	tuning := defaultTestTuning()
+	failed, reason := detectAgentFailure(workspacePath, 1, nil, tuning)
 
 	if !failed {
 		t.Error("expected failure when exit code is non-zero")
@@ -206,7 +234,8 @@ func TestDetectAgentFailure_ExecutionErrorCheckedFirst(t *testing.T) {
 	}
 
 	testErr := errors.New("test error")
-	failed, reason := detectAgentFailure(workspacePath, 0, testErr)
+	tuning := defaultTestTuning()
+	failed, reason := detectAgentFailure(workspacePath, 0, testErr, tuning)
 
 	if !failed {
 		t.Error("expected failure when execution error is present")
@@ -329,7 +358,8 @@ func TestProcessEvent_Integration(t *testing.T) {
 			execErr := tt.mockAgentError
 
 			// Call detectAgentFailure (this is the core validation logic)
-			agentFailed, failureReason := detectAgentFailure(workspacePath, exitCode, execErr)
+			tuning := defaultTestTuning()
+			agentFailed, failureReason := detectAgentFailure(workspacePath, exitCode, execErr, tuning)
 
 			// Verify agent failure detection
 			if tt.expectStatus == "agent_failed" {
@@ -474,7 +504,8 @@ func TestCircuitBreakerIntegration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create circuit breaker
-			cb := reporting.NewCircuitBreaker(tt.threshold)
+			tuning := defaultTestTuning()
+			cb := reporting.NewCircuitBreaker(tt.threshold, tuning)
 
 			// Track alerts
 			alertCount := 0
@@ -589,7 +620,8 @@ func TestCircuitBreakerThresholdConfiguration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cb := reporting.NewCircuitBreaker(tt.configuredThreshold)
+			tuning := defaultTestTuning()
+			cb := reporting.NewCircuitBreaker(tt.configuredThreshold, tuning)
 
 			// Record the specified number of failures
 			for i := 0; i < tt.failureCount; i++ {
@@ -754,7 +786,8 @@ func TestIndividualNotificationsAlwaysSkippedForAgentFailures(t *testing.T) {
 
 // TestCircuitBreakerAlertContent verifies the alert contains required information
 func TestCircuitBreakerAlertContent(t *testing.T) {
-	cb := reporting.NewCircuitBreaker(3)
+	tuning := defaultTestTuning()
+	cb := reporting.NewCircuitBreaker(3, tuning)
 
 	// Record failures with different reasons
 	reasons := []string{
@@ -809,7 +842,8 @@ func TestCircuitBreakerAlertContent(t *testing.T) {
 
 // TestCircuitBreakerFullScenario tests a complete failure and recovery cycle
 func TestCircuitBreakerFullScenario(t *testing.T) {
-	cb := reporting.NewCircuitBreaker(3)
+	tuning := defaultTestTuning()
+	cb := reporting.NewCircuitBreaker(3, tuning)
 
 	// Scenario: 3 failures -> alert -> 2 more failures (no new alert) -> success -> recovery alert
 	// Then repeat cycle to verify state is fully reset
@@ -912,7 +946,8 @@ func TestCircuitBreakerRecoveryNotificationFlow(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cb := reporting.NewCircuitBreaker(tt.threshold)
+			tuning := defaultTestTuning()
+			cb := reporting.NewCircuitBreaker(tt.threshold, tuning)
 
 			// Record failures
 			for i := 0; i < tt.failuresBeforeAlert; i++ {
@@ -935,7 +970,8 @@ func TestCircuitBreakerRecoveryNotificationFlow(t *testing.T) {
 
 // TestCircuitBreakerNoAlertSpam verifies no repeated alerts without recovery
 func TestCircuitBreakerNoAlertSpam(t *testing.T) {
-	cb := reporting.NewCircuitBreaker(2)
+	tuning := defaultTestTuning()
+	cb := reporting.NewCircuitBreaker(2, tuning)
 
 	// Record failures to open circuit
 	cb.RecordFailure("failure 1")
@@ -968,7 +1004,8 @@ func TestCircuitBreakerDifferentThresholds(t *testing.T) {
 
 	for _, threshold := range thresholds {
 		t.Run(fmt.Sprintf("threshold=%d", threshold), func(t *testing.T) {
-			cb := reporting.NewCircuitBreaker(threshold)
+			tuning := defaultTestTuning()
+			cb := reporting.NewCircuitBreaker(threshold, tuning)
 
 			// Record failures up to threshold-1
 			for i := 1; i < threshold; i++ {

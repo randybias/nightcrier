@@ -11,12 +11,16 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/rbias/nightcrier/internal/config"
 )
 
 // SlackNotifier sends incident notifications to Slack
 type SlackNotifier struct {
-	WebhookURL string
-	httpClient *http.Client
+	WebhookURL                   string
+	httpClient                   *http.Client
+	rootCauseTruncationLength    int
+	failureReasonsDisplayCount   int
 }
 
 // SlackMessage represents a Slack webhook message
@@ -76,12 +80,14 @@ type IncidentSummary struct {
 }
 
 // NewSlackNotifier creates a new Slack notifier
-func NewSlackNotifier(webhookURL string) *SlackNotifier {
+func NewSlackNotifier(webhookURL string, tuning *config.TuningConfig) *SlackNotifier {
 	return &SlackNotifier{
 		WebhookURL: webhookURL,
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: time.Duration(tuning.HTTP.SlackTimeoutSeconds) * time.Second,
 		},
+		rootCauseTruncationLength:  tuning.Reporting.RootCauseTruncationLength,
+		failureReasonsDisplayCount: tuning.Reporting.FailureReasonsDisplayCount,
 	}
 }
 
@@ -187,10 +193,10 @@ func (s *SlackNotifier) SendSystemDegradedAlert(ctx context.Context, stats Failu
 	// Format the failure count
 	failureCount := fmt.Sprintf("%d", stats.Count)
 
-	// Get the last 3 failure reasons
+	// Get the last N failure reasons (configured via tuning)
 	sampleReasons := stats.RecentReasons
-	if len(sampleReasons) > 3 {
-		sampleReasons = sampleReasons[len(sampleReasons)-3:]
+	if len(sampleReasons) > s.failureReasonsDisplayCount {
+		sampleReasons = sampleReasons[len(sampleReasons)-s.failureReasonsDisplayCount:]
 	}
 
 	// Format sample reasons as a bullet list
@@ -225,7 +231,7 @@ func (s *SlackNotifier) SendSystemDegradedAlert(ctx context.Context, stats Failu
 			Type: "section",
 			Text: &SlackText{
 				Type: "mrkdwn",
-				Text: fmt.Sprintf("*Sample Failure Reasons (last 3):*\n%s", reasonsText),
+				Text: fmt.Sprintf("*Sample Failure Reasons (last %d):*\n%s", s.failureReasonsDisplayCount, reasonsText),
 			},
 		},
 		{
@@ -326,6 +332,14 @@ func (s *SlackNotifier) send(msg SlackMessage) error {
 	return nil
 }
 
+// TruncateRootCause truncates the root cause text to the configured length
+func (s *SlackNotifier) TruncateRootCause(rootCause string) string {
+	if len(rootCause) > s.rootCauseTruncationLength {
+		return rootCause[:s.rootCauseTruncationLength-3] + "..."
+	}
+	return rootCause
+}
+
 // ExtractSummaryFromReport reads an investigation report and extracts key information
 func ExtractSummaryFromReport(workspacePath string) (rootCause, confidence string, err error) {
 	reportPath := filepath.Join(workspacePath, "output", "investigation.md")
@@ -377,10 +391,6 @@ func ExtractSummaryFromReport(workspacePath string) (rootCause, confidence strin
 
 	if len(rootCauseLines) > 0 {
 		rootCause = strings.Join(rootCauseLines, " ")
-		// Truncate if too long
-		if len(rootCause) > 300 {
-			rootCause = rootCause[:297] + "..."
-		}
 	} else {
 		rootCause = "See investigation report for details"
 	}

@@ -12,55 +12,77 @@
 set -euo pipefail
 
 # =============================================================================
-# Default Configuration (override via environment or flags)
+# Environment Variable Configuration
+# =============================================================================
+#
+# ALL configuration must be provided via environment variables or command-line flags.
+# No default values are provided in this script.
+# When invoked by nightcrier (Go), all values are set via environment variables.
+# When invoked manually, use command-line flags or set environment variables.
+#
+# Required environment variables (when invoked by nightcrier):
+#   AGENT_IMAGE          - Docker image to use
+#   AGENT_CLI            - AI CLI (claude, codex, goose, gemini)
+#   LLM_MODEL            - Model to use (agent-agnostic)
+#   AGENT_ALLOWED_TOOLS  - Allowed tools for agent (agent-agnostic)
+#   CONTAINER_TIMEOUT    - Timeout in seconds
+#
+# Optional environment variables:
+#   ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, GOOGLE_API_KEY
+#   WORKSPACE_DIR, OUTPUT_DIR, OUTPUT_FILE
+#   KUBECONFIG_PATH, KUBERNETES_CONTEXT
+#   OUTPUT_FORMAT        - Output format (agent-agnostic)
+#   SYSTEM_PROMPT        - System prompt text (agent-agnostic)
+#   SYSTEM_PROMPT_FILE   - System prompt file path (agent-agnostic)
+#   AGENT_VERBOSE        - Enable verbose output
+#   AGENT_MAX_TURNS      - Maximum conversation turns
+#   CONTAINER_MEMORY, CONTAINER_CPUS, CONTAINER_NETWORK, CONTAINER_USER
+#   SKILLS_DIR, DEBUG
+#
+# Legacy Claude-specific variables (still supported for backward compatibility):
+#   CLAUDE_MODEL, CLAUDE_ALLOWED_TOOLS, CLAUDE_OUTPUT_FORMAT, CLAUDE_SYSTEM_PROMPT_FILE
+#
 # =============================================================================
 
-# Docker image
-AGENT_IMAGE="${AGENT_IMAGE:-nightcrier-agent:latest}"
-
-# Agent selection (claude, codex, goose, gemini)
-AGENT_CLI="${AGENT_CLI:-claude}"
-
-# API Authentication (set the appropriate one for your agent)
+# Initialize variables from environment (no defaults)
+AGENT_IMAGE="${AGENT_IMAGE:-}"
+AGENT_CLI="${AGENT_CLI:-}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 GEMINI_API_KEY="${GEMINI_API_KEY:-}"
 GOOGLE_API_KEY="${GOOGLE_API_KEY:-}"
-
-# Workspace configuration
-# IMPORTANT: Workspace should be an INCIDENT directory, not source code!
-# incident.json and output/ from this directory are mounted into the container.
-WORKSPACE_DIR="${WORKSPACE_DIR:-}"  # Required - must be specified
-
-# Output configuration
-OUTPUT_DIR="${OUTPUT_DIR:-}"  # If empty, uses WORKSPACE_DIR/output
-OUTPUT_FILE="${OUTPUT_FILE:-}"  # If empty, auto-generates based on timestamp
-
-# Kubernetes configuration
-KUBECONFIG_PATH="${KUBECONFIG_PATH:-${HOME}/.kube/config}"
+WORKSPACE_DIR="${WORKSPACE_DIR:-}"
+OUTPUT_DIR="${OUTPUT_DIR:-}"
+OUTPUT_FILE="${OUTPUT_FILE:-}"
+KUBECONFIG_PATH="${KUBECONFIG_PATH:-}"
 KUBERNETES_CONTEXT="${KUBERNETES_CONTEXT:-}"
 
-# Claude CLI options (default agent)
-CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
-CLAUDE_OUTPUT_FORMAT="${CLAUDE_OUTPUT_FORMAT:-text}"
-CLAUDE_ALLOWED_TOOLS="${CLAUDE_ALLOWED_TOOLS:-Read,Grep,Glob,Bash}"
-CLAUDE_SYSTEM_PROMPT="${CLAUDE_SYSTEM_PROMPT:-}"
-CLAUDE_SYSTEM_PROMPT_FILE="${CLAUDE_SYSTEM_PROMPT_FILE:-}"
-CLAUDE_VERBOSE="${CLAUDE_VERBOSE:-false}"
-CLAUDE_MAX_TURNS="${CLAUDE_MAX_TURNS:-}"
+# Generic agent-agnostic variables (preferred)
+LLM_MODEL="${LLM_MODEL:-}"
+AGENT_ALLOWED_TOOLS="${AGENT_ALLOWED_TOOLS:-}"
+OUTPUT_FORMAT="${OUTPUT_FORMAT:-}"
+SYSTEM_PROMPT="${SYSTEM_PROMPT:-}"
+SYSTEM_PROMPT_FILE="${SYSTEM_PROMPT_FILE:-}"
+AGENT_VERBOSE="${AGENT_VERBOSE:-}"
+AGENT_MAX_TURNS="${AGENT_MAX_TURNS:-}"
 
-# Container options
-CONTAINER_TIMEOUT="${CONTAINER_TIMEOUT:-600}"
-CONTAINER_MEMORY="${CONTAINER_MEMORY:-2g}"
+# Legacy Claude-specific variables (for backward compatibility)
+# Fall back to these if generic ones not set
+[[ -z "$LLM_MODEL" && -n "${CLAUDE_MODEL:-}" ]] && LLM_MODEL="$CLAUDE_MODEL"
+[[ -z "$AGENT_ALLOWED_TOOLS" && -n "${CLAUDE_ALLOWED_TOOLS:-}" ]] && AGENT_ALLOWED_TOOLS="$CLAUDE_ALLOWED_TOOLS"
+[[ -z "$OUTPUT_FORMAT" && -n "${CLAUDE_OUTPUT_FORMAT:-}" ]] && OUTPUT_FORMAT="$CLAUDE_OUTPUT_FORMAT"
+[[ -z "$SYSTEM_PROMPT" && -n "${CLAUDE_SYSTEM_PROMPT:-}" ]] && SYSTEM_PROMPT="$CLAUDE_SYSTEM_PROMPT"
+[[ -z "$SYSTEM_PROMPT_FILE" && -n "${CLAUDE_SYSTEM_PROMPT_FILE:-}" ]] && SYSTEM_PROMPT_FILE="$CLAUDE_SYSTEM_PROMPT_FILE"
+[[ -z "$AGENT_VERBOSE" && -n "${CLAUDE_VERBOSE:-}" ]] && AGENT_VERBOSE="$CLAUDE_VERBOSE"
+[[ -z "$AGENT_MAX_TURNS" && -n "${CLAUDE_MAX_TURNS:-}" ]] && AGENT_MAX_TURNS="$CLAUDE_MAX_TURNS"
+
+CONTAINER_TIMEOUT="${CONTAINER_TIMEOUT:-}"
+CONTAINER_MEMORY="${CONTAINER_MEMORY:-}"
 CONTAINER_CPUS="${CONTAINER_CPUS:-}"
-CONTAINER_NETWORK="${CONTAINER_NETWORK:-host}"
+CONTAINER_NETWORK="${CONTAINER_NETWORK:-}"
 CONTAINER_USER="${CONTAINER_USER:-}"
-
-# Skills
 SKILLS_DIR="${SKILLS_DIR:-}"
-
-# Debug mode
-DEBUG="${DEBUG:-false}"
+DEBUG="${DEBUG:-}"
 
 # =============================================================================
 # Help
@@ -223,31 +245,31 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -m|--model)
-            CLAUDE_MODEL="$2"
+            LLM_MODEL="$2"
             shift 2
             ;;
         -o|--output-format)
-            CLAUDE_OUTPUT_FORMAT="$2"
+            OUTPUT_FORMAT="$2"
             shift 2
             ;;
         -t|--allowed-tools)
-            CLAUDE_ALLOWED_TOOLS="$2"
+            AGENT_ALLOWED_TOOLS="$2"
             shift 2
             ;;
         -s|--system-prompt)
-            CLAUDE_SYSTEM_PROMPT="$2"
+            SYSTEM_PROMPT="$2"
             shift 2
             ;;
         --system-prompt-file)
-            CLAUDE_SYSTEM_PROMPT_FILE="$2"
+            SYSTEM_PROMPT_FILE="$2"
             shift 2
             ;;
         -v|--verbose)
-            CLAUDE_VERBOSE="true"
+            AGENT_VERBOSE="true"
             shift
             ;;
         --max-turns)
-            CLAUDE_MAX_TURNS="$2"
+            AGENT_MAX_TURNS="$2"
             shift 2
             ;;
         -i|--image)
@@ -295,15 +317,45 @@ done
 # Validation
 # =============================================================================
 
+# Validate required environment variables when invoked programmatically
+# (These can be overridden by command-line flags for manual usage)
+validate_required_vars() {
+    local missing=()
+
+    # Check required vars that should always be set by nightcrier
+    [[ -z "$AGENT_CLI" ]] && missing+=("AGENT_CLI")
+    [[ -z "$AGENT_IMAGE" ]] && missing+=("AGENT_IMAGE")
+    [[ -z "$LLM_MODEL" ]] && missing+=("LLM_MODEL")
+    [[ -z "$AGENT_ALLOWED_TOOLS" ]] && missing+=("AGENT_ALLOWED_TOOLS")
+    [[ -z "$CONTAINER_TIMEOUT" ]] && missing+=("CONTAINER_TIMEOUT")
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "Error: Required environment variables not set: ${missing[*]}" >&2
+        echo "These must be set by the calling application (nightcrier) or via environment." >&2
+        echo "For manual usage, use command-line flags instead (see --help)." >&2
+        return 1
+    fi
+    return 0
+}
+
+# Only validate required vars if they're not being set by flags
+# (detect if we're being called programmatically vs manually)
+if [[ $# -eq 0 ]]; then
+    # No arguments - must be called programmatically with env vars
+    validate_required_vars || exit 1
+fi
+
 # Validate agent selection
-case "$AGENT_CLI" in
-    claude|codex|goose|gemini)
-        ;;
-    *)
-        echo "Error: Invalid agent '$AGENT_CLI'. Must be one of: claude, codex, goose, gemini" >&2
-        exit 1
-        ;;
-esac
+if [[ -n "$AGENT_CLI" ]]; then
+    case "$AGENT_CLI" in
+        claude|codex|goose|gemini)
+            ;;
+        *)
+            echo "Error: Invalid agent '$AGENT_CLI'. Must be one of: claude, codex, goose, gemini" >&2
+            exit 1
+            ;;
+    esac
+fi
 
 # Validate API key for selected agent
 validate_api_key() {
@@ -451,9 +503,9 @@ if [[ -n "$SKILLS_DIR" && -d "$SKILLS_DIR" ]]; then
 fi
 
 # Mount system prompt file if specified
-if [[ -n "$CLAUDE_SYSTEM_PROMPT_FILE" && -f "$CLAUDE_SYSTEM_PROMPT_FILE" ]]; then
-    CLAUDE_SYSTEM_PROMPT_FILE_ABS="$(cd "$(dirname "$CLAUDE_SYSTEM_PROMPT_FILE")" && pwd)/$(basename "$CLAUDE_SYSTEM_PROMPT_FILE")"
-    DOCKER_ARGS+=("-v" "${CLAUDE_SYSTEM_PROMPT_FILE_ABS}:/tmp/system-prompt.txt:ro")
+if [[ -n "$SYSTEM_PROMPT_FILE" && -f "$SYSTEM_PROMPT_FILE" ]]; then
+    SYSTEM_PROMPT_FILE_ABS="$(cd "$(dirname "$SYSTEM_PROMPT_FILE")" && pwd)/$(basename "$SYSTEM_PROMPT_FILE")"
+    DOCKER_ARGS+=("-v" "${SYSTEM_PROMPT_FILE_ABS}:/tmp/system-prompt.txt:ro")
 fi
 
 # Working directory IS the agent home - everything in one place
@@ -474,38 +526,38 @@ build_agent_command() {
             cmd="claude -p '${PROMPT//\'/\'\\\'\'}'"
 
             # Model
-            if [[ -n "$CLAUDE_MODEL" ]]; then
-                cmd+=" --model $CLAUDE_MODEL"
+            if [[ -n "$LLM_MODEL" ]]; then
+                cmd+=" --model $LLM_MODEL"
             fi
 
             # Output format
-            if [[ -n "$CLAUDE_OUTPUT_FORMAT" ]]; then
-                cmd+=" --output-format $CLAUDE_OUTPUT_FORMAT"
+            if [[ -n "$OUTPUT_FORMAT" ]]; then
+                cmd+=" --output-format $OUTPUT_FORMAT"
             fi
 
             # Allowed tools
-            if [[ -n "$CLAUDE_ALLOWED_TOOLS" ]]; then
-                cmd+=" --allowedTools $CLAUDE_ALLOWED_TOOLS"
+            if [[ -n "$AGENT_ALLOWED_TOOLS" ]]; then
+                cmd+=" --allowedTools $AGENT_ALLOWED_TOOLS"
             fi
 
             # System prompt (inline)
-            if [[ -n "$CLAUDE_SYSTEM_PROMPT" ]]; then
-                cmd+=" --append-system-prompt '${CLAUDE_SYSTEM_PROMPT//\'/\'\\\'\'}'"
+            if [[ -n "$SYSTEM_PROMPT" ]]; then
+                cmd+=" --append-system-prompt '${SYSTEM_PROMPT//\'/\'\\\'\'}'"
             fi
 
             # System prompt (file)
-            if [[ -n "$CLAUDE_SYSTEM_PROMPT_FILE" ]]; then
+            if [[ -n "$SYSTEM_PROMPT_FILE" ]]; then
                 cmd+=" --append-system-prompt-file /tmp/system-prompt.txt"
             fi
 
             # Verbose
-            if [[ "$CLAUDE_VERBOSE" == "true" ]]; then
+            if [[ "$AGENT_VERBOSE" == "true" ]]; then
                 cmd+=" --verbose"
             fi
 
             # Max turns
-            if [[ -n "$CLAUDE_MAX_TURNS" ]]; then
-                cmd+=" --max-turns $CLAUDE_MAX_TURNS"
+            if [[ -n "$AGENT_MAX_TURNS" ]]; then
+                cmd+=" --max-turns $AGENT_MAX_TURNS"
             fi
             ;;
 
@@ -518,10 +570,10 @@ build_agent_command() {
             # AGENTS.md is in /home/agent (the working directory) so Codex finds it automatically
             cmd="echo -n \"\${OPENAI_API_KEY}\" > /tmp/.codex-key && codex login --with-api-key < /tmp/.codex-key && rm -f /tmp/.codex-key && codex exec --skip-git-repo-check --enable skills --dangerously-bypass-approvals-and-sandbox"
 
-            # Model (default: gpt-5.2 for general tasks)
-            # Note: Codex uses -m flag same as Claude, but with OpenAI model names
-            if [[ -n "$CLAUDE_MODEL" ]]; then
-                case "$CLAUDE_MODEL" in
+            # Model mapping for Codex
+            # Codex uses OpenAI model names, but we support friendly aliases
+            if [[ -n "$LLM_MODEL" ]]; then
+                case "$LLM_MODEL" in
                     opus|gpt-5-codex)
                         cmd+=" -m gpt-5-codex"
                         ;;
@@ -533,22 +585,32 @@ build_agent_command() {
                         ;;
                     *)
                         # Pass through custom model name
-                        cmd+=" -m $CLAUDE_MODEL"
+                        cmd+=" -m $LLM_MODEL"
                         ;;
                 esac
-            else
-                cmd+=" -m gpt-5.2"
             fi
 
             cmd+=" '${PROMPT//\'/\'\\\'\'}'"
             ;;
 
         goose)
-            cmd="goose run '${PROMPT//\'/\'\\\'\'}'"
+            cmd="goose run"
+
+            # Model for Goose (supports various providers)
+            if [[ -n "$LLM_MODEL" ]]; then
+                cmd+=" --model $LLM_MODEL"
+            fi
+
+            cmd+=" '${PROMPT//\'/\'\\\'\'}'"
             ;;
 
         gemini)
             cmd="gemini -p '${PROMPT//\'/\'\\\'\'}'"
+
+            # Model for Gemini
+            if [[ -n "$LLM_MODEL" ]]; then
+                cmd+=" --model $LLM_MODEL"
+            fi
             ;;
     esac
 

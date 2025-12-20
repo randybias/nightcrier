@@ -403,7 +403,7 @@ func TestSlackButtonMarshaling(t *testing.T) {
 
 func TestSendSystemDegradedAlert_BasicMessage(t *testing.T) {
 	// Create a notifier (webhook URL not needed for message format testing)
-	notifier := NewSlackNotifier("")
+	notifier := NewSlackNotifier("", defaultTestTuning())
 
 	// Create sample failure stats
 	now := time.Now()
@@ -502,7 +502,7 @@ func TestSendSystemDegradedAlert_BasicMessage(t *testing.T) {
 }
 
 func TestSendSystemDegradedAlert_MoreThanThreeReasons(t *testing.T) {
-	notifier := NewSlackNotifier("")
+	notifier := NewSlackNotifier("", defaultTestTuning())
 
 	now := time.Now()
 	stats := FailureStats{
@@ -586,7 +586,7 @@ func TestSendSystemDegradedAlert_MoreThanThreeReasons(t *testing.T) {
 }
 
 func TestSendSystemDegradedAlert_NoReasons(t *testing.T) {
-	notifier := NewSlackNotifier("")
+	notifier := NewSlackNotifier("", defaultTestTuning())
 
 	now := time.Now()
 	stats := FailureStats{
@@ -663,7 +663,7 @@ func TestSendSystemDegradedAlert_NoReasons(t *testing.T) {
 }
 
 func TestSendSystemDegradedAlert_ZeroDuration(t *testing.T) {
-	notifier := NewSlackNotifier("")
+	notifier := NewSlackNotifier("", defaultTestTuning())
 
 	now := time.Now()
 	stats := FailureStats{
@@ -742,7 +742,7 @@ func TestSendSystemDegradedAlert_ZeroDuration(t *testing.T) {
 
 func TestSendSystemRecoveredAlert_BasicMessage(t *testing.T) {
 	// Create a notifier (webhook URL not needed for message format testing)
-	notifier := NewSlackNotifier("")
+	notifier := NewSlackNotifier("", defaultTestTuning())
 
 	// Create sample failure stats representing a recovery
 	now := time.Now()
@@ -837,7 +837,7 @@ func TestSendSystemRecoveredAlert_BasicMessage(t *testing.T) {
 }
 
 func TestSendSystemRecoveredAlert_ZeroDuration(t *testing.T) {
-	notifier := NewSlackNotifier("")
+	notifier := NewSlackNotifier("", defaultTestTuning())
 
 	now := time.Now()
 	stats := FailureStats{
@@ -908,7 +908,7 @@ func TestSendSystemRecoveredAlert_ZeroDuration(t *testing.T) {
 }
 
 func TestSendSystemRecoveredAlert_HighFailureCount(t *testing.T) {
-	notifier := NewSlackNotifier("")
+	notifier := NewSlackNotifier("", defaultTestTuning())
 
 	now := time.Now()
 	stats := FailureStats{
