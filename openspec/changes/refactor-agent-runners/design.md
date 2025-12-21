@@ -182,11 +182,21 @@ Gemini CLI automatically saves sessions in hashed folders under `~/.gemini/tmp/`
 
 **Location**: `~/.config/goose/sessions.db` (SQLite database)
 
-As of Goose v1.10.0, sessions are stored in a SQLite database rather than individual .jsonl files. Configuration lives in `~/.config/goose/config.yaml`.
+As of Goose v1.18.0, sessions are stored in a SQLite database rather than individual .jsonl files. Configuration lives in `~/.config/goose/config.yaml`.
 
-**Extraction approach**: Extract `~/.config/goose/` directory. Command extraction would require SQLite queries rather than JSONL parsing - more complex than other agents.
+**Extraction approach**: Extract `~/.config/goose/` directory. Command extraction requires SQLite queries rather than JSONL parsing - more complex than other agents. Basic session extraction implemented with `sqlite3` for session metadata.
 
 **Provider consideration**: Goose works with any LLM and supports multi-model configuration. The session storage format is provider-agnostic (same SQLite structure regardless of which LLM backend is used), so no provider-specific post-hooks are needed.
+
+**Installation details**: Goose v1.18.0 installed via direct binary download (tar.bz2). The official installer script fails in containers due to `goose-configure` requiring connectivity. Minimal X11 libraries (libxcb1, libx11-6, libx11-xcb1) required even in CLI mode.
+
+**Context file integration**: Goose CLI uses `.goosehints` files for persistent context:
+- Similar to Gemini's GEMINI.md but different filename
+- Located in working directory or home directory
+- Automatically loaded as additional context
+- Used to provide k8s-troubleshooter skill reference
+
+**Configuration**: Pre-configured with OpenAI provider and gpt-4.1 model as cost-effective default. Uses `GOOSE_DISABLE_KEYRING=1` environment variable to bypass keyring in headless/container environments.
 
 ## Implementation Details
 
@@ -216,6 +226,16 @@ As of Goose v1.10.0, sessions are stored in a SQLite database rather than indivi
 - ✓ DEBUG mode session extraction: `.gemini/tmp/*/chats/session-*.json`
 - ✓ Session file path fixed from `logs.json` to `session-*.json`
 - ✓ Variable scope fixed (removed invalid `local` outside function)
+
+**Goose**:
+- ✓ Goose v1.18.0 binary installed directly (installer script fails in containers)
+- ✓ Minimal X11 libraries installed for headless operation
+- ✓ .goosehints context file created with k8s-troubleshooter skill reference
+- ✓ Pre-configured with OpenAI gpt-4.1 for cost-effective testing
+- ✓ GOOSE_DISABLE_KEYRING=1 working for headless environments
+- ✓ Basic execution: `goose run --text` command working
+- ✓ Context loading: Goose recognizes k8s-troubleshooter skill from .goosehints
+- ✓ DEBUG mode infrastructure in place (session extraction requires INCIDENT_ID)
 
 **Test Suite Created**:
 - 6 isolated test scripts (45+ test cases total)

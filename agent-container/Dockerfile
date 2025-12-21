@@ -88,9 +88,14 @@ RUN npm install -g @openai/codex
 # Google Gemini CLI
 RUN npm install -g @google/gemini-cli
 
-# Block Goose CLI - skipped (still requires libxcb.so.1 X11 libs even in "CLI" mode)
-# Install command when they fix headless:
-# RUN curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash
+# Block Goose CLI - install minimal X11 libs for headless operation
+# Goose CLI needs libxcb for keyring access, use GOOSE_DISABLE_KEYRING=1 to bypass
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libxcb1 \
+    libx11-6 \
+    libx11-xcb1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash
 
 # Create non-root user for security (matches typical container best practices)
 # Using UID 1000 which is common default for first non-root user
@@ -203,6 +208,64 @@ Write a markdown report with:
 EOF
 
 RUN chown ${USER_NAME}:${USER_NAME} /home/${USER_NAME}/GEMINI.md
+
+# Create .goosehints for Goose CLI (uses hint files instead of skills)
+RUN cat > /home/${USER_NAME}/.goosehints << 'EOF'
+# Kubernetes Incident Triage Agent
+
+You are a Kubernetes incident triage agent investigating a production incident.
+
+## k8s-troubleshooter Skill
+
+You have access to the k8s-troubleshooter skill for Kubernetes troubleshooting.
+Read `/home/agent/.claude/skills/k8s-troubleshooter/SKILL.md` for detailed instructions and available tools.
+
+The skill includes reference scripts in `/home/agent/.claude/skills/k8s-troubleshooter/scripts/`:
+- `incident_triage.sh` - Initial incident triage workflow
+- `pod_diagnostics.sh` - Pod-level diagnostics and analysis
+- `network_debug.sh` - Network connectivity troubleshooting
+- `resource_analysis.sh` - Resource usage and quota analysis
+- `pvc_debug.sh` - Persistent volume troubleshooting
+- `helm_release_debug.sh` - Helm release diagnostics
+
+## Files
+
+- `incident.json` - The Kubernetes incident that triggered this investigation
+- `output/investigation.md` - Write your findings here
+
+## Instructions
+
+1. Read `incident.json` to understand the incident
+2. Use kubectl to investigate (read-only: get, describe, logs)
+3. Use the k8s-troubleshooter skill tools as needed
+4. Write findings to `output/investigation.md`
+
+## Output Format
+
+Write a markdown report with:
+- Executive Summary (1-2 sentences)
+- Root Cause Analysis
+- Evidence (relevant kubectl outputs)
+- Recommendations
+
+## Safety
+
+- Read-only kubectl commands only
+- Do not modify cluster state
+EOF
+
+RUN chown ${USER_NAME}:${USER_NAME} /home/${USER_NAME}/.goosehints
+
+# Pre-configure Goose with OpenAI provider (default for cost-effective testing)
+RUN mkdir -p /home/${USER_NAME}/.config/goose && \
+    cat > /home/${USER_NAME}/.config/goose/config.yaml << 'EOF'
+GOOSE_PROVIDER: openai
+GOOSE_MODEL: gpt-4.1
+OPENAI_HOST: https://api.openai.com
+OPENAI_BASE_PATH: v1/chat/completions
+EOF
+
+RUN chown -R ${USER_NAME}:${USER_NAME} /home/${USER_NAME}/.config
 
 # Switch to non-root user
 USER ${USER_NAME}

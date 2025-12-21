@@ -34,6 +34,13 @@ The system SHALL capture and persist AI agent session archives in DEBUG mode usi
 - **Then** the system SHALL extract `/home/agent/.gemini` from the container
 - **And** the archive SHALL contain Gemini's session JSON files in `tmp/*/chats/session-*.json` format
 
+#### Scenario: Goose-specific session extraction
+- **Given** an agent executes in DEBUG mode
+- **And** the agent is Goose (`AGENT_CLI=goose`)
+- **When** `runners/goose-post.sh` executes
+- **Then** the system SHALL extract `/home/agent/.config/goose` from the container
+- **And** the archive SHALL contain Goose's SQLite session database (`sessions.db`)
+
 #### Scenario: Session archive graceful handling
 - **Given** a post-run hook attempts session extraction
 - **When** the session directory doesn't exist or extraction fails
@@ -73,6 +80,15 @@ The system SHALL extract and log all commands executed by the agent during inves
 - **Then** `runners/gemini-post.sh` SHALL parse the Gemini session JSON files
 - **And** it SHALL extract all bash tool executions from the messages array
 - **And** it SHALL write commands to `{workspace}/logs/agent-commands-executed.log`
+
+#### Scenario: Commands extracted from Goose session
+- **Given** an agent executes in DEBUG mode
+- **And** the agent is Goose (`AGENT_CLI=goose`)
+- **When** the agent completes
+- **Then** `runners/goose-post.sh` SHALL create a minimal commands log
+- **And** the log SHALL note that Goose uses SQLite database storage
+- **And** if `sqlite3` is available, it SHALL extract basic session metadata
+- **And** it SHALL write the log to `{workspace}/logs/agent-commands-executed.log`
 
 #### Scenario: Commands log format
 - **Given** commands are being extracted from any agent's session

@@ -25,10 +25,13 @@
 - [x] 4.4 Test Gemini sub-runner command generation validated
 
 ## 5. Goose Sub-Runner
-- [ ] 5.1 Create `runners/goose.sh` - extract Goose CLI command building (DEFERRED per user request)
-- [ ] 5.2 Research Goose session storage (varies by provider)
-- [ ] 5.3 Create `runners/goose-post.sh` - stub or implement session extraction
-- [ ] 5.4 Test Goose sub-runner (if configured)
+- [x] 5.1 Create `runners/goose.sh` - Goose CLI command building with GOOSE_DISABLE_KEYRING=1
+- [x] 5.2 Research Goose session storage (SQLite database at ~/.config/goose/sessions.db)
+- [x] 5.3 Create `runners/goose-post.sh` - implement basic SQLite session extraction
+- [x] 5.4 Test Goose sub-runner with OpenAI gpt-4.1
+- [x] 5.5 Install Goose v1.18.0 binary directly in Dockerfile (installer script fails in containers)
+- [x] 5.6 Add .goosehints context file with k8s-troubleshooter skill reference
+- [x] 5.7 Pre-configure Goose with OpenAI provider and gpt-4.1 model
 
 ## 6. Refactor Main Orchestrator
 - [x] 6.1 Refactor `run-agent.sh` to source `common.sh` for shared functions

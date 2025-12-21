@@ -18,6 +18,20 @@ The system SHALL provide agent-specific context files for skill integration wher
 - **AND** it SHALL load context from /home/agent/GEMINI.md (project level)
 - **AND** all loaded context files SHALL be concatenated and provided to the model
 
+#### Scenario: Goose context file
+- **WHEN** the container is built
+- **THEN** a .goosehints file SHALL be created in /home/agent/
+- **AND** it SHALL contain instructions for Kubernetes incident triage
+- **AND** it SHALL reference the k8s-troubleshooter skill location and available scripts
+- **AND** Goose CLI SHALL automatically load this file as additional context
+
+#### Scenario: Goose configuration
+- **WHEN** the container is built
+- **THEN** a config.yaml file SHALL be created in /home/agent/.config/goose/
+- **AND** it SHALL be pre-configured with GOOSE_PROVIDER: openai
+- **AND** it SHALL be pre-configured with GOOSE_MODEL: gpt-4.1
+- **AND** the Goose runner SHALL set GOOSE_DISABLE_KEYRING=1 for headless operation
+
 ### Requirement: Modular Agent Runners
 The system SHALL provide modular sub-runner scripts for each supported AI CLI agent.
 
