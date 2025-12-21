@@ -690,6 +690,19 @@ func readIncidentArtifacts(workspacePath, incidentID string, logPaths agent.LogP
 		}
 	}
 
+	// Read commands executed log (DEBUG mode only - generated from session JSONL)
+	commandsLogPath := filepath.Join(workspacePath, "logs", "agent-commands-executed.log")
+	if commandsData, err := os.ReadFile(commandsLogPath); err != nil {
+		slog.Debug("agent commands log not found (this is normal in production mode)",
+			"path", commandsLogPath,
+			"error", err)
+	} else {
+		agentLogs.CommandsExecuted = commandsData
+		slog.Debug("read agent commands log",
+			"path", commandsLogPath,
+			"size", len(commandsData))
+	}
+
 	// Read cluster permissions file (optional - only present if triage was enabled)
 	var clusterPermissionsJSON []byte
 	permissionsPath := filepath.Join(workspacePath, "incident_cluster_permissions.json")

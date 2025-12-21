@@ -691,6 +691,49 @@ echo "Output saved to: $OUTPUT_PATH" >&2
 # This section handles tasks that run after the agent completes.
 # Add new post-run tasks as separate functions below.
 
+# Post-run hook: Extract executed commands from Claude session JSONL files
+# Creates agent-commands-executed.log with all Bash commands run by the agent
+extract_agent_commands() {
+    local session_dir="$1"
+    local output_file="$WORKSPACE_DIR/logs/agent-commands-executed.log"
+
+    # Find the most recent session JSONL file
+    local jsonl_file
+    jsonl_file=$(find "$session_dir/projects" -name "*.jsonl" -type f 2>/dev/null | \
+                 xargs ls -t 2>/dev/null | head -1)
+
+    if [[ -z "$jsonl_file" || ! -f "$jsonl_file" ]]; then
+        echo "DEBUG: No session JSONL file found for command extraction" >&2
+        return 0
+    fi
+
+    echo "DEBUG: Extracting commands from: $jsonl_file" >&2
+
+    # Extract Bash tool calls using jq
+    # Format: timestamp | command | description
+    {
+        echo "# Agent Commands Executed"
+        echo "# Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        echo "# Incident: ${INCIDENT_ID:-unknown}"
+        echo "# Session: $(basename "$jsonl_file")"
+        echo "#"
+        echo ""
+
+        # Parse JSONL and extract Bash commands
+        jq -r '
+            select(.type == "assistant") |
+            .message.content[]? |
+            select(.type == "tool_use" and .name == "Bash") |
+            "$ " + .input.command + (if .input.description then " # " + .input.description else "" end)
+        ' "$jsonl_file" 2>/dev/null
+
+    } > "$output_file"
+
+    local cmd_count
+    cmd_count=$(grep -c '^\$' "$output_file" 2>/dev/null || echo "0")
+    echo "DEBUG: Extracted $cmd_count commands to agent-commands-executed.log" >&2
+}
+
 # Post-run hook: Extract Claude session archive (DEBUG mode only)
 post_run_extract_claude_session() {
     if [[ "$DEBUG" != "true" ]]; then
@@ -707,6 +750,10 @@ post_run_extract_claude_session() {
     # Extract the session directory from the container
     if docker cp "$CONTAINER_NAME:/home/agent/.claude" "$WORKSPACE_DIR/claude-session-src" 2>/dev/null; then
         mkdir -p "$WORKSPACE_DIR/logs"
+
+        # Extract commands before archiving
+        extract_agent_commands "$WORKSPACE_DIR/claude-session-src"
+
         cd "$WORKSPACE_DIR"
         tar -czf "$WORKSPACE_DIR/logs/claude-session.tar.gz" -C "$WORKSPACE_DIR" claude-session-src
         echo "DEBUG: Post-run: Claude session archive saved to $WORKSPACE_DIR/logs/claude-session.tar.gz" >&2

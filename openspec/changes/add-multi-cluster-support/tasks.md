@@ -128,16 +128,26 @@
 ### 3.5 Agent Integration (Critical Fix)
 - [x] Update `configs/triage-system-prompt.md` to instruct agent about permissions file
 - [x] Add Docker volume mount for `incident_cluster_permissions.json` in run-agent.sh
+- [x] Update all `agent_prompt` configs to reference permissions file
 - [x] Verify agent can read cluster context and permissions
 - [x] Verify agent successfully runs kubectl commands with provided kubeconfig
 - [x] Confirmed working with live clusters (westeu-cluster1, eastus-cluster1)
 
-### 3.6 Runtime Verification (Completed with Live Clusters)
+### 3.6 Permissions File Storage Upload
+- [x] Add `ClusterPermissionsJSON` field to `IncidentArtifacts` struct
+- [x] Update `readIncidentArtifacts()` to read permissions file from workspace
+- [x] Update Azure storage to upload permissions file
+- [x] Update index.html generation to include permissions file
+- [x] Update filesystem storage to copy permissions file (inherited from artifact upload)
+
+### 3.7 Runtime Verification (Completed with Live Clusters)
 - [x] Verify `incident_cluster_permissions.json` is created in workspaces
+- [x] Verify `incident_cluster_permissions.json` is uploaded to Azure blob storage
 - [x] Verify agent can read pods, logs, events from cluster
 - [x] Verify triage output references actual cluster resources
 - [x] Verify investigation.md contains real cluster data (pod names, node IPs, etc.)
 - [x] Verify cluster name appears in investigation report header
+- [x] Verify permissions file appears in index.html with SAS URL
 
 ---
 

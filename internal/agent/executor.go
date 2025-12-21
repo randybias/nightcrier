@@ -261,19 +261,33 @@ func (e *Executor) ExecuteWithPrompt(ctx context.Context, workspacePath string, 
 		args = append(args, "--agent", e.config.AgentCLI)
 	}
 
-	if e.config.SystemPromptFile != "" {
-		args = append(args, "--system-prompt-file", e.config.SystemPromptFile)
-	}
-
 	// Add kubeconfig if specified (Phase 2: multi-cluster support)
 	if e.config.Kubeconfig != "" {
 		args = append(args, "--kubeconfig", e.config.Kubeconfig)
 	}
 
-	// Add the additional prompt only if non-empty (system prompt drives investigation)
-	if prompt != "" {
-		args = append(args, "-p", prompt)
+	// Build the combined prompt: system prompt content + additional prompt (if set)
+	// The system prompt drives the investigation; additional prompt provides optional context
+	systemPromptContent, err := e.readSystemPromptFile()
+	if err != nil {
+		return -1, LogPaths{}, fmt.Errorf("failed to read system prompt file: %w", err)
 	}
+
+	// Combine prompts: system prompt is primary, additional prompt appended if present
+	combinedPrompt := systemPromptContent
+	if prompt != "" {
+		if combinedPrompt != "" {
+			combinedPrompt += "\n\n" + prompt
+		} else {
+			combinedPrompt = prompt
+		}
+	}
+
+	if combinedPrompt == "" {
+		return -1, LogPaths{}, fmt.Errorf("no prompt available: system prompt file is empty and no additional prompt provided")
+	}
+
+	args = append(args, combinedPrompt)
 
 	// Create context with timeout using configured buffer from TuningConfig
 	timeoutWithBuffer := e.config.Timeout + e.tuning.Agent.TimeoutBufferSeconds
@@ -308,11 +322,6 @@ func (e *Executor) ExecuteWithPrompt(ctx context.Context, workspacePath string, 
 	// Enable verbose agent output (shows thinking and tool usage)
 	if e.config.Verbose {
 		cmd.Env = append(cmd.Env, "AGENT_VERBOSE=true")
-	}
-
-	// Add optional config values if set
-	if e.config.SystemPromptFile != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("SYSTEM_PROMPT_FILE=%s", e.config.SystemPromptFile))
 	}
 
 	// Add kubeconfig path for cluster access (Phase 2: multi-cluster support)

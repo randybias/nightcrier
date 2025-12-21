@@ -181,3 +181,31 @@ The system SHALL capture and store the prompt sent to the agent for auditability
 - **THEN** the upload SHALL succeed without prompt-sent.md
 - **AND** no error SHALL be logged (prompt is optional for backwards compatibility)
 
+### Requirement: Debug Log Artifacts
+
+The system SHALL upload debug log artifacts when running in DEBUG mode.
+
+#### Scenario: Debug log files uploaded
+- **GIVEN** Azure storage mode is enabled
+- **AND** the system is running in DEBUG mode
+- **WHEN** an investigation completes
+- **THEN** the following log files SHALL be uploaded to `{incident-id}/logs/`:
+  - `agent-stdout.log` - Agent standard output
+  - `agent-stderr.log` - Agent standard error
+  - `agent-full.log` - Combined timestamped log
+  - `agent-commands-executed.log` - Extracted Bash commands from session
+  - `claude-session.tar.gz` - Complete Claude Code session archive
+
+#### Scenario: Debug logs in index.html
+- **GIVEN** debug logs were captured and uploaded
+- **WHEN** index.html is generated
+- **THEN** all log files SHALL appear in the file listing
+- **AND** each log SHALL be labeled "(DEBUG mode only)"
+- **AND** logs SHALL appear after core artifacts in the display order
+
+#### Scenario: Empty debug logs skipped
+- **GIVEN** a debug log file is empty (zero bytes)
+- **WHEN** artifacts are uploaded
+- **THEN** the empty file SHALL NOT be uploaded
+- **AND** no error SHALL be logged
+

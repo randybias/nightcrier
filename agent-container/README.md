@@ -54,7 +54,25 @@ Container (/workspace):
 
 **Security**: The workspace directory is the ONLY host directory the container can access (plus kubeconfig read-only). Do NOT point workspace at source code directories.
 
-## Built-in Skills
+## Skill-Driven Investigation
+
+The agent uses a minimal system prompt (`configs/triage-system-prompt.md`) that delegates investigation methodology to the **k8s-troubleshooter** skill. This approach:
+
+1. **Minimal System Prompt**: ~20 lines describing workspace files and output format
+2. **Skill-Driven Methodology**: The k8s-troubleshooter skill contains the actual investigation playbook
+3. **Structured Workflows**: Skill provides `incident_triage.sh` for systematic root cause analysis
+
+### Investigation Flow
+
+```
+1. Agent reads incident.json for fault context
+2. Agent reads incident_cluster_permissions.json for access constraints
+3. Agent invokes k8s-troubleshooter skill (via /k8s-troubleshooter or incident_triage.sh)
+4. Skill guides systematic investigation based on fault type
+5. Agent writes findings to output/investigation.md
+```
+
+### Built-in Skills
 
 The container includes the [k8s-troubleshooter](https://github.com/randybias/k8s4agents) skill for Kubernetes debugging. Claude can access it via the `/k8s-troubleshooter` slash command or by reading `/skills/k8s-troubleshooter/SKILL.md`.
 

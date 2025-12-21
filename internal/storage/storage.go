@@ -23,6 +23,8 @@ type AgentLogs struct {
 	Stderr []byte
 	// Combined contains the combined stdout and stderr in chronological order
 	Combined []byte
+	// CommandsExecuted contains the extracted Bash commands from the agent session (DEBUG mode only)
+	CommandsExecuted []byte
 }
 
 // IncidentArtifacts contains all files generated during incident investigation.

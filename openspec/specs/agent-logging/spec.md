@@ -28,6 +28,7 @@ The system SHALL only capture and persist agent logs when running in DEBUG mode.
 - **Then** the output SHALL be written to `{workspace}/logs/agent-stdout.log`
 - **And** the output SHALL be written to `{workspace}/logs/agent-stderr.log`
 - **And** a combined log SHALL be written to `{workspace}/logs/agent-full.log`
+- **And** extracted commands SHALL be written to `{workspace}/logs/agent-commands-executed.log`
 
 #### Scenario: Timestamped combined log
 - **Given** an agent produces interleaved stdout and stderr output in DEBUG mode
@@ -112,6 +113,40 @@ The system SHALL capture and persist Claude Code session archives in DEBUG mode 
 - **When** an agent executes
 - **Then** the system SHALL NOT attempt to extract the session
 - **And** no session archive SHALL be created
+
+### Requirement: Agent Commands Extraction
+
+The system SHALL extract and log all Bash commands executed by the agent during investigation in DEBUG mode.
+
+#### Scenario: Commands extracted from session JSONL
+- **Given** an agent executes in DEBUG mode
+- **And** the agent uses Claude Code CLI
+- **When** the agent completes and session files are extracted
+- **Then** the system SHALL parse the session JSONL files
+- **And** the system SHALL extract all Bash tool calls with their commands
+- **And** the system SHALL write commands to `{workspace}/logs/agent-commands-executed.log`
+
+#### Scenario: Commands log format
+- **Given** commands are being extracted from session JSONL
+- **When** the commands log file is generated
+- **Then** each command SHALL be prefixed with `$ `
+- **And** each command SHALL include its description as a comment (if available)
+- **And** the file SHALL include a header with timestamp, incident ID, and session ID
+
+#### Scenario: Commands log upload
+- **Given** Azure storage is configured
+- **And** commands were extracted in DEBUG mode
+- **When** artifacts are uploaded
+- **Then** `agent-commands-executed.log` SHALL be uploaded to `{incident-id}/logs/`
+- **And** a SAS URL SHALL be generated for the commands log
+- **And** the log SHALL appear in index.html file listing
+
+#### Scenario: Commands extraction graceful handling
+- **Given** session extraction completed
+- **When** no JSONL files are found or jq parsing fails
+- **Then** the system SHALL NOT fail the incident
+- **And** the system SHALL log a debug message
+- **And** the commands log SHALL be empty or not created
 
 ### Requirement: Post-Run Hooks Architecture
 

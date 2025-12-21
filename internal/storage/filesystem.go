@@ -111,6 +111,15 @@ func (fs *FilesystemStorage) SaveIncident(ctx context.Context, incidentID string
 			logURLs["agent-full.log"] = combinedPath
 		}
 
+		// Write commands executed log if not empty
+		if len(artifacts.AgentLogs.CommandsExecuted) > 0 {
+			commandsPath := filepath.Join(logsDir, "agent-commands-executed.log")
+			if err := os.WriteFile(commandsPath, artifacts.AgentLogs.CommandsExecuted, 0600); err != nil {
+				return nil, fmt.Errorf("failed to write agent-commands-executed.log: %w", err)
+			}
+			logURLs["agent-commands-executed.log"] = commandsPath
+		}
+
 		// Write Claude session archive if not empty
 		if len(artifacts.ClaudeSessionArchive) > 0 {
 			sessionPath := filepath.Join(logsDir, "claude-session.tar.gz")
