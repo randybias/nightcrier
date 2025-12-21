@@ -157,6 +157,53 @@ EOF
 RUN cp /home/${USER_NAME}/AGENTS.md /home/${USER_NAME}/CLAUDE.md \
     && chown ${USER_NAME}:${USER_NAME} /home/${USER_NAME}/AGENTS.md /home/${USER_NAME}/CLAUDE.md
 
+# Create GEMINI.md for Gemini CLI (uses context files instead of skills)
+RUN cat > /home/${USER_NAME}/GEMINI.md << 'EOF'
+# Kubernetes Incident Triage Agent
+
+You are a Kubernetes incident triage agent investigating a production incident.
+
+## k8s-troubleshooter Skill
+
+You have access to the k8s-troubleshooter skill for Kubernetes troubleshooting.
+Read `~/.claude/skills/k8s-troubleshooter/SKILL.md` for detailed instructions and available tools.
+
+The skill includes reference scripts in `~/.claude/skills/k8s-troubleshooter/scripts/`:
+- `incident_triage.sh` - Initial incident triage workflow
+- `pod_diagnostics.sh` - Pod-level diagnostics and analysis
+- `network_debug.sh` - Network connectivity troubleshooting
+- `resource_analysis.sh` - Resource usage and quota analysis
+- `pvc_debug.sh` - Persistent volume troubleshooting
+- `helm_release_debug.sh` - Helm release diagnostics
+
+## Files
+
+- `incident.json` - The Kubernetes incident that triggered this investigation
+- `output/investigation.md` - Write your findings here
+
+## Instructions
+
+1. Read `incident.json` to understand the incident
+2. Use kubectl to investigate (read-only: get, describe, logs)
+3. Use the k8s-troubleshooter skill tools as needed
+4. Write findings to `output/investigation.md`
+
+## Output Format
+
+Write a markdown report with:
+- Executive Summary (1-2 sentences)
+- Root Cause Analysis
+- Evidence (relevant kubectl outputs)
+- Recommendations
+
+## Safety
+
+- Read-only kubectl commands only
+- Do not modify cluster state
+EOF
+
+RUN chown ${USER_NAME}:${USER_NAME} /home/${USER_NAME}/GEMINI.md
+
 # Switch to non-root user
 USER ${USER_NAME}
 

@@ -38,12 +38,12 @@ SESSION_EXTRACT_DIR="$WORKSPACE_DIR/gemini-session-src"
 if docker cp "$CONTAINER_NAME:/home/agent/.gemini" "$SESSION_EXTRACT_DIR" 2>/dev/null; then
     mkdir -p "$WORKSPACE_DIR/logs"
 
-    # Find logs.json files in ~/.gemini/tmp/*/logs.json
-    LOG_FILES=$(find "$SESSION_EXTRACT_DIR/tmp" -name "logs.json" -type f 2>/dev/null)
+    # Find session JSON files in ~/.gemini/tmp/*/chats/session-*.json
+    LOG_FILES=$(find "$SESSION_EXTRACT_DIR/tmp" -path "*/chats/session-*.json" -type f 2>/dev/null)
 
-    # Extract commands from Gemini logs.json format
+    # Extract commands from Gemini session JSON format
     if [[ -n "$LOG_FILES" ]]; then
-        # Use the most recent logs.json file
+        # Use the most recent session file
         LOGS_JSON=$(echo "$LOG_FILES" | xargs ls -t 2>/dev/null | head -1)
 
         if [[ -f "$LOGS_JSON" ]]; then
@@ -69,7 +69,6 @@ if docker cp "$CONTAINER_NAME:/home/agent/.gemini" "$SESSION_EXTRACT_DIR" 2>/dev
 
             } > "$WORKSPACE_DIR/logs/agent-commands-executed.log"
 
-            local cmd_count
             cmd_count=$(grep -c '^\$' "$WORKSPACE_DIR/logs/agent-commands-executed.log" 2>/dev/null || echo "0")
             log_debug "Post-run: Extracted $cmd_count commands from Gemini session"
         fi
