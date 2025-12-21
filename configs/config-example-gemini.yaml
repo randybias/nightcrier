@@ -1,0 +1,59 @@
+# Nightcrier Configuration - Gemini Example
+# Copy to config.yaml and set your GEMINI_API_KEY
+
+# Single cluster configuration
+clusters:
+  - name: my-cluster
+    environment: production
+
+    mcp:
+      endpoint: "http://kubernetes-mcp-server:8080/mcp"
+      api_key: "PLACEHOLDER"
+
+    triage:
+      enabled: true
+      kubeconfig: "./kubeconfigs/my-cluster-readonly.yaml"
+      allow_secrets_access: false
+
+# Event subscription mode
+subscribe_mode: "faults"
+
+# Workspace for incident investigations
+workspace_root: "./incidents"
+
+# Logging
+log_level: "info"
+
+# Agent configuration - Gemini with GEMINI.md context files
+agent_script_path: "./agent-container/run-agent.sh"
+agent_system_prompt_file: "./configs/triage-system-prompt.md"
+agent_allowed_tools: "Read,Write,Grep,Glob,Bash,Skill"
+
+# Gemini model selection
+agent_model: "gemini-2.0-flash-exp"  # Use Gemini model names directly
+agent_cli: "gemini"
+agent_timeout: 300
+agent_image: "nightcrier-agent:latest"
+
+# LLM API Keys
+# Set via environment variable: export GEMINI_API_KEY="..."
+# gemini_api_key: "..."
+
+# Event processing
+severity_threshold: "ERROR"
+max_concurrent_agents: 5
+global_queue_size: 100
+cluster_queue_size: 10
+dedup_window_seconds: 300
+queue_overflow_policy: "drop"
+shutdown_timeout: 30
+
+# SSE/MCP reconnection
+sse_reconnect_initial_backoff: 1
+sse_reconnect_max_backoff: 60
+sse_read_timeout: 120
+
+# Notifications
+notify_on_agent_failure: true
+failure_threshold_for_alert: 3
+upload_failed_investigations: false

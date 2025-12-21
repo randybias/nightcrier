@@ -90,12 +90,18 @@ RUN npm install -g @google/gemini-cli
 
 # Block Goose CLI - install minimal X11 libs for headless operation
 # Goose CLI needs libxcb for keyring access, use GOOSE_DISABLE_KEYRING=1 to bypass
+# Install Goose v1.18.0 binary directly (installer script fails in container due to goose-configure)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcb1 \
     libx11-6 \
     libx11-xcb1 \
     && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash
+    && ARCH=$(dpkg --print-architecture) \
+    && if [ "$ARCH" = "amd64" ]; then GOOSE_ARCH="x86_64"; elif [ "$ARCH" = "arm64" ]; then GOOSE_ARCH="aarch64"; fi \
+    && curl -fsSL "https://github.com/block/goose/releases/download/v1.18.0/goose-${GOOSE_ARCH}-unknown-linux-gnu.tar.bz2" -o /tmp/goose.tar.bz2 \
+    && tar -xjf /tmp/goose.tar.bz2 -C /usr/local/bin \
+    && chmod +x /usr/local/bin/goose \
+    && rm /tmp/goose.tar.bz2
 
 # Create non-root user for security (matches typical container best practices)
 # Using UID 1000 which is common default for first non-root user

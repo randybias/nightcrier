@@ -36,218 +36,244 @@ export GEMINI_API_KEY="your-key"
 
 ## Architecture
 
+### Container Structure
+
 ```
 Host:
   ./incidents/inc-123/          <-- Incident workspace (REQUIRED)
     incident.json               <-- Input data with incident context
     context/                    <-- Additional context files
   ./incidents/inc-123/output/   <-- Agent output
-    triage_claude_YYYYMMDD_HHMMSS.log
+    triage_<agent>_YYYYMMDD_HHMMSS.log
 
-Container (/workspace):
-  /workspace/                   <-- Mounted from incident workspace
-  /output/                      <-- Mounted from workspace/output
-  /skills/                      <-- Built-in skills from k8s4agents
-    k8s-troubleshooter/
-  /root/.kube/config            <-- Mounted read-only from host
+Container (/home/agent):
+  /home/agent/                  <-- Agent home AND workspace
+    incident.json               <-- Mounted read-only
+    output/                     <-- Mounted read-write
+    .kube/config                <-- Mounted read-only
+    .claude/skills/             <-- Skills (if provided)
+    .codex/skills/              <-- Skills (if provided)
 ```
 
-**Security**: The workspace directory is the ONLY host directory the container can access (plus kubeconfig read-only). Do NOT point workspace at source code directories.
+### Modular Runner Architecture
 
-## Skill-Driven Investigation
-
-The agent uses a minimal system prompt (`configs/triage-system-prompt.md`) that delegates investigation methodology to the **k8s-troubleshooter** skill. This approach:
-
-1. **Minimal System Prompt**: ~20 lines describing workspace files and output format
-2. **Skill-Driven Methodology**: The k8s-troubleshooter skill contains the actual investigation playbook
-3. **Structured Workflows**: Skill provides `incident_triage.sh` for systematic root cause analysis
-
-### Investigation Flow
+The agent container uses a modular architecture with agent-specific sub-runners:
 
 ```
-1. Agent reads incident.json for fault context
-2. Agent reads incident_cluster_permissions.json for access constraints
-3. Agent invokes k8s-troubleshooter skill (via /k8s-troubleshooter or incident_triage.sh)
-4. Skill guides systematic investigation based on fault type
-5. Agent writes findings to output/investigation.md
+agent-container/
+├── run-agent.sh              # Main orchestrator
+│   ├── Environment setup
+│   ├── Docker container configuration
+│   ├── Dispatches to agent-specific sub-runners
+│   └── Post-run artifact extraction
+│
+└── runners/                  # Agent-specific sub-runners
+    ├── common.sh             # Shared utilities (logging, validation, archiving)
+    │
+    ├── claude.sh             # Claude command builder
+    ├── claude-post.sh        # Claude session extraction
+    │
+    ├── codex.sh              # Codex command builder
+    ├── codex-post.sh         # Codex session extraction
+    │
+    ├── gemini.sh             # Gemini command builder
+    └── gemini-post.sh        # Gemini session extraction
 ```
 
-### Built-in Skills
+### How It Works
 
-The container includes the [k8s-troubleshooter](https://github.com/randybias/k8s4agents) skill for Kubernetes debugging. Claude can access it via the `/k8s-troubleshooter` slash command or by reading `/skills/k8s-troubleshooter/SKILL.md`.
+1. **Main orchestrator** (`run-agent.sh`):
+   - Parses arguments and validates configuration
+   - Sets up Docker environment and volume mounts
+   - Exports standardized environment variables
+   - Dispatches to agent-specific command builder
+   - Executes Docker container with agent command
+   - Dispatches to agent-specific post-run hooks
 
-## Configuration
+2. **Agent command builders** (`runners/<agent>.sh`):
+   - Source `common.sh` for shared utilities
+   - Build agent-specific CLI command string
+   - Output command to stdout for orchestrator
 
-### Required Parameters
+3. **Post-run hooks** (`runners/<agent>-post.sh`):
+   - Extract session data from container (DEBUG mode only)
+   - Parse session files for executed commands
+   - Create standardized artifacts:
+     - `logs/agent-session.tar.gz` - Session archive
+     - `logs/agent-commands-executed.log` - Extracted commands
 
-| Parameter | Description |
-|-----------|-------------|
-| `-w, --workspace DIR` | Incident workspace directory (REQUIRED) |
-| Prompt | The investigation prompt (positional argument) |
+### Adding a New Agent
 
-### Agent Selection
+To add support for a new AI agent:
 
-| Flag | Environment | Description |
-|------|-------------|-------------|
-| `-a, --agent` | `AGENT_CLI` | AI CLI: claude, codex, gemini (default: claude) |
+1. Create `runners/<agent>.sh`:
+   ```bash
+   #!/usr/bin/env bash
+   # Source common.sh
+   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+   source "$SCRIPT_DIR/common.sh"
 
-### API Keys
+   # Validate environment
+   validate_runner_env || exit 1
 
-| Variable | Used By | Notes |
-|----------|---------|-------|
-| `ANTHROPIC_API_KEY` | Claude | Required for Claude |
-| `OPENAI_API_KEY` | Codex | Must have Codex model access |
-| `GEMINI_API_KEY` | Gemini | Or use `GOOGLE_API_KEY` |
+   # Build command
+   build_<agent>_command() {
+       local cmd=""
+       # ... build agent-specific command
+       echo "$cmd"
+   }
 
-### Environment Variables
+   build_<agent>_command
+   ```
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AGENT_IMAGE` | `nightcrier-agent:latest` | Docker image to use |
-| `WORKSPACE_DIR` | (required) | Host workspace directory |
-| `OUTPUT_DIR` | `workspace/output` | Output directory for logs |
-| `KUBECONFIG_PATH` | `~/.kube/config` | Path to kubeconfig |
-| `KUBERNETES_CONTEXT` | | Kubernetes context to use |
-| `CLAUDE_MODEL` | `sonnet` | Claude model (opus, sonnet, haiku) |
-| `CLAUDE_OUTPUT_FORMAT` | `text` | Output format |
-| `CLAUDE_ALLOWED_TOOLS` | `Read,Grep,Glob,Bash` | Allowed tools |
-| `CLAUDE_SYSTEM_PROMPT` | | System prompt text |
-| `CLAUDE_VERBOSE` | `false` | Enable verbose output |
-| `CLAUDE_MAX_TURNS` | | Max conversation turns |
-| `CONTAINER_TIMEOUT` | `600` | Timeout in seconds |
-| `CONTAINER_MEMORY` | `2g` | Memory limit |
-| `CONTAINER_NETWORK` | `host` | Network mode |
+2. Create `runners/<agent>-post.sh`:
+   ```bash
+   #!/usr/bin/env bash
+   # Source common.sh
+   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+   source "$SCRIPT_DIR/common.sh"
 
-### Command-Line Flags
+   # Only run in DEBUG mode
+   [[ "$DEBUG" != "true" ]] && exit 0
 
-```
-./run-agent.sh --help
-```
+   # Extract session data
+   docker cp "$CONTAINER_NAME:/home/agent/.<agent>" "$WORKSPACE_DIR/<agent>-session-src"
 
-## Examples
+   # Create standardized artifacts
+   extract_commands_from_jsonl "$SESSION_FILE" "$WORKSPACE_DIR/logs/agent-commands-executed.log"
+   create_archive "$WORKSPACE_DIR/<agent>-session-src" "$WORKSPACE_DIR/logs/agent-session.tar.gz"
 
-### Basic Investigation with Claude
+   exit 0
+   ```
 
+3. Make scripts executable:
+   ```bash
+   chmod +x runners/<agent>.sh runners/<agent>-post.sh
+   ```
+
+4. Test:
+   ```bash
+   ./run-agent.sh -a <agent> -w ./test-workspace "Test prompt"
+   ```
+
+The main orchestrator will automatically discover and use the new sub-runners.
+
+## Environment Variables
+
+### Required (set by nightcrier Go application)
+
+| Variable | Description |
+|----------|-------------|
+| `AGENT_IMAGE` | Docker image name |
+| `AGENT_CLI` | AI CLI to use: claude, codex, gemini, goose |
+| `LLM_MODEL` | Model to use (agent-agnostic) |
+| `AGENT_ALLOWED_TOOLS` | Comma-separated tool list |
+| `CONTAINER_TIMEOUT` | Timeout in seconds |
+| `WORKSPACE_DIR` | Host incident directory |
+| `KUBECONFIG_PATH` | Path to kubeconfig file |
+
+### Optional
+
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_API_KEY` | API key for Claude |
+| `OPENAI_API_KEY` | API key for Codex |
+| `GEMINI_API_KEY` | API key for Gemini |
+| `GOOGLE_API_KEY` | Alternate API key for Gemini |
+| `OUTPUT_FORMAT` | Output format (agent-specific) |
+| `SYSTEM_PROMPT` | Additional system prompt text |
+| `SYSTEM_PROMPT_FILE` | Path to system prompt file |
+| `AGENT_VERBOSE` | Enable verbose output (true/false) |
+| `AGENT_MAX_TURNS` | Maximum conversation turns |
+| `CONTAINER_MEMORY` | Memory limit (e.g., "2g") |
+| `CONTAINER_CPUS` | CPU limit (e.g., "1.5") |
+| `CONTAINER_NETWORK` | Network mode (default: host) |
+| `SKILLS_DIR` | Directory containing custom skills |
+| `DEBUG` | Enable debug mode (true/false) |
+| `INCIDENT_ID` | Incident identifier for container naming |
+
+## DEBUG Mode
+
+When `DEBUG=true`:
+- Container is NOT removed after execution (--rm flag omitted)
+- Agent session data is extracted from container
+- Session archive created at `logs/agent-session.tar.gz`
+- Commands log created at `logs/agent-commands-executed.log`
+- Verbose debug logging throughout execution
+
+When `DEBUG=false`:
+- Container is automatically removed after execution
+- No session extraction performed
+- Minimal logging
+
+## Agent-Specific Details
+
+### Claude
+
+- **Command builder**: `runners/claude.sh`
+- **Session location**: `~/.claude/projects/*.jsonl`
+- **Post-run**: Extracts session JSONL and parses Bash tool calls
+- **Supports**: model selection, output format, allowed tools, system prompts, verbose mode, max turns
+
+### Codex
+
+- **Command builder**: `runners/codex.sh`
+- **Session location**: `~/.codex/sessions/*.jsonl`
+- **Post-run**: Extracts session JSONL and parses commands
+- **Special**: Requires `codex login --with-api-key` before execution
+- **Flags**: `--skip-git-repo-check`, `--enable skills`, `--dangerously-bypass-approvals-and-sandbox`
+- **Model mapping**:
+  - `opus` → `gpt-5-codex`
+  - `sonnet` → `gpt-5.2`
+  - `haiku` → `gpt-4o`
+
+### Gemini
+
+- **Command builder**: `runners/gemini.sh`
+- **Session location**: `~/.gemini/tmp/<hash>/logs.json`
+- **Post-run**: Extracts logs.json (JSON format, not JSONL) and parses commands
+- **Supports**: model selection
+- **API keys**: Accepts both `GEMINI_API_KEY` and `GOOGLE_API_KEY`
+
+## Testing
+
+Run syntax checks:
 ```bash
-./run-agent.sh -w ./incidents/inc-123 "Analyze the pod failure in incident.json and suggest fixes"
+for script in runners/*.sh run-agent.sh; do
+    bash -n "$script" && echo "✓ $script" || echo "✗ $script"
+done
 ```
 
-### Use Different AI Agent
-
+Test command generation:
 ```bash
-# Codex
-./run-agent.sh -a codex -w ./incidents/inc-123 "Analyze the CrashLoopBackOff issue"
-
-# Gemini
-./run-agent.sh -a gemini -w ./incidents/inc-123 "Check why pods are pending"
-```
-
-### Read-Only Kubectl
-
-```bash
-./run-agent.sh -w ./incidents/inc-123 \
-  -t "Read,Grep,Glob,Bash" \
-  -s "Only use kubectl get, describe, and logs. Never modify cluster state." \
-  "Why is pod my-app in CrashLoopBackOff?"
-```
-
-### With Custom Output Directory
-
-```bash
-./run-agent.sh -w ./incidents/inc-123 --output-dir ./reports "Investigate incident.json"
-```
-
-### Debug Mode
-
-```bash
-./run-agent.sh -d -w ./incidents/inc-123 "Your prompt here"
-```
-
-### Claude with Opus Model
-
-```bash
-./run-agent.sh -m opus -w ./incidents/inc-123 "Deep analysis of the cluster issue"
-```
-
-## Output
-
-All agent output is captured and saved to:
-- Default: `<workspace>/output/triage_<agent>_<timestamp>.log`
-- Custom: Use `--output-dir` and `--output-file` flags
-
-## Included Tools
-
-### Kubernetes
-- kubectl 1.31
-- helm 3.x
-
-### Search & Navigation
-- ripgrep (rg)
-- fd
-- fzf
-- tree
-
-### JSON/YAML
-- jq
-- yq
-
-### Network Debugging
-- dnsutils (dig, nslookup)
-- netcat
-- ping
-- iproute2
-
-### Development
-- git
-- python3
-- make
-- GitHub CLI
-
-### Editors
-- vim
-- neovim
-
-## Integration with Event Runner
-
-The event runner calls this script like:
-
-```bash
-./run-agent.sh \
-  -a claude \
-  -m sonnet \
-  -w "$INCIDENT_WORKSPACE" \
-  -t "Read,Grep,Glob,Bash,Skill" \
-  -s "Investigate the Kubernetes incident. Read incident.json for context." \
-  --output-dir "$REPORTS_DIR" \
-  "Analyze the incident and provide a root cause analysis"
-```
-
-## Makefile Targets
-
-```bash
-make build         # Build the container image
-make build-clean   # Build without cache
-make test-claude   # Test with Claude (needs ANTHROPIC_API_KEY)
-make test-codex    # Test with Codex (needs OPENAI_API_KEY)
-make test-gemini   # Test with Gemini (needs GEMINI_API_KEY)
-make test-tools    # Verify all tools are installed
-make test-kubectl  # Verify kubectl works
-make test-workspace # Create isolated test workspace
-make shell         # Interactive shell in container
-make info          # Show image information
-make clean         # Remove the image
+export AGENT_CLI="claude"
+export AGENT_HOME="/home/agent"
+export PROMPT="Test investigation"
+export LLM_MODEL="sonnet"
+export OUTPUT_FILE="test.log"
+export ANTHROPIC_API_KEY="test-key"
+bash runners/claude.sh
 ```
 
 ## Troubleshooting
 
-### Codex Authentication
+### "Agent runner not found" error
 
-Codex requires explicit login with the API key. The run-agent.sh script handles this automatically, but your OpenAI API key must have access to Codex models (`gpt-5.1-codex-max`). If you see "Quota exceeded", your API key may not have Codex access.
+The agent specified doesn't have a runner script. Check `runners/<agent>.sh` exists.
 
-### Goose Disabled
+### "Required environment variable not set" error
 
-Block's Goose CLI currently requires X11 libraries (`libxcb.so.1`) even in "CLI mode", making it incompatible with headless containers. This will be re-enabled when Block provides a true headless build.
+Missing required environment variables. Ensure nightcrier Go app is setting all required vars.
 
-### Workspace Required
+### Session extraction fails
 
-The `-w` flag is required to prevent accidentally mounting source code or sensitive directories into the container. Always use an isolated incident directory.
+- Verify DEBUG mode is enabled (`DEBUG=true`)
+- Check INCIDENT_ID is set (needed for container naming)
+- Ensure container hasn't been removed (`--rm` flag)
+- Check agent actually created session data in expected location
+
+### Command extraction produces empty file
+
+- Session format may differ from expected
+- jq query may need adjustment for agent's session structure
+- Check logs for jq parsing errors

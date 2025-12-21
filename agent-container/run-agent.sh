@@ -44,8 +44,8 @@ set -euo pipefail
 #
 # =============================================================================
 
-# Initialize variables from environment (no defaults)
-AGENT_IMAGE="${AGENT_IMAGE:-}"
+# Initialize variables from environment
+AGENT_IMAGE="${AGENT_IMAGE:-nightcrier-agent:latest}"
 AGENT_CLI="${AGENT_CLI:-}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
@@ -83,6 +83,7 @@ CONTAINER_NETWORK="${CONTAINER_NETWORK:-}"
 CONTAINER_USER="${CONTAINER_USER:-}"
 SKILLS_DIR="${SKILLS_DIR:-}"
 DEBUG="${DEBUG:-}"
+INCIDENT_ID="${INCIDENT_ID:-}"
 
 # =============================================================================
 # Help
@@ -522,7 +523,7 @@ fi
 DOCKER_ARGS+=("-w" "${AGENT_HOME}")
 
 # Container name for reliable session archive extraction
-if [[ -n "$INCIDENT_ID" ]]; then
+if [[ -n "${INCIDENT_ID:-}" ]]; then
     DOCKER_ARGS+=("--name" "nightcrier-agent-${INCIDENT_ID}")
 fi
 
@@ -530,125 +531,51 @@ fi
 DOCKER_ARGS+=("$AGENT_IMAGE")
 
 # =============================================================================
-# Build Agent CLI Command
+# Build Agent CLI Command (Refactored)
 # =============================================================================
 
-build_agent_command() {
-    local cmd=""
+# Get script directory for sourcing sub-runners
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-    # Add environment verification if debug mode (runs inside container)
-    if [[ "$DEBUG" == "true" ]]; then
-        cmd="echo '=== Container Environment ===' >&2 && "
-        cmd+="echo \"PWD: \$(pwd)\" >&2 && "
-        cmd+="echo \"USER: \$(whoami)\" >&2 && "
-        cmd+="echo \"HOME: \$HOME\" >&2 && "
-        cmd+="echo \"ANTHROPIC_API_KEY: \${ANTHROPIC_API_KEY:+SET}\" >&2 && "
-        cmd+="echo \"Kubeconfig exists: \$(test -f \$HOME/.kube/config && echo YES || echo NO)\" >&2 && "
-        cmd+="echo \"incident.json exists: \$(test -f incident.json && echo YES || echo NO)\" >&2 && "
-        cmd+="echo \"Files in workspace: \$(ls -la | wc -l) files\" >&2 && "
-        cmd+="echo '==============================' >&2 && "
-    fi
+# Source common utilities
+# shellcheck source=./runners/common.sh
+source "$SCRIPT_DIR/runners/common.sh"
 
-    case "$AGENT_CLI" in
-        claude)
-            cmd+="claude -p '${PROMPT//\'/\'\\\'\'}'"
+# Export environment variables needed by sub-runners
+export AGENT_CLI
+export AGENT_HOME
+export PROMPT
+export LLM_MODEL
+export AGENT_VERBOSE
+export AGENT_ALLOWED_TOOLS
+export OUTPUT_FORMAT
+export SYSTEM_PROMPT
+export SYSTEM_PROMPT_FILE
+export AGENT_MAX_TURNS
+export OUTPUT_FILE
+export WORKSPACE_DIR
+export INCIDENT_ID
+export DEBUG
 
-            # Model
-            if [[ -n "$LLM_MODEL" ]]; then
-                cmd+=" --model $LLM_MODEL"
-            fi
+# Dispatch to agent-specific sub-runner
+AGENT_RUNNER="$SCRIPT_DIR/runners/${AGENT_CLI}.sh"
 
-            # Output format
-            if [[ -n "$OUTPUT_FORMAT" ]]; then
-                cmd+=" --output-format $OUTPUT_FORMAT"
-            fi
+if [[ ! -f "$AGENT_RUNNER" ]]; then
+    log_error "Agent runner not found: $AGENT_RUNNER"
+    log_error "Supported agents: claude, codex, gemini, goose"
+    exit 1
+fi
 
-            # Allowed tools
-            if [[ -n "$AGENT_ALLOWED_TOOLS" ]]; then
-                cmd+=" --allowedTools $AGENT_ALLOWED_TOOLS"
-            fi
+log_debug "Building command using: $AGENT_RUNNER"
 
-            # System prompt (inline)
-            if [[ -n "$SYSTEM_PROMPT" ]]; then
-                cmd+=" --append-system-prompt '${SYSTEM_PROMPT//\'/\'\\\'\'}'"
-            fi
+# Source the sub-runner to build the command
+# The sub-runner outputs the command to stdout
+AGENT_CMD=$(bash "$AGENT_RUNNER")
 
-            # System prompt (file)
-            if [[ -n "$SYSTEM_PROMPT_FILE" ]]; then
-                cmd+=" --append-system-prompt-file /tmp/system-prompt.txt"
-            fi
-
-            # Verbose
-            if [[ "$AGENT_VERBOSE" == "true" ]]; then
-                cmd+=" --verbose"
-            fi
-
-            # Max turns
-            if [[ -n "$AGENT_MAX_TURNS" ]]; then
-                cmd+=" --max-turns $AGENT_MAX_TURNS"
-            fi
-            ;;
-
-        codex)
-            # Use 'codex exec' for non-interactive/headless mode
-            # Must login with API key first (codex doesn't auto-use OPENAI_API_KEY)
-            # --skip-git-repo-check needed when not in a git repo
-            # --enable skills to enable SKILL.md loading from ~/.codex/skills
-            # In Docker containers without Landlock, we need --dangerously-bypass-approvals-and-sandbox
-            # AGENTS.md is in /home/agent (the working directory) so Codex finds it automatically
-            cmd="echo -n \"\${OPENAI_API_KEY}\" > /tmp/.codex-key && codex login --with-api-key < /tmp/.codex-key && rm -f /tmp/.codex-key && codex exec --skip-git-repo-check --enable skills --dangerously-bypass-approvals-and-sandbox"
-
-            # Model mapping for Codex
-            # Codex uses OpenAI model names, but we support friendly aliases
-            if [[ -n "$LLM_MODEL" ]]; then
-                case "$LLM_MODEL" in
-                    opus|gpt-5-codex)
-                        cmd+=" -m gpt-5-codex"
-                        ;;
-                    sonnet|gpt-5.2)
-                        cmd+=" -m gpt-5.2"
-                        ;;
-                    haiku|gpt-4o)
-                        cmd+=" -m gpt-4o"
-                        ;;
-                    *)
-                        # Pass through custom model name
-                        cmd+=" -m $LLM_MODEL"
-                        ;;
-                esac
-            fi
-
-            cmd+=" '${PROMPT//\'/\'\\\'\'}'"
-            ;;
-
-        goose)
-            cmd="goose run"
-
-            # Model for Goose (supports various providers)
-            if [[ -n "$LLM_MODEL" ]]; then
-                cmd+=" --model $LLM_MODEL"
-            fi
-
-            cmd+=" '${PROMPT//\'/\'\\\'\'}'"
-            ;;
-
-        gemini)
-            cmd="gemini -p '${PROMPT//\'/\'\\\'\'}'"
-
-            # Model for Gemini
-            if [[ -n "$LLM_MODEL" ]]; then
-                cmd+=" --model $LLM_MODEL"
-            fi
-            ;;
-    esac
-
-    # Tee output to file
-    cmd+=" 2>&1 | tee ${AGENT_HOME}/output/${OUTPUT_FILE}"
-
-    echo "$cmd"
-}
-
-AGENT_CMD=$(build_agent_command)
+if [[ -z "$AGENT_CMD" ]]; then
+    log_error "Agent runner produced no command: $AGENT_RUNNER"
+    exit 1
+fi
 
 # =============================================================================
 # Execute
@@ -686,87 +613,35 @@ echo "Agent completed with exit code: $EXIT_CODE" >&2
 echo "Output saved to: $OUTPUT_PATH" >&2
 
 # =============================================================================
-# Post-Run Hooks
+# Post-Run Hooks (Refactored)
 # =============================================================================
-# This section handles tasks that run after the agent completes.
-# Add new post-run tasks as separate functions below.
 
-# Post-run hook: Extract executed commands from Claude session JSONL files
-# Creates agent-commands-executed.log with all Bash commands run by the agent
-extract_agent_commands() {
-    local session_dir="$1"
-    local output_file="$WORKSPACE_DIR/logs/agent-commands-executed.log"
+# Dispatch to agent-specific post-run hook
+run_post_hooks() {
+    local post_script="$SCRIPT_DIR/runners/${AGENT_CLI}-post.sh"
 
-    # Find the most recent session JSONL file
-    local jsonl_file
-    jsonl_file=$(find "$session_dir/projects" -name "*.jsonl" -type f 2>/dev/null | \
-                 xargs ls -t 2>/dev/null | head -1)
-
-    if [[ -z "$jsonl_file" || ! -f "$jsonl_file" ]]; then
-        echo "DEBUG: No session JSONL file found for command extraction" >&2
+    if [[ ! -f "$post_script" ]]; then
+        log_debug "No post-run hook found for $AGENT_CLI (expected: $post_script)"
         return 0
     fi
 
-    echo "DEBUG: Extracting commands from: $jsonl_file" >&2
+    log_debug "Running post-run hook: $post_script"
 
-    # Extract Bash tool calls using jq
-    # Format: timestamp | command | description
-    {
-        echo "# Agent Commands Executed"
-        echo "# Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-        echo "# Incident: ${INCIDENT_ID:-unknown}"
-        echo "# Session: $(basename "$jsonl_file")"
-        echo "#"
-        echo ""
+    # Export additional variables for post-run hooks
+    export CONTAINER_NAME="nightcrier-agent-${INCIDENT_ID}"
 
-        # Parse JSONL and extract Bash commands
-        jq -r '
-            select(.type == "assistant") |
-            .message.content[]? |
-            select(.type == "tool_use" and .name == "Bash") |
-            "$ " + .input.command + (if .input.description then " # " + .input.description else "" end)
-        ' "$jsonl_file" 2>/dev/null
+    # Source and execute the post-run hook
+    bash "$post_script"
+    local hook_exit=$?
 
-    } > "$output_file"
+    if [[ $hook_exit -ne 0 ]]; then
+        log_debug "Post-run hook exited with code: $hook_exit"
+    fi
 
-    local cmd_count
-    cmd_count=$(grep -c '^\$' "$output_file" 2>/dev/null || echo "0")
-    echo "DEBUG: Extracted $cmd_count commands to agent-commands-executed.log" >&2
+    return 0
 }
 
-# Post-run hook: Extract Claude session archive (DEBUG mode only)
-post_run_extract_claude_session() {
-    if [[ "$DEBUG" != "true" ]]; then
-        return 0
-    fi
-
-    CONTAINER_NAME="nightcrier-agent-${INCIDENT_ID}"
-    if [[ -z "$INCIDENT_ID" ]]; then
-        return 0
-    fi
-
-    echo "DEBUG: Post-run: Extracting Claude session from container: $CONTAINER_NAME" >&2
-
-    # Extract the session directory from the container
-    if docker cp "$CONTAINER_NAME:/home/agent/.claude" "$WORKSPACE_DIR/claude-session-src" 2>/dev/null; then
-        mkdir -p "$WORKSPACE_DIR/logs"
-
-        # Extract commands before archiving
-        extract_agent_commands "$WORKSPACE_DIR/claude-session-src"
-
-        cd "$WORKSPACE_DIR"
-        tar -czf "$WORKSPACE_DIR/logs/claude-session.tar.gz" -C "$WORKSPACE_DIR" claude-session-src
-        echo "DEBUG: Post-run: Claude session archive saved to $WORKSPACE_DIR/logs/claude-session.tar.gz" >&2
-        rm -rf "$WORKSPACE_DIR/claude-session-src"
-        return 0
-    else
-        echo "DEBUG: Post-run: Could not extract Claude session (session may not exist)" >&2
-        return 0
-    fi
-}
-
-# Execute all post-run hooks
-# Add new hooks here:
-post_run_extract_claude_session
+# Execute post-run hooks
+run_post_hooks
 
 exit $EXIT_CODE
