@@ -1,6 +1,9 @@
 # Exclude test logs
 logs/
 
+# Exclude test incident artifacts
+incidents/
+
 # Exclude scratch directory
 scratch/
 
