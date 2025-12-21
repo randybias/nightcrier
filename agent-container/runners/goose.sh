@@ -41,7 +41,8 @@ build_goose_command() {
     escaped_prompt=$(escape_single_quotes "$PROMPT")
 
     # Goose uses 'goose run --text' for non-interactive execution with prompt
-    cmd+="goose run --text '${escaped_prompt}'"
+    # --no-session: Run without creating/storing session history for automation
+    cmd+="goose run --no-session --text '${escaped_prompt}'"
 
     # Model selection (if specified)
     if [[ -n "$LLM_MODEL" ]]; then

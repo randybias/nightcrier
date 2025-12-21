@@ -26,6 +26,43 @@ fi
 # Build Gemini Command
 # =============================================================================
 
+# Map Claude-style tool names to Gemini CLI tool names
+map_tools_to_gemini() {
+    local tools="$1"
+    local gemini_tools=""
+
+    # Split by comma and map each tool
+    IFS=',' read -ra TOOL_ARRAY <<< "$tools"
+    for tool in "${TOOL_ARRAY[@]}"; do
+        case "$tool" in
+            Read)
+                gemini_tools+="read_file,"
+                ;;
+            Write)
+                gemini_tools+="write_file,"
+                ;;
+            Grep)
+                gemini_tools+="grep,"
+                ;;
+            Glob)
+                gemini_tools+="glob,"
+                ;;
+            Bash)
+                gemini_tools+="run_shell_command,"
+                ;;
+            Skill)
+                # Gemini doesn't have direct skill equivalent, skip
+                ;;
+            *)
+                log_warn "Unknown tool: $tool (skipping)"
+                ;;
+        esac
+    done
+
+    # Remove trailing comma
+    echo "${gemini_tools%,}"
+}
+
 build_gemini_command() {
     local cmd=""
 
@@ -37,6 +74,15 @@ build_gemini_command() {
     # Model
     if [[ -n "$LLM_MODEL" ]]; then
         cmd+=" --model $LLM_MODEL"
+    fi
+
+    # Map and add allowed tools
+    if [[ -n "$AGENT_ALLOWED_TOOLS" ]]; then
+        local gemini_tools
+        gemini_tools=$(map_tools_to_gemini "$AGENT_ALLOWED_TOOLS")
+        if [[ -n "$gemini_tools" ]]; then
+            cmd+=" --allowed-tools \"$gemini_tools\""
+        fi
     fi
 
     # Tee output to file
