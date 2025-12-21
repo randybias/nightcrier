@@ -1,0 +1,12 @@
+# Whitelist approach: ignore everything except specific files
+*
+
+# Allow only these files to be committed
+!.gitignore
+!tuning.yaml
+!config.example.yaml
+!config-example-claude.yaml
+!config-example-codex.yaml
+!config-example-gemini.yaml
+!config-example-goose.yaml
+!triage-system-prompt.md
