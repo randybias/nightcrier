@@ -160,6 +160,7 @@ func run(cmd *cobra.Command, args []string) error {
 			AgentImage:       cfg.AgentImage,
 			Prompt:           cfg.AgentPrompt,
 			Debug:            cfg.LogLevel == "debug",
+			Verbose:          cfg.AgentVerbose || cfg.LogLevel == "debug",
 			Kubeconfig:       clusterCfg.Triage.Kubeconfig,
 		}, tuning)
 		slog.Info("executor created for cluster",
@@ -377,10 +378,17 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 	inc.StartedAt = &startedAt
 
 	// Execute agent
-	exitCode, execErr := executor.Execute(ctx, workspacePath, incidentID)
+	exitCode, logPaths, execErr := executor.Execute(ctx, workspacePath, incidentID)
 
 	// Update incident with completion info
 	inc.MarkCompleted(exitCode, execErr)
+
+	// Populate log paths in incident for local reference
+	inc.LogPaths = map[string]string{
+		"agent-stdout.log": logPaths.Stdout,
+		"agent-stderr.log": logPaths.Stderr,
+		"agent-full.log":   logPaths.Combined,
+	}
 
 	// Detect agent failures (exit code 0 but missing or invalid output)
 	agentFailed, failureReason := detectAgentFailure(workspacePath, exitCode, execErr, tuning)
@@ -475,7 +483,7 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 				"config", "upload_failed_investigations=false")
 		} else {
 			// Read the generated artifacts and convert markdown to HTML
-			artifacts, err := readIncidentArtifacts(workspacePath, incidentID)
+			artifacts, err := readIncidentArtifacts(workspacePath, incidentID, logPaths)
 			if err != nil {
 				slog.Warn("failed to read incident artifacts for storage", "error", err)
 			} else {
@@ -488,7 +496,16 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 					slog.Info("incident artifacts saved to storage",
 						"incident_id", incidentID,
 						"artifact_count", len(saveResult.ArtifactURLs),
+						"log_url_count", len(saveResult.LogURLs),
 						"report_url", reportURL)
+
+					// Populate log URLs in incident from storage result
+					inc.LogURLs = saveResult.LogURLs
+
+					// Update incident.json with log URLs
+					if err := inc.WriteToFile(incidentPath); err != nil {
+						slog.Warn("failed to update incident.json with log URLs", "error", err)
+					}
 				}
 			}
 		}
@@ -606,7 +623,8 @@ func setupLogging(level string) {
 
 // readIncidentArtifacts reads the generated artifacts from the workspace for storage upload.
 // It also converts the markdown report to HTML for better browser rendering.
-func readIncidentArtifacts(workspacePath, incidentID string) (*storage.IncidentArtifacts, error) {
+// It reads agent logs if they exist.
+func readIncidentArtifacts(workspacePath, incidentID string, logPaths agent.LogPaths) (*storage.IncidentArtifacts, error) {
 	// Read incident.json
 	incidentPath := filepath.Join(workspacePath, "incident.json")
 	incidentJSON, err := os.ReadFile(incidentPath)
@@ -624,10 +642,89 @@ func readIncidentArtifacts(workspacePath, incidentID string) (*storage.IncidentA
 	// Convert markdown to HTML for better browser rendering
 	investigationHTML := reporting.ConvertMarkdownToHTML(investigationMD, incidentID)
 
+	// Read agent logs if they exist (logs are optional)
+	var agentLogs storage.AgentLogs
+
+	// Read stdout log
+	if logPaths.Stdout != "" {
+		stdout, err := os.ReadFile(logPaths.Stdout)
+		if err != nil {
+			slog.Debug("failed to read agent stdout log (this is normal if logging disabled)",
+				"path", logPaths.Stdout,
+				"error", err)
+		} else {
+			agentLogs.Stdout = stdout
+			slog.Debug("read agent stdout log",
+				"path", logPaths.Stdout,
+				"size", len(stdout))
+		}
+	}
+
+	// Read stderr log
+	if logPaths.Stderr != "" {
+		stderr, err := os.ReadFile(logPaths.Stderr)
+		if err != nil {
+			slog.Debug("failed to read agent stderr log (this is normal if logging disabled)",
+				"path", logPaths.Stderr,
+				"error", err)
+		} else {
+			agentLogs.Stderr = stderr
+			slog.Debug("read agent stderr log",
+				"path", logPaths.Stderr,
+				"size", len(stderr))
+		}
+	}
+
+	// Read combined log
+	if logPaths.Combined != "" {
+		combined, err := os.ReadFile(logPaths.Combined)
+		if err != nil {
+			slog.Debug("failed to read agent combined log (this is normal if logging disabled)",
+				"path", logPaths.Combined,
+				"error", err)
+		} else {
+			agentLogs.Combined = combined
+			slog.Debug("read agent combined log",
+				"path", logPaths.Combined,
+				"size", len(combined))
+		}
+	}
+
+	// Read cluster permissions file (optional - only present if triage was enabled)
+	var clusterPermissionsJSON []byte
+	permissionsPath := filepath.Join(workspacePath, "incident_cluster_permissions.json")
+	if permsData, err := os.ReadFile(permissionsPath); err != nil {
+		slog.Debug("cluster permissions file not found (this is normal if triage disabled)",
+			"path", permissionsPath,
+			"error", err)
+	} else {
+		clusterPermissionsJSON = permsData
+		slog.Debug("read cluster permissions file",
+			"path", permissionsPath,
+			"size", len(permsData))
+	}
+
+	// Read Claude Code session archive if present (DEBUG mode only)
+	var claudeSessionArchive []byte
+	sessionArchivePath := filepath.Join(workspacePath, "logs", "claude-session.tar.gz")
+	if sessionData, err := os.ReadFile(sessionArchivePath); err != nil {
+		slog.Debug("claude session archive not found (this is normal in production mode)",
+			"path", sessionArchivePath,
+			"error", err)
+	} else {
+		claudeSessionArchive = sessionData
+		slog.Debug("read claude session archive",
+			"path", sessionArchivePath,
+			"size", len(sessionData))
+	}
+
 	return &storage.IncidentArtifacts{
-		IncidentJSON:      incidentJSON,
-		InvestigationMD:   investigationMD,
-		InvestigationHTML: investigationHTML,
+		IncidentJSON:            incidentJSON,
+		InvestigationMD:         investigationMD,
+		InvestigationHTML:       investigationHTML,
+		ClusterPermissionsJSON:  clusterPermissionsJSON,
+		AgentLogs:               agentLogs,
+		ClaudeSessionArchive:    claudeSessionArchive,
 	}, nil
 }
 

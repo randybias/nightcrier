@@ -181,6 +181,8 @@ func getContentType(filename string) string {
 		return "text/plain; charset=utf-8"
 	case ".html":
 		return "text/html; charset=utf-8"
+	case ".log":
+		return "text/plain; charset=utf-8"
 	default:
 		return "application/octet-stream"
 	}
@@ -294,13 +296,18 @@ func generateIndexHTML(incidentID string, artifactURLs map[string]string, expire
 		description string
 		badge       string
 	}{
-		"investigation.html": {"Investigation Report", "Formatted HTML report with root cause analysis", "primary"},
-		"investigation.md":   {"Investigation Report (Raw)", "Markdown source for programmatic access", "secondary"},
-		"incident.json":      {"Incident Data", "Complete incident context including event, status, and result metadata", "success"},
+		"investigation.html":                {"Investigation Report", "Formatted HTML report with root cause analysis", "primary"},
+		"investigation.md":                  {"Investigation Report (Raw)", "Markdown source for programmatic access", "secondary"},
+		"incident.json":                     {"Incident Data", "Complete incident context including event, status, and result metadata", "success"},
+		"incident_cluster_permissions.json": {"Cluster Permissions", "Validated Kubernetes permissions the agent had during investigation", "success"},
+		"agent-stdout.log":                  {"Agent Standard Output", "Agent's final output and results (DEBUG mode only)", "secondary"},
+		"agent-stderr.log":                  {"Agent Standard Error", "Agent's diagnostic output and errors (DEBUG mode only)", "secondary"},
+		"agent-full.log":                    {"Agent Combined Log", "Complete timestamped agent execution log (DEBUG mode only)", "secondary"},
+		"claude-session.tar.gz":             {"Claude Session Archive", "Complete Claude Code session with turn history and internal logs (DEBUG mode only)", "secondary"},
 	}
 
-	// Sort files for consistent display
-	orderedFiles := []string{"investigation.html", "investigation.md", "incident.json"}
+	// Sort files for consistent display - logs and session archive last since operators only need them for troubleshooting
+	orderedFiles := []string{"investigation.html", "investigation.md", "incident.json", "incident_cluster_permissions.json", "agent-stdout.log", "agent-stderr.log", "agent-full.log", "claude-session.tar.gz"}
 	for _, filename := range orderedFiles {
 		if url, exists := artifactURLs[filename]; exists {
 			desc := fileDescriptions[filename]
@@ -372,13 +379,15 @@ func (a *AzureStorage) SaveIncident(ctx context.Context, incidentID string, arti
 
 	// Define artifact mappings
 	artifactFiles := map[string][]byte{
-		"incident.json":        artifacts.IncidentJSON,
-		"investigation.md":     artifacts.InvestigationMD,
-		"investigation.html":   artifacts.InvestigationHTML,
+		"incident.json":                    artifacts.IncidentJSON,
+		"investigation.md":                 artifacts.InvestigationMD,
+		"investigation.html":               artifacts.InvestigationHTML,
+		"incident_cluster_permissions.json": artifacts.ClusterPermissionsJSON,
 	}
 
 	result := &SaveResult{
 		ArtifactURLs: make(map[string]string),
+		LogURLs:      make(map[string]string),
 		ExpiresAt:    expiresAt,
 	}
 
@@ -413,9 +422,70 @@ func (a *AzureStorage) SaveIncident(ctx context.Context, incidentID string, arti
 		fileList = append(fileList, filename)
 	}
 
+	// Upload agent logs if present (DEBUG mode only)
+	logFiles := map[string][]byte{
+		"agent-stdout.log": artifacts.AgentLogs.Stdout,
+		"agent-stderr.log": artifacts.AgentLogs.Stderr,
+		"agent-full.log":   artifacts.AgentLogs.Combined,
+	}
+
+	for filename, data := range logFiles {
+		if len(data) == 0 {
+			log.Printf("Info: skipping empty log file %s for incident %s", filename, incidentID)
+			continue
+		}
+
+		blobPath := fmt.Sprintf("%s/logs/%s", incidentID, filename)
+
+		// Upload the log blob
+		if err := a.uploadBlob(ctx, blobPath, data); err != nil {
+			log.Printf("Error uploading %s for incident %s: %v", filename, incidentID, err)
+			lastError = err
+			continue // Continue with other logs
+		}
+
+		// Generate SAS URL
+		sasURL, err := a.generateSASURL(blobPath, expiresAt)
+		if err != nil {
+			log.Printf("Error generating SAS URL for %s: %v", filename, err)
+			lastError = err
+			continue // Continue with other logs
+		}
+
+		result.LogURLs[filename] = sasURL
+	}
+
+	// Upload Claude Code session archive if present (DEBUG mode only)
+	if len(artifacts.ClaudeSessionArchive) > 0 {
+		blobPath := fmt.Sprintf("%s/logs/claude-session.tar.gz", incidentID)
+
+		if err := a.uploadBlob(ctx, blobPath, artifacts.ClaudeSessionArchive); err != nil {
+			log.Printf("Error uploading claude session archive for incident %s: %v", incidentID, err)
+			lastError = err
+		} else {
+			// Generate SAS URL for session archive
+			sasURL, err := a.generateSASURL(blobPath, expiresAt)
+			if err != nil {
+				log.Printf("Error generating SAS URL for claude session archive: %v", err)
+				lastError = err
+			} else {
+				result.LogURLs["claude-session.tar.gz"] = sasURL
+			}
+		}
+	}
+
 	// Generate and upload index.html for browsing
 	if len(fileList) > 0 {
-		indexHTML := generateIndexHTML(incidentID, result.ArtifactURLs, expiresAt)
+		// Merge log URLs into artifact URLs for index.html generation
+		allURLs := make(map[string]string)
+		for k, v := range result.ArtifactURLs {
+			allURLs[k] = v
+		}
+		for k, v := range result.LogURLs {
+			allURLs[k] = v
+		}
+
+		indexHTML := generateIndexHTML(incidentID, allURLs, expiresAt)
 		indexPath := fmt.Sprintf("%s/index.html", incidentID)
 
 		if err := a.uploadBlob(ctx, indexPath, []byte(indexHTML)); err != nil {

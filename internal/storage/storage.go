@@ -14,6 +14,17 @@ type Storage interface {
 	SaveIncident(ctx context.Context, incidentID string, artifacts *IncidentArtifacts) (*SaveResult, error)
 }
 
+// AgentLogs contains the captured log output from the agent's execution.
+// These logs are read from the workspace logs/ directory after the agent completes.
+type AgentLogs struct {
+	// Stdout contains the standard output from the agent
+	Stdout []byte
+	// Stderr contains the standard error output from the agent
+	Stderr []byte
+	// Combined contains the combined stdout and stderr in chronological order
+	Combined []byte
+}
+
 // IncidentArtifacts contains all files generated during incident investigation.
 type IncidentArtifacts struct {
 	// IncidentJSON is the serialized incident (combines event context and result)
@@ -22,6 +33,12 @@ type IncidentArtifacts struct {
 	InvestigationMD []byte
 	// InvestigationHTML is the HTML-rendered version of the investigation report
 	InvestigationHTML []byte
+	// ClusterPermissionsJSON contains the validated cluster permissions for the triage agent
+	ClusterPermissionsJSON []byte
+	// AgentLogs contains the captured log output from the agent's execution (DEBUG mode only)
+	AgentLogs AgentLogs
+	// ClaudeSessionArchive contains the tar.gz archive of ~/.claude from the agent container (DEBUG mode only)
+	ClaudeSessionArchive []byte
 }
 
 // SaveResult contains the results of a storage operation, including URLs to access artifacts.
@@ -31,6 +48,9 @@ type SaveResult struct {
 	// ArtifactURLs maps artifact names to their authenticated URLs
 	// Common keys: "incident.json", "investigation.md"
 	ArtifactURLs map[string]string
+	// LogURLs maps agent log file names to their presigned URLs
+	// Common keys: "stdout.log", "stderr.log", "combined.log"
+	LogURLs map[string]string
 	// ExpiresAt is when the URLs expire (relevant for cloud storage with SAS tokens)
 	ExpiresAt time.Time
 }

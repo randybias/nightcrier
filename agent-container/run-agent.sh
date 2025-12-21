@@ -431,8 +431,13 @@ OUTPUT_PATH="${OUTPUT_DIR}/${OUTPUT_FILE}"
 
 DOCKER_ARGS=(
     "run"
-    "--rm"
 )
+
+# Remove containers automatically in production mode
+# In DEBUG mode, keep the container so we can extract the Claude session
+if [[ "$DEBUG" != "true" ]]; then
+    DOCKER_ARGS+=("--rm")
+fi
 
 # Timeout via timeout command wrapper
 if [[ -n "$CONTAINER_TIMEOUT" ]]; then
@@ -516,6 +521,11 @@ fi
 # Working directory IS the agent home - everything in one place
 DOCKER_ARGS+=("-w" "${AGENT_HOME}")
 
+# Container name for reliable session archive extraction
+if [[ -n "$INCIDENT_ID" ]]; then
+    DOCKER_ARGS+=("--name" "nightcrier-agent-${INCIDENT_ID}")
+fi
+
 # Image
 DOCKER_ARGS+=("$AGENT_IMAGE")
 
@@ -526,9 +536,22 @@ DOCKER_ARGS+=("$AGENT_IMAGE")
 build_agent_command() {
     local cmd=""
 
+    # Add environment verification if debug mode (runs inside container)
+    if [[ "$DEBUG" == "true" ]]; then
+        cmd="echo '=== Container Environment ===' >&2 && "
+        cmd+="echo \"PWD: \$(pwd)\" >&2 && "
+        cmd+="echo \"USER: \$(whoami)\" >&2 && "
+        cmd+="echo \"HOME: \$HOME\" >&2 && "
+        cmd+="echo \"ANTHROPIC_API_KEY: \${ANTHROPIC_API_KEY:+SET}\" >&2 && "
+        cmd+="echo \"Kubeconfig exists: \$(test -f \$HOME/.kube/config && echo YES || echo NO)\" >&2 && "
+        cmd+="echo \"incident.json exists: \$(test -f incident.json && echo YES || echo NO)\" >&2 && "
+        cmd+="echo \"Files in workspace: \$(ls -la | wc -l) files\" >&2 && "
+        cmd+="echo '==============================' >&2 && "
+    fi
+
     case "$AGENT_CLI" in
         claude)
-            cmd="claude -p '${PROMPT//\'/\'\\\'\'}'"
+            cmd+="claude -p '${PROMPT//\'/\'\\\'\'}'"
 
             # Model
             if [[ -n "$LLM_MODEL" ]]; then
@@ -634,9 +657,12 @@ AGENT_CMD=$(build_agent_command)
 if [[ "$DEBUG" == "true" ]]; then
     echo "=== Debug Information ===" >&2
     echo "Agent: $AGENT_CLI" >&2
+    echo "Model: $LLM_MODEL" >&2
+    echo "Verbose: $AGENT_VERBOSE" >&2
     echo "Workspace: $WORKSPACE_DIR" >&2
     echo "Output: $OUTPUT_PATH" >&2
     echo "Image: $AGENT_IMAGE" >&2
+    echo "Kubeconfig: $KUBECONFIG_PATH" >&2
     echo "Docker args: ${DOCKER_ARGS[*]}" >&2
     echo "Agent command: $AGENT_CMD" >&2
     echo "=========================" >&2
@@ -658,5 +684,42 @@ fi
 echo "" >&2
 echo "Agent completed with exit code: $EXIT_CODE" >&2
 echo "Output saved to: $OUTPUT_PATH" >&2
+
+# =============================================================================
+# Post-Run Hooks
+# =============================================================================
+# This section handles tasks that run after the agent completes.
+# Add new post-run tasks as separate functions below.
+
+# Post-run hook: Extract Claude session archive (DEBUG mode only)
+post_run_extract_claude_session() {
+    if [[ "$DEBUG" != "true" ]]; then
+        return 0
+    fi
+
+    CONTAINER_NAME="nightcrier-agent-${INCIDENT_ID}"
+    if [[ -z "$INCIDENT_ID" ]]; then
+        return 0
+    fi
+
+    echo "DEBUG: Post-run: Extracting Claude session from container: $CONTAINER_NAME" >&2
+
+    # Extract the session directory from the container
+    if docker cp "$CONTAINER_NAME:/home/agent/.claude" "$WORKSPACE_DIR/claude-session-src" 2>/dev/null; then
+        mkdir -p "$WORKSPACE_DIR/logs"
+        cd "$WORKSPACE_DIR"
+        tar -czf "$WORKSPACE_DIR/logs/claude-session.tar.gz" -C "$WORKSPACE_DIR" claude-session-src
+        echo "DEBUG: Post-run: Claude session archive saved to $WORKSPACE_DIR/logs/claude-session.tar.gz" >&2
+        rm -rf "$WORKSPACE_DIR/claude-session-src"
+        return 0
+    else
+        echo "DEBUG: Post-run: Could not extract Claude session (session may not exist)" >&2
+        return 0
+    fi
+}
+
+# Execute all post-run hooks
+# Add new hooks here:
+post_run_extract_claude_session
 
 exit $EXIT_CODE

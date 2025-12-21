@@ -38,8 +38,7 @@ type ClusterPermissions struct {
 	CanGetNodes bool `json:"can_get_nodes"`
 
 	// Validation metadata
-	RawOutput string   `json:"raw_output,omitempty"` // kubectl auth can-i --list output
-	Warnings  []string `json:"warnings,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // MinimumPermissionsMet returns true if minimum triage permissions are available.
@@ -85,8 +84,6 @@ func validateClusterPermissions(ctx context.Context, cfg *ClusterConfig) (*Clust
 	if err != nil {
 		return nil, fmt.Errorf("kubectl auth can-i --list failed: %w (output: %s)", err, string(output))
 	}
-
-	perms.RawOutput = string(output)
 
 	// Check specific permissions using targeted can-i queries
 	// This is more reliable than parsing the --list output

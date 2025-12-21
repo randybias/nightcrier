@@ -386,7 +386,7 @@ exit 0
 	workspace := t.TempDir()
 
 	ctx := context.Background()
-	exitCode, err := executor.Execute(ctx, workspace, "test-incident-001")
+	exitCode, _, err := executor.Execute(ctx, workspace, "test-incident-001")
 
 	// The script should be cancelled due to timeout
 	// We expect either an error or non-zero exit code

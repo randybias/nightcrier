@@ -77,6 +77,7 @@ type IncidentSummary struct {
 	Duration   time.Duration
 	ReportPath string
 	ReportURL  string
+	LogURLs    map[string]string // Maps log file names to their presigned URLs
 }
 
 // NewSlackNotifier creates a new Slack notifier

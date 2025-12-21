@@ -34,6 +34,10 @@ type Incident struct {
 	ExitCode      *int   `json:"exitCode,omitempty"`
 	FailureReason string `json:"failureReason,omitempty"`
 
+	// Logs (populated after agent runs)
+	LogPaths map[string]string `json:"logPaths,omitempty"` // Local log file paths
+	LogURLs  map[string]string `json:"logUrls,omitempty"`  // Presigned URLs from storage
+
 	// Context (flattened from triggering event)
 	Cluster   string        `json:"cluster"`
 	Namespace string        `json:"namespace"`

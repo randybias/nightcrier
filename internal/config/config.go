@@ -34,6 +34,7 @@ type Config struct {
 	AgentTimeout          int    `mapstructure:"agent_timeout"` // seconds
 	AgentCLI              string `mapstructure:"agent_cli"`     // claude, codex, goose, gemini
 	AgentImage            string `mapstructure:"agent_image"`   // Docker image for agent container
+	AgentVerbose          bool   `mapstructure:"agent_verbose"` // Enable verbose agent output
 	AgentPrompt           string `mapstructure:"agent_prompt"`  // Prompt sent to agent
 
 	// LLM API Keys (optional - can also be set via environment)
@@ -89,6 +90,7 @@ func bindEnvVars() {
 		"agent_timeout":                   "AGENT_TIMEOUT",
 		"agent_cli":                       "AGENT_CLI",
 		"agent_image":                     "AGENT_IMAGE",
+		"agent_verbose":                   "AGENT_VERBOSE",
 		"agent_prompt":                    "AGENT_PROMPT",
 		"anthropic_api_key":               "ANTHROPIC_API_KEY",
 		"openai_api_key":                  "OPENAI_API_KEY",
