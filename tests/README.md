@@ -36,7 +36,7 @@ The baseline configuration tests the most appropriate model for each CLI tool:
 |-----------|-------|-----------------|
 | claude | sonnet-4.5 | `tests/config-templates/test-claude.yaml.tmpl` |
 | codex | gpt-5.2 | `tests/config-templates/test-codex.yaml.tmpl` |
-| gemini | gemini-3-pro-preview | `tests/config-templates/test-gemini.yaml.tmpl` |
+| gemini | gemini-3-flash-preview | `tests/config-templates/test-gemini.yaml.tmpl` |
 
 **Model References**:
 - Claude models: https://docs.anthropic.com/en/docs/about-claude/models
