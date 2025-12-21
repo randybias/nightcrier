@@ -25,7 +25,7 @@ type ExecutorConfig struct {
 	Timeout          int    // seconds
 	AgentCLI         string // claude, codex, goose, gemini
 	AgentImage       string // Docker image for agent container
-	Prompt           string // Prompt to send to the agent
+	AdditionalPrompt string // Optional additional context for the agent
 	Debug            bool   // Enable debug output in run-agent.sh
 	Verbose          bool   // Enable verbose agent output (shows thinking/tool usage)
 	Kubeconfig       string // Path to kubeconfig file for cluster access
@@ -217,8 +217,8 @@ func NewExecutorWithConfig(config ExecutorConfig, tuning *config.TuningConfig) *
 // Execute runs the agent script with the given incident ID in the workspace directory.
 // It returns the exit code, log file paths, and any error encountered.
 func (e *Executor) Execute(ctx context.Context, workspacePath string, incidentID string) (int, LogPaths, error) {
-	// Use the configured prompt
-	return e.ExecuteWithPrompt(ctx, workspacePath, incidentID, e.config.Prompt)
+	// Use the configured additional prompt (may be empty)
+	return e.ExecuteWithPrompt(ctx, workspacePath, incidentID, e.config.AdditionalPrompt)
 }
 
 // ExecuteWithPrompt runs the agent with a custom prompt
@@ -230,6 +230,12 @@ func (e *Executor) ExecuteWithPrompt(ctx context.Context, workspacePath string, 
 		"agent_cli", e.config.AgentCLI,
 		"model", e.config.Model,
 		"timeout", e.config.Timeout)
+
+	// Capture the combined prompt to prompt-sent.md before execution
+	if err := e.capturePrompt(workspacePath, incidentID, prompt); err != nil {
+		slog.Warn("failed to capture prompt for audit", "error", err)
+		// Continue execution - prompt capture failure is not fatal
+	}
 
 	// Create log capture to persist agent output to files (DEBUG mode only)
 	logCapture, err := NewLogCapture(workspacePath, e.config.Debug)
@@ -264,8 +270,10 @@ func (e *Executor) ExecuteWithPrompt(ctx context.Context, workspacePath string, 
 		args = append(args, "--kubeconfig", e.config.Kubeconfig)
 	}
 
-	// Add the prompt as the final argument
-	args = append(args, prompt)
+	// Add the additional prompt only if non-empty (system prompt drives investigation)
+	if prompt != "" {
+		args = append(args, "-p", prompt)
+	}
 
 	// Create context with timeout using configured buffer from TuningConfig
 	timeoutWithBuffer := e.config.Timeout + e.tuning.Agent.TimeoutBufferSeconds
@@ -394,5 +402,103 @@ func (e *Executor) ExecuteWithPrompt(ctx context.Context, workspacePath string, 
 	}
 
 	slog.Info("agent script completed", "exit_code", exitCode)
-	return exitCode, logCapture.GetLogPaths(), nil
+	if logCapture != nil {
+		return exitCode, logCapture.GetLogPaths(), nil
+	}
+	return exitCode, LogPaths{}, nil
+}
+
+// capturePrompt writes the combined system + additional prompt to prompt-sent.md
+// for auditability and debugging. This is called before subprocess launch.
+func (e *Executor) capturePrompt(workspacePath string, incidentID string, additionalPrompt string) error {
+	// Read system prompt file content
+	systemPromptContent, err := e.readSystemPromptFile()
+	if err != nil {
+		return fmt.Errorf("failed to read system prompt: %w", err)
+	}
+
+	// Generate the prompt-sent.md content
+	content := e.generatePromptSentContent(incidentID, systemPromptContent, additionalPrompt)
+
+	// Write to workspace
+	promptPath := filepath.Join(workspacePath, "prompt-sent.md")
+	if err := os.WriteFile(promptPath, []byte(content), 0600); err != nil {
+		return fmt.Errorf("failed to write prompt-sent.md: %w", err)
+	}
+
+	slog.Debug("captured prompt to prompt-sent.md", "path", promptPath)
+	return nil
+}
+
+// readSystemPromptFile reads the system prompt file content.
+// Returns empty string if no system prompt file is configured.
+func (e *Executor) readSystemPromptFile() (string, error) {
+	if e.config.SystemPromptFile == "" {
+		return "", nil
+	}
+
+	content, err := os.ReadFile(e.config.SystemPromptFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read system prompt file %s: %w", e.config.SystemPromptFile, err)
+	}
+
+	return string(content), nil
+}
+
+// generatePromptSentContent creates the markdown content for prompt-sent.md
+func (e *Executor) generatePromptSentContent(incidentID string, systemPrompt string, additionalPrompt string) string {
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+
+	// Extract cluster name from kubeconfig path if available
+	clusterName := "unknown"
+	if e.config.Kubeconfig != "" {
+		// Try to extract cluster name from kubeconfig filename
+		// e.g., "./kubeconfigs/prod-us-east-1-readonly.yaml" -> "prod-us-east-1"
+		base := filepath.Base(e.config.Kubeconfig)
+		// Remove extension and -readonly suffix
+		clusterName = base
+		if ext := filepath.Ext(base); ext != "" {
+			clusterName = base[:len(base)-len(ext)]
+		}
+		// Remove common suffixes
+		for _, suffix := range []string{"-readonly", "-admin", "-kubeconfig"} {
+			if len(clusterName) > len(suffix) && clusterName[len(clusterName)-len(suffix):] == suffix {
+				clusterName = clusterName[:len(clusterName)-len(suffix)]
+			}
+		}
+	}
+
+	// Build the prompt-sent.md content
+	var content string
+	content = "# Prompt Sent to Agent\n\n"
+	content += "## Metadata\n"
+	content += fmt.Sprintf("- Timestamp: %s\n", timestamp)
+	content += fmt.Sprintf("- Incident ID: %s\n", incidentID)
+	content += fmt.Sprintf("- Cluster: %s\n", clusterName)
+	content += fmt.Sprintf("- Agent CLI: %s\n", e.config.AgentCLI)
+	content += fmt.Sprintf("- Model: %s\n", e.config.Model)
+	content += "\n"
+
+	content += "## System Prompt\n\n"
+	if systemPrompt != "" {
+		content += systemPrompt
+		if systemPrompt[len(systemPrompt)-1] != '\n' {
+			content += "\n"
+		}
+	} else {
+		content += "*No system prompt configured*\n"
+	}
+	content += "\n"
+
+	content += "## Additional Prompt\n\n"
+	if additionalPrompt != "" {
+		content += additionalPrompt
+		if additionalPrompt[len(additionalPrompt)-1] != '\n' {
+			content += "\n"
+		}
+	} else {
+		content += "*None provided*\n"
+	}
+
+	return content
 }

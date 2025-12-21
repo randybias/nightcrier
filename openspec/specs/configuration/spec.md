@@ -74,11 +74,11 @@ The system SHALL fail fast at startup when required configuration parameters are
 - **THEN** the application SHALL exit with a non-zero status
 - **AND** the error message SHALL state "agent_image is required"
 
-#### Scenario: Missing agent prompt
+#### Scenario: Optional additional agent prompt
 - **WHEN** the application starts
-- **AND** `agent_prompt` is not configured
-- **THEN** the application SHALL exit with a non-zero status
-- **AND** the error message SHALL state "agent_prompt is required"
+- **AND** `additional_agent_prompt` is not configured
+- **THEN** the application SHALL start successfully
+- **AND** the system prompt SHALL drive investigation methodology
 
 #### Scenario: Clear error guidance
 - **WHEN** a required configuration parameter is missing
@@ -93,7 +93,7 @@ The system SHALL NOT define default values for required configuration parameters
 #### Scenario: No duplicate defaults in executor
 - **WHEN** the agent executor is initialized
 - **THEN** it SHALL receive all configuration values from the Config struct
-- **AND** it SHALL NOT define its own default values for agent_timeout, agent_model, agent_allowed_tools, or agent_prompt
+- **AND** it SHALL NOT define its own default values for agent_timeout, agent_model, or agent_allowed_tools
 
 #### Scenario: No duplicate defaults in shell script
 - **WHEN** the agent shell script is invoked

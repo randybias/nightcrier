@@ -55,11 +55,11 @@ func TestNewExecutorWithConfig_RequiresTuningConfig(t *testing.T) {
 	tuning := createTestTuning()
 
 	execConfig := ExecutorConfig{
-		ScriptPath:   scriptPath,
-		AllowedTools: "Read,Write,Grep,Glob,Bash,Skill",
-		Model:        "sonnet",
-		Timeout:      300,
-		Prompt:       "Test prompt",
+		ScriptPath:       scriptPath,
+		AllowedTools:     "Read,Write,Grep,Glob,Bash,Skill",
+		Model:            "sonnet",
+		Timeout:          300,
+		AdditionalPrompt: "Test prompt",
 	}
 
 	// Test that executor can be created with tuning config
@@ -98,11 +98,11 @@ exit 0
 
 	tuning := createTestTuning()
 	execConfig := ExecutorConfig{
-		ScriptPath:   scriptName, // Relative path
-		AllowedTools: "Read,Write",
-		Model:        "sonnet",
-		Timeout:      60,
-		Prompt:       "Test",
+		ScriptPath:       scriptName, // Relative path
+		AllowedTools:     "Read,Write",
+		Model:            "sonnet",
+		Timeout:          60,
+		AdditionalPrompt: "Test",
 	}
 
 	executor := NewExecutorWithConfig(execConfig, tuning)
@@ -128,7 +128,7 @@ func TestNewExecutorWithConfig_SystemPromptFileAbsolutePath(t *testing.T) {
 		AllowedTools:     "Read,Write",
 		Model:            "sonnet",
 		Timeout:          60,
-		Prompt:           "Test",
+		AdditionalPrompt: "Test",
 	}
 
 	executor := NewExecutorWithConfig(execConfig, tuning)
@@ -151,7 +151,7 @@ func TestNewExecutorWithConfig_AllConfigFieldsPreserved(t *testing.T) {
 		Model:            "opus",
 		Timeout:          600,
 		AgentCLI:         "claude",
-		Prompt:           "Custom prompt text",
+		AdditionalPrompt: "Custom prompt text",
 	}
 
 	executor := NewExecutorWithConfig(execConfig, tuning)
@@ -172,8 +172,8 @@ func TestNewExecutorWithConfig_AllConfigFieldsPreserved(t *testing.T) {
 	if executor.config.AgentCLI != "claude" {
 		t.Errorf("AgentCLI = %s, want claude", executor.config.AgentCLI)
 	}
-	if executor.config.Prompt != "Custom prompt text" {
-		t.Errorf("Prompt = %s, want 'Custom prompt text'", executor.config.Prompt)
+	if executor.config.AdditionalPrompt != "Custom prompt text" {
+		t.Errorf("AdditionalPrompt = %s, want 'Custom prompt text'", executor.config.AdditionalPrompt)
 	}
 }
 
@@ -200,11 +200,11 @@ func TestExecutor_UsesTuningConfigTimeoutBuffer(t *testing.T) {
 			tuning.Agent.TimeoutBufferSeconds = tt.tuningTimeoutBuffer
 
 			execConfig := ExecutorConfig{
-				ScriptPath:   scriptPath,
-				AllowedTools: "Read,Write",
-				Model:        "sonnet",
-				Timeout:      tt.configTimeout,
-				Prompt:       "Test",
+				ScriptPath:       scriptPath,
+				AllowedTools:     "Read,Write",
+				Model:            "sonnet",
+				Timeout:          tt.configTimeout,
+				AdditionalPrompt: "Test",
 			}
 
 			executor := NewExecutorWithConfig(execConfig, tuning)
@@ -248,11 +248,11 @@ func TestExecutor_UsesTuningConfigIOBuffers(t *testing.T) {
 			tuning.IO.StderrBufferSize = tt.stderrBuffer
 
 			execConfig := ExecutorConfig{
-				ScriptPath:   scriptPath,
-				AllowedTools: "Read,Write",
-				Model:        "sonnet",
-				Timeout:      60,
-				Prompt:       "Test",
+				ScriptPath:       scriptPath,
+				AllowedTools:     "Read,Write",
+				Model:            "sonnet",
+				Timeout:          60,
+				AdditionalPrompt: "Test",
 			}
 
 			executor := NewExecutorWithConfig(execConfig, tuning)
@@ -284,7 +284,7 @@ func TestExecutor_NoDefaultsApplied(t *testing.T) {
 		Model:            "test-model",
 		Timeout:          1, // Minimal timeout
 		AgentCLI:         "",
-		Prompt:           "",
+		AdditionalPrompt: "",
 	}
 
 	executor := NewExecutorWithConfig(execConfig, tuning)
@@ -299,8 +299,8 @@ func TestExecutor_NoDefaultsApplied(t *testing.T) {
 	if executor.config.Timeout != 1 {
 		t.Errorf("Timeout = %d, expected 1 (no defaults applied)", executor.config.Timeout)
 	}
-	if executor.config.Prompt != "" {
-		t.Errorf("Prompt = %s, expected empty (no defaults applied)", executor.config.Prompt)
+	if executor.config.AdditionalPrompt != "" {
+		t.Errorf("AdditionalPrompt = %s, expected empty (no defaults applied)", executor.config.AdditionalPrompt)
 	}
 }
 
@@ -319,18 +319,18 @@ exit 0
 	customPrompt := "Test investigation prompt"
 
 	execConfig := ExecutorConfig{
-		ScriptPath:   scriptPath,
-		AllowedTools: "Read,Write",
-		Model:        "sonnet",
-		Timeout:      5,
-		Prompt:       customPrompt,
+		ScriptPath:       scriptPath,
+		AllowedTools:     "Read,Write",
+		Model:            "sonnet",
+		Timeout:          5,
+		AdditionalPrompt: customPrompt,
 	}
 
 	executor := NewExecutorWithConfig(execConfig, tuning)
 
 	// Verify the prompt is stored in config
-	if executor.config.Prompt != customPrompt {
-		t.Errorf("config.Prompt = %s, want %s", executor.config.Prompt, customPrompt)
+	if executor.config.AdditionalPrompt != customPrompt {
+		t.Errorf("config.AdditionalPrompt = %s, want %s", executor.config.AdditionalPrompt, customPrompt)
 	}
 
 	// Note: We don't actually execute here because it requires a full agent setup
@@ -343,11 +343,11 @@ func TestExecutor_TuningConfigRequired(t *testing.T) {
 	scriptPath := createTestScript(t)
 
 	execConfig := ExecutorConfig{
-		ScriptPath:   scriptPath,
-		AllowedTools: "Read,Write",
-		Model:        "sonnet",
-		Timeout:      60,
-		Prompt:       "Test",
+		ScriptPath:       scriptPath,
+		AllowedTools:     "Read,Write",
+		Model:            "sonnet",
+		Timeout:          60,
+		AdditionalPrompt: "Test",
 	}
 
 	// This line MUST include tuning parameter - if it compiles without it, the test fails
@@ -375,11 +375,11 @@ exit 0
 	tuning.Agent.TimeoutBufferSeconds = 1 // Short buffer for quick test
 
 	execConfig := ExecutorConfig{
-		ScriptPath:   scriptPath,
-		AllowedTools: "Read,Write",
-		Model:        "sonnet",
-		Timeout:      1, // 1 second timeout
-		Prompt:       "Test",
+		ScriptPath:       scriptPath,
+		AllowedTools:     "Read,Write",
+		Model:            "sonnet",
+		Timeout:          1, // 1 second timeout
+		AdditionalPrompt: "Test",
 	}
 
 	executor := NewExecutorWithConfig(execConfig, tuning)
@@ -415,8 +415,8 @@ func TestExecutorConfig_AllFieldsExplicit(t *testing.T) {
 	if cfg.AgentCLI != "" {
 		t.Error("ExecutorConfig.AgentCLI should have no default")
 	}
-	if cfg.Prompt != "" {
-		t.Error("ExecutorConfig.Prompt should have no default")
+	if cfg.AdditionalPrompt != "" {
+		t.Error("ExecutorConfig.AdditionalPrompt should have no default")
 	}
 
 	// Timeout should be zero by default

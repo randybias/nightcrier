@@ -158,7 +158,7 @@ func run(cmd *cobra.Command, args []string) error {
 			Timeout:          cfg.AgentTimeout,
 			AgentCLI:         cfg.AgentCLI,
 			AgentImage:       cfg.AgentImage,
-			Prompt:           cfg.AgentPrompt,
+			AdditionalPrompt: cfg.AdditionalAgentPrompt,
 			Debug:            cfg.LogLevel == "debug",
 			Verbose:          cfg.AgentVerbose || cfg.LogLevel == "debug",
 			Kubeconfig:       clusterCfg.Triage.Kubeconfig,
@@ -718,13 +718,23 @@ func readIncidentArtifacts(workspacePath, incidentID string, logPaths agent.LogP
 			"size", len(sessionData))
 	}
 
+	// Read prompt-sent.md (optional - may not exist for older incidents)
+	promptSentPath := filepath.Join(workspacePath, "prompt-sent.md")
+	promptSent, err := os.ReadFile(promptSentPath)
+	if err != nil {
+		// prompt-sent.md is optional, log but don't fail
+		slog.Debug("prompt-sent.md not found (optional artifact)", "path", promptSentPath)
+		promptSent = nil
+	}
+
 	return &storage.IncidentArtifacts{
-		IncidentJSON:            incidentJSON,
-		InvestigationMD:         investigationMD,
-		InvestigationHTML:       investigationHTML,
-		ClusterPermissionsJSON:  clusterPermissionsJSON,
-		AgentLogs:               agentLogs,
-		ClaudeSessionArchive:    claudeSessionArchive,
+		IncidentJSON:           incidentJSON,
+		InvestigationMD:        investigationMD,
+		InvestigationHTML:      investigationHTML,
+		ClusterPermissionsJSON: clusterPermissionsJSON,
+		AgentLogs:              agentLogs,
+		ClaudeSessionArchive:   claudeSessionArchive,
+		PromptSent:             promptSent,
 	}, nil
 }
 

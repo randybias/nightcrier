@@ -93,10 +93,11 @@ agent_cli: "claude"
 # Environment variable: AGENT_IMAGE
 agent_image: "nightcrier-agent:latest"
 
-# REQUIRED: Prompt sent to the agent for triage
-# This can be customized to change how the agent approaches incidents
-# Environment variable: AGENT_PROMPT
-agent_prompt: "Production incident detected. Incident context is in incident.json. Review incident_cluster_permissions.json to understand your cluster access constraints. Perform immediate triage and root cause analysis. Write findings to output/investigation.md"
+# Optional: Additional context for the agent (beyond the system prompt)
+# Use this for cluster-specific information like SLOs, escalation contacts, or special constraints.
+# The system prompt handles investigation methodology via the k8s-troubleshooter skill.
+# Environment variable: ADDITIONAL_AGENT_PROMPT
+# additional_agent_prompt: "SLO: 99.9% uptime. Escalation: page oncall@example.com for P1 issues."
 
 # =============================================================================
 # LLM API Keys (At least one required)

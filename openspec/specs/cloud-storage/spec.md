@@ -151,3 +151,33 @@ The system SHALL store SAS URLs in the result.json for programmatic access.
 - **THEN** it SHALL include `presigned_urls_expire_at` timestamp
 - **AND** the timestamp SHALL reflect when the URLs will expire
 
+### Requirement: Prompt Capture Artifact
+
+The system SHALL capture and store the prompt sent to the agent for auditability.
+
+#### Scenario: Prompt capture before execution
+- **GIVEN** an incident investigation is starting
+- **WHEN** the agent executor is about to launch the subprocess
+- **THEN** the full prompt (system + additional) SHALL be written to `prompt-sent.md` in the workspace
+- **AND** the file SHALL be written before the subprocess starts
+
+#### Scenario: Prompt capture metadata
+- **GIVEN** prompt-sent.md is being generated
+- **WHEN** the file content is created
+- **THEN** it SHALL include metadata: timestamp, incident ID, cluster name, agent CLI, and model
+- **AND** it SHALL include the full system prompt content
+- **AND** it SHALL include the additional prompt content (or "None provided" if empty)
+
+#### Scenario: Prompt artifact upload
+- **GIVEN** Azure storage mode is enabled
+- **AND** an investigation completes
+- **WHEN** artifacts are uploaded
+- **THEN** prompt-sent.md SHALL be uploaded alongside other artifacts
+- **AND** it SHALL appear in the index.html file listing
+
+#### Scenario: Prompt artifact optional
+- **GIVEN** prompt-sent.md does not exist in the workspace
+- **WHEN** artifacts are read for upload
+- **THEN** the upload SHALL succeed without prompt-sent.md
+- **AND** no error SHALL be logged (prompt is optional for backwards compatibility)
+

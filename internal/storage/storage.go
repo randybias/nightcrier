@@ -39,6 +39,8 @@ type IncidentArtifacts struct {
 	AgentLogs AgentLogs
 	// ClaudeSessionArchive contains the tar.gz archive of ~/.claude from the agent container (DEBUG mode only)
 	ClaudeSessionArchive []byte
+	// PromptSent is the captured prompt sent to the agent (system + additional)
+	PromptSent []byte
 }
 
 // SaveResult contains the results of a storage operation, including URLs to access artifacts.

@@ -33,9 +33,9 @@ type Config struct {
 	AgentModel            string `mapstructure:"agent_model"`
 	AgentTimeout          int    `mapstructure:"agent_timeout"` // seconds
 	AgentCLI              string `mapstructure:"agent_cli"`     // claude, codex, goose, gemini
-	AgentImage            string `mapstructure:"agent_image"`   // Docker image for agent container
-	AgentVerbose          bool   `mapstructure:"agent_verbose"` // Enable verbose agent output
-	AgentPrompt           string `mapstructure:"agent_prompt"`  // Prompt sent to agent
+	AgentImage            string `mapstructure:"agent_image"`              // Docker image for agent container
+	AgentVerbose          bool   `mapstructure:"agent_verbose"`           // Enable verbose agent output
+	AdditionalAgentPrompt string `mapstructure:"additional_agent_prompt"` // Optional additional context for agent (cluster-specific SLOs, escalation info)
 
 	// LLM API Keys (optional - can also be set via environment)
 	AnthropicAPIKey string `mapstructure:"anthropic_api_key"`
@@ -91,7 +91,7 @@ func bindEnvVars() {
 		"agent_cli":                       "AGENT_CLI",
 		"agent_image":                     "AGENT_IMAGE",
 		"agent_verbose":                   "AGENT_VERBOSE",
-		"agent_prompt":                    "AGENT_PROMPT",
+		"additional_agent_prompt":         "ADDITIONAL_AGENT_PROMPT",
 		"anthropic_api_key":               "ANTHROPIC_API_KEY",
 		"openai_api_key":                  "OPENAI_API_KEY",
 		"gemini_api_key":                  "GEMINI_API_KEY",
@@ -255,9 +255,7 @@ func (c *Config) Validate() error {
 		return missingFieldError("agent_image", "AGENT_IMAGE")
 	}
 
-	if c.AgentPrompt == "" {
-		return missingFieldError("agent_prompt", "AGENT_PROMPT")
-	}
+	// Note: AdditionalAgentPrompt is optional - system prompt drives investigation
 
 	// Required: Event Processing
 	if c.SeverityThreshold == "" {

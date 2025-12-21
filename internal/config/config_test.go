@@ -30,7 +30,10 @@ func testConfigWithAPIKey(baseConfig string) string {
 // completeTestConfig returns a complete config with all required fields for testing
 func completeTestConfig() string {
 	return `
-mcp_endpoint: "http://localhost:8080/mcp"
+clusters:
+  - name: test-cluster
+    mcp:
+      endpoint: "http://localhost:8080/mcp"
 subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./agent-container/run-agent.sh"
@@ -38,7 +41,6 @@ agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
@@ -62,7 +64,10 @@ func completeTestConfigWith(overrides string) string {
 // completeTestConfigWithoutAPIKey returns a complete config without any API key for validation testing
 func completeTestConfigWithoutAPIKey() string {
 	return `
-mcp_endpoint: "http://localhost:8080/mcp"
+clusters:
+  - name: test-cluster
+    mcp:
+      endpoint: "http://localhost:8080/mcp"
 subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./agent-container/run-agent.sh"
@@ -70,7 +75,6 @@ agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
@@ -89,7 +93,6 @@ failure_threshold_for_alert: 3
 func buildTestConfig(overrides map[string]interface{}) string {
 	// Default values
 	values := map[string]interface{}{
-		"mcp_endpoint":                    "http://localhost:8080/mcp",
 		"subscribe_mode":                  "faults",
 		"workspace_root":                  "./incidents",
 		"agent_script_path":               "./agent-container/run-agent.sh",
@@ -97,7 +100,6 @@ func buildTestConfig(overrides map[string]interface{}) string {
 		"agent_model":                     "sonnet",
 		"agent_cli":                       "claude",
 		"agent_image":                     "nightcrier-agent:latest",
-		"agent_prompt":                    "Test prompt",
 		"severity_threshold":              "ERROR",
 		"max_concurrent_agents":           5,
 		"global_queue_size":               100,
@@ -121,8 +123,13 @@ func buildTestConfig(overrides map[string]interface{}) string {
 		}
 	}
 
-	// Build YAML string
-	config := "\n"
+	// Build YAML string - start with clusters section
+	config := `
+clusters:
+  - name: test-cluster
+    mcp:
+      endpoint: "http://localhost:8080/mcp"
+`
 	for k, v := range values {
 		switch val := v.(type) {
 		case string:
@@ -139,55 +146,17 @@ func buildTestConfig(overrides map[string]interface{}) string {
 func TestLoadWithAllRequiredFields(t *testing.T) {
 	resetViper()
 
-	// Set all required fields via environment variables
-	os.Setenv("K8S_CLUSTER_MCP_ENDPOINT", "http://localhost:8080/mcp")
-	os.Setenv("SUBSCRIBE_MODE", "faults")
-	os.Setenv("WORKSPACE_ROOT", "./incidents")
-	os.Setenv("AGENT_SCRIPT_PATH", "./agent-container/run-agent.sh")
-	os.Setenv("AGENT_TIMEOUT", "300")
-	os.Setenv("AGENT_MODEL", "sonnet")
-	os.Setenv("AGENT_CLI", "claude")
-	os.Setenv("AGENT_IMAGE", "nightcrier-agent:latest")
-	os.Setenv("AGENT_PROMPT", "Test prompt")
-	os.Setenv("SEVERITY_THRESHOLD", "ERROR")
-	os.Setenv("MAX_CONCURRENT_AGENTS", "5")
-	os.Setenv("GLOBAL_QUEUE_SIZE", "100")
-	os.Setenv("CLUSTER_QUEUE_SIZE", "10")
-	os.Setenv("DEDUP_WINDOW_SECONDS", "300")
-	os.Setenv("QUEUE_OVERFLOW_POLICY", "drop")
-	os.Setenv("SHUTDOWN_TIMEOUT_SECONDS", "30")
-	os.Setenv("SSE_RECONNECT_INITIAL_BACKOFF", "1")
-	os.Setenv("SSE_RECONNECT_MAX_BACKOFF", "60")
-	os.Setenv("SSE_READ_TIMEOUT_SECONDS", "120")
-	os.Setenv("FAILURE_THRESHOLD_FOR_ALERT", "3")
-	defer setTestAPIKey(t)()
+	// Create config file with all required fields including clusters
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfig()
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
 
-	defer func() {
-		os.Unsetenv("K8S_CLUSTER_MCP_ENDPOINT")
-		os.Unsetenv("SUBSCRIBE_MODE")
-		os.Unsetenv("WORKSPACE_ROOT")
-		os.Unsetenv("AGENT_SCRIPT_PATH")
-		os.Unsetenv("AGENT_TIMEOUT")
-		os.Unsetenv("AGENT_MODEL")
-		os.Unsetenv("AGENT_CLI")
-		os.Unsetenv("AGENT_IMAGE")
-		os.Unsetenv("AGENT_PROMPT")
-		os.Unsetenv("SEVERITY_THRESHOLD")
-		os.Unsetenv("MAX_CONCURRENT_AGENTS")
-		os.Unsetenv("GLOBAL_QUEUE_SIZE")
-		os.Unsetenv("CLUSTER_QUEUE_SIZE")
-		os.Unsetenv("DEDUP_WINDOW_SECONDS")
-		os.Unsetenv("QUEUE_OVERFLOW_POLICY")
-		os.Unsetenv("SHUTDOWN_TIMEOUT_SECONDS")
-		os.Unsetenv("SSE_RECONNECT_INITIAL_BACKOFF")
-		os.Unsetenv("SSE_RECONNECT_MAX_BACKOFF")
-		os.Unsetenv("SSE_READ_TIMEOUT_SECONDS")
-		os.Unsetenv("FAILURE_THRESHOLD_FOR_ALERT")
-	}()
-
-	cfg, err := Load()
+	cfg, err := LoadWithConfigFile(configPath)
 	if err != nil {
-		t.Fatalf("Load() failed: %v", err)
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
 	}
 
 	// Check all values are set correctly
@@ -223,62 +192,37 @@ func TestLoadWithAllRequiredFields(t *testing.T) {
 func TestLoadFromEnvVars(t *testing.T) {
 	resetViper()
 
-	// Set env vars (all required plus some optional ones to test overrides)
-	os.Setenv("K8S_CLUSTER_MCP_ENDPOINT", "http://mcp-server:8080/mcp")
-	os.Setenv("SUBSCRIBE_MODE", "events")
+	// Create a minimal config file with clusters (required in config file)
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfig() // Provides clusters and defaults
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	// Set env vars to override config file values
 	os.Setenv("WORKSPACE_ROOT", "/var/incidents")
 	os.Setenv("LOG_LEVEL", "debug")
-	os.Setenv("AGENT_SCRIPT_PATH", "./test-script.sh")
 	os.Setenv("AGENT_MODEL", "opus")
 	os.Setenv("AGENT_TIMEOUT", "600")
-	os.Setenv("AGENT_CLI", "gemini")
-	os.Setenv("AGENT_IMAGE", "test-image:v1")
-	os.Setenv("AGENT_PROMPT", "Custom prompt")
 	os.Setenv("SEVERITY_THRESHOLD", "WARNING")
 	os.Setenv("MAX_CONCURRENT_AGENTS", "10")
-	os.Setenv("GLOBAL_QUEUE_SIZE", "200")
-	os.Setenv("CLUSTER_QUEUE_SIZE", "20")
-	os.Setenv("DEDUP_WINDOW_SECONDS", "600")
-	os.Setenv("QUEUE_OVERFLOW_POLICY", "reject")
-	os.Setenv("SHUTDOWN_TIMEOUT_SECONDS", "60")
-	os.Setenv("SSE_RECONNECT_INITIAL_BACKOFF", "2")
-	os.Setenv("SSE_RECONNECT_MAX_BACKOFF", "120")
-	os.Setenv("SSE_READ_TIMEOUT_SECONDS", "240")
-	os.Setenv("FAILURE_THRESHOLD_FOR_ALERT", "5")
-	defer setTestAPIKey(t)()
 
 	defer func() {
-		os.Unsetenv("K8S_CLUSTER_MCP_ENDPOINT")
-		os.Unsetenv("SUBSCRIBE_MODE")
 		os.Unsetenv("WORKSPACE_ROOT")
 		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("AGENT_SCRIPT_PATH")
 		os.Unsetenv("AGENT_MODEL")
 		os.Unsetenv("AGENT_TIMEOUT")
-		os.Unsetenv("AGENT_CLI")
-		os.Unsetenv("AGENT_IMAGE")
-		os.Unsetenv("AGENT_PROMPT")
 		os.Unsetenv("SEVERITY_THRESHOLD")
 		os.Unsetenv("MAX_CONCURRENT_AGENTS")
-		os.Unsetenv("GLOBAL_QUEUE_SIZE")
-		os.Unsetenv("CLUSTER_QUEUE_SIZE")
-		os.Unsetenv("DEDUP_WINDOW_SECONDS")
-		os.Unsetenv("QUEUE_OVERFLOW_POLICY")
-		os.Unsetenv("SHUTDOWN_TIMEOUT_SECONDS")
-		os.Unsetenv("SSE_RECONNECT_INITIAL_BACKOFF")
-		os.Unsetenv("SSE_RECONNECT_MAX_BACKOFF")
-		os.Unsetenv("SSE_READ_TIMEOUT_SECONDS")
-		os.Unsetenv("FAILURE_THRESHOLD_FOR_ALERT")
 	}()
 
-	cfg, err := Load()
+	cfg, err := LoadWithConfigFile(configPath)
 	if err != nil {
-		t.Fatalf("Load() failed: %v", err)
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
 	}
 
-	if cfg.MCPEndpoint != "http://mcp-server:8080/mcp" {
-		t.Errorf("MCPEndpoint = %q, want %q", cfg.MCPEndpoint, "http://mcp-server:8080/mcp")
-	}
+	// Env vars should override config file values
 	if cfg.WorkspaceRoot != "/var/incidents" {
 		t.Errorf("WorkspaceRoot = %q, want %q", cfg.WorkspaceRoot, "/var/incidents")
 	}
@@ -306,7 +250,10 @@ func TestLoadFromConfigFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	configContent := `
-mcp_endpoint: "http://config-file-server:8080/mcp"
+clusters:
+  - name: config-file-cluster
+    mcp:
+      endpoint: "http://config-file-server:8080/mcp"
 subscribe_mode: "faults"
 workspace_root: "/config/incidents"
 log_level: "warn"
@@ -315,7 +262,6 @@ agent_model: "haiku"
 agent_timeout: 120
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "CRITICAL"
 max_concurrent_agents: 3
 global_queue_size: 50
@@ -338,8 +284,8 @@ anthropic_api_key: "test-key"
 		t.Fatalf("LoadWithConfigFile() failed: %v", err)
 	}
 
-	if cfg.MCPEndpoint != "http://config-file-server:8080/mcp" {
-		t.Errorf("MCPEndpoint = %q, want %q", cfg.MCPEndpoint, "http://config-file-server:8080/mcp")
+	if len(cfg.Clusters) != 1 || cfg.Clusters[0].MCP.Endpoint != "http://config-file-server:8080/mcp" {
+		t.Errorf("Clusters[0].MCP.Endpoint = %q, want %q", cfg.Clusters[0].MCP.Endpoint, "http://config-file-server:8080/mcp")
 	}
 	if cfg.WorkspaceRoot != "/config/incidents" {
 		t.Errorf("WorkspaceRoot = %q, want %q", cfg.WorkspaceRoot, "/config/incidents")
@@ -380,7 +326,10 @@ func TestEnvVarsOverrideConfigFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	configContent := `
-mcp_endpoint: "http://config-file-server:8080/mcp"
+clusters:
+  - name: config-file-cluster
+    mcp:
+      endpoint: "http://config-file-server:8080/mcp"
 subscribe_mode: "faults"
 workspace_root: "/config/incidents"
 log_level: "warn"
@@ -389,7 +338,6 @@ agent_timeout: 120
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
@@ -408,10 +356,9 @@ anthropic_api_key: "test-key"
 	}
 
 	// Set env vars that should override config file
-	os.Setenv("K8S_CLUSTER_MCP_ENDPOINT", "http://env-override:8080/mcp")
+	// Note: Cluster MCP endpoint is no longer overridable via env var (multi-cluster config)
 	os.Setenv("LOG_LEVEL", "error")
 	defer func() {
-		os.Unsetenv("K8S_CLUSTER_MCP_ENDPOINT")
 		os.Unsetenv("LOG_LEVEL")
 	}()
 
@@ -420,10 +367,7 @@ anthropic_api_key: "test-key"
 		t.Fatalf("LoadWithConfigFile() failed: %v", err)
 	}
 
-	// Env vars should override config file
-	if cfg.MCPEndpoint != "http://env-override:8080/mcp" {
-		t.Errorf("MCPEndpoint = %q, want %q (env var should override)", cfg.MCPEndpoint, "http://env-override:8080/mcp")
-	}
+	// Env vars should override config file for supported fields
 	if cfg.LogLevel != "error" {
 		t.Errorf("LogLevel = %q, want %q (env var should override)", cfg.LogLevel, "error")
 	}
@@ -437,15 +381,40 @@ anthropic_api_key: "test-key"
 	}
 }
 
-func TestValidation_MissingMCPEndpoint(t *testing.T) {
+func TestValidation_MissingClusters(t *testing.T) {
 	resetViper()
 
-	// Don't set required K8S_CLUSTER_MCP_ENDPOINT
-	os.Unsetenv("K8S_CLUSTER_MCP_ENDPOINT")
+	// Config without clusters should fail
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := `
+subscribe_mode: "faults"
+workspace_root: "./incidents"
+agent_script_path: "./agent-container/run-agent.sh"
+agent_timeout: 300
+agent_model: "sonnet"
+agent_cli: "claude"
+agent_image: "nightcrier-agent:latest"
+severity_threshold: "ERROR"
+max_concurrent_agents: 5
+global_queue_size: 100
+cluster_queue_size: 10
+dedup_window_seconds: 300
+queue_overflow_policy: "drop"
+shutdown_timeout: 30
+sse_reconnect_initial_backoff: 1
+sse_reconnect_max_backoff: 60
+sse_read_timeout: 120
+failure_threshold_for_alert: 3
+anthropic_api_key: "test-key"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
 
-	_, err := Load()
+	_, err := LoadWithConfigFile(configPath)
 	if err == nil {
-		t.Error("Load() should fail when MCP endpoint is missing")
+		t.Error("LoadWithConfigFile() should fail when clusters is missing")
 	}
 }
 
@@ -455,7 +424,10 @@ func TestValidation_InvalidSeverityThreshold(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	configContent := `
-mcp_endpoint: "http://localhost:8080/mcp"
+clusters:
+  - name: test-cluster
+    mcp:
+      endpoint: "http://localhost:8080/mcp"
 severity_threshold: "INVALID"
 anthropic_api_key: "test-key"
 `
@@ -472,54 +444,41 @@ anthropic_api_key: "test-key"
 func TestValidation_InvalidNumericRanges(t *testing.T) {
 	resetViper()
 
+	clusterPrefix := `
+clusters:
+  - name: test-cluster
+    mcp:
+      endpoint: "http://localhost:8080/mcp"
+`
+
 	tests := []struct {
 		name    string
 		config  string
 		wantErr bool
 	}{
 		{
-			name: "max_concurrent_agents < 1",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-max_concurrent_agents: 0
-anthropic_api_key: "test-key"
-`,
+			name:    "max_concurrent_agents < 1",
+			config:  clusterPrefix + "max_concurrent_agents: 0\nanthropic_api_key: \"test-key\"\n",
 			wantErr: true,
 		},
 		{
-			name: "global_queue_size < 1",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-global_queue_size: 0
-anthropic_api_key: "test-key"
-`,
+			name:    "global_queue_size < 1",
+			config:  clusterPrefix + "global_queue_size: 0\nanthropic_api_key: \"test-key\"\n",
 			wantErr: true,
 		},
 		{
-			name: "cluster_queue_size < 1",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-cluster_queue_size: 0
-anthropic_api_key: "test-key"
-`,
+			name:    "cluster_queue_size < 1",
+			config:  clusterPrefix + "cluster_queue_size: 0\nanthropic_api_key: \"test-key\"\n",
 			wantErr: true,
 		},
 		{
-			name: "dedup_window_seconds negative",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-dedup_window_seconds: -1
-anthropic_api_key: "test-key"
-`,
+			name:    "dedup_window_seconds negative",
+			config:  clusterPrefix + "dedup_window_seconds: -1\nanthropic_api_key: \"test-key\"\n",
 			wantErr: true,
 		},
 		{
-			name: "agent_timeout < 1",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-agent_timeout: 0
-anthropic_api_key: "test-key"
-`,
+			name:    "agent_timeout < 1",
+			config:  clusterPrefix + "agent_timeout: 0\nanthropic_api_key: \"test-key\"\n",
 			wantErr: true,
 		},
 	}
@@ -548,7 +507,10 @@ func TestValidation_InvalidQueueOverflowPolicy(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	configContent := `
-mcp_endpoint: "http://localhost:8080/mcp"
+clusters:
+  - name: test-cluster
+    mcp:
+      endpoint: "http://localhost:8080/mcp"
 queue_overflow_policy: "invalid"
 anthropic_api_key: "test-key"
 `
@@ -565,37 +527,31 @@ anthropic_api_key: "test-key"
 func TestValidation_SSEReconnectSettings(t *testing.T) {
 	resetViper()
 
+	clusterPrefix := `
+clusters:
+  - name: test-cluster
+    mcp:
+      endpoint: "http://localhost:8080/mcp"
+`
+
 	tests := []struct {
 		name    string
 		config  string
 		wantErr bool
 	}{
 		{
-			name: "initial backoff < 1",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-sse_reconnect_initial_backoff: 0
-anthropic_api_key: "test-key"
-`,
+			name:    "initial backoff < 1",
+			config:  clusterPrefix + "sse_reconnect_initial_backoff: 0\nanthropic_api_key: \"test-key\"\n",
 			wantErr: true,
 		},
 		{
-			name: "max backoff < initial backoff",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-sse_reconnect_initial_backoff: 10
-sse_reconnect_max_backoff: 5
-anthropic_api_key: "test-key"
-`,
+			name:    "max backoff < initial backoff",
+			config:  clusterPrefix + "sse_reconnect_initial_backoff: 10\nsse_reconnect_max_backoff: 5\nanthropic_api_key: \"test-key\"\n",
 			wantErr: true,
 		},
 		{
-			name: "read timeout < 1",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-sse_read_timeout: 0
-anthropic_api_key: "test-key"
-`,
+			name:    "read timeout < 1",
+			config:  clusterPrefix + "sse_read_timeout: 0\nanthropic_api_key: \"test-key\"\n",
 			wantErr: true,
 		},
 	}
@@ -630,7 +586,10 @@ func TestValidation_ValidSeverityLevels(t *testing.T) {
 			tmpDir := t.TempDir()
 			configPath := filepath.Join(tmpDir, "config.yaml")
 			configContent := `
-mcp_endpoint: "http://localhost:8080/mcp"
+clusters:
+  - name: test-cluster
+    mcp:
+      endpoint: "http://localhost:8080/mcp"
 subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./agent-container/run-agent.sh"
@@ -638,7 +597,6 @@ agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "` + severity + `"
 max_concurrent_agents: 5
 global_queue_size: 100
@@ -693,60 +651,11 @@ func TestValidation_ValidQueueOverflowPolicies(t *testing.T) {
 func TestConfigFileNotFound(t *testing.T) {
 	resetViper()
 
-	// Set all required env vars
-	os.Setenv("K8S_CLUSTER_MCP_ENDPOINT", "http://localhost:8080/mcp")
-	os.Setenv("SUBSCRIBE_MODE", "faults")
-	os.Setenv("WORKSPACE_ROOT", "./incidents")
-	os.Setenv("AGENT_SCRIPT_PATH", "./agent-container/run-agent.sh")
-	os.Setenv("AGENT_TIMEOUT", "300")
-	os.Setenv("AGENT_MODEL", "sonnet")
-	os.Setenv("AGENT_CLI", "claude")
-	os.Setenv("AGENT_IMAGE", "nightcrier-agent:latest")
-	os.Setenv("AGENT_PROMPT", "Test prompt")
-	os.Setenv("SEVERITY_THRESHOLD", "ERROR")
-	os.Setenv("MAX_CONCURRENT_AGENTS", "5")
-	os.Setenv("GLOBAL_QUEUE_SIZE", "100")
-	os.Setenv("CLUSTER_QUEUE_SIZE", "10")
-	os.Setenv("DEDUP_WINDOW_SECONDS", "300")
-	os.Setenv("QUEUE_OVERFLOW_POLICY", "drop")
-	os.Setenv("SHUTDOWN_TIMEOUT_SECONDS", "30")
-	os.Setenv("SSE_RECONNECT_INITIAL_BACKOFF", "1")
-	os.Setenv("SSE_RECONNECT_MAX_BACKOFF", "60")
-	os.Setenv("SSE_READ_TIMEOUT_SECONDS", "120")
-	os.Setenv("FAILURE_THRESHOLD_FOR_ALERT", "3")
-	defer setTestAPIKey(t)()
-
-	defer func() {
-		os.Unsetenv("K8S_CLUSTER_MCP_ENDPOINT")
-		os.Unsetenv("SUBSCRIBE_MODE")
-		os.Unsetenv("WORKSPACE_ROOT")
-		os.Unsetenv("AGENT_SCRIPT_PATH")
-		os.Unsetenv("AGENT_TIMEOUT")
-		os.Unsetenv("AGENT_MODEL")
-		os.Unsetenv("AGENT_CLI")
-		os.Unsetenv("AGENT_IMAGE")
-		os.Unsetenv("AGENT_PROMPT")
-		os.Unsetenv("SEVERITY_THRESHOLD")
-		os.Unsetenv("MAX_CONCURRENT_AGENTS")
-		os.Unsetenv("GLOBAL_QUEUE_SIZE")
-		os.Unsetenv("CLUSTER_QUEUE_SIZE")
-		os.Unsetenv("DEDUP_WINDOW_SECONDS")
-		os.Unsetenv("QUEUE_OVERFLOW_POLICY")
-		os.Unsetenv("SHUTDOWN_TIMEOUT_SECONDS")
-		os.Unsetenv("SSE_RECONNECT_INITIAL_BACKOFF")
-		os.Unsetenv("SSE_RECONNECT_MAX_BACKOFF")
-		os.Unsetenv("SSE_READ_TIMEOUT_SECONDS")
-		os.Unsetenv("FAILURE_THRESHOLD_FOR_ALERT")
-	}()
-
-	// Should not fail even if no config file exists
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() should not fail when config file is not found: %v", err)
-	}
-
-	if cfg.MCPEndpoint != "http://localhost:8080/mcp" {
-		t.Errorf("MCPEndpoint = %q, want %q", cfg.MCPEndpoint, "http://localhost:8080/mcp")
+	// With multi-cluster config, clusters must be defined in a config file.
+	// Load() without a config file should fail when no clusters are defined.
+	_, err := Load()
+	if err == nil {
+		t.Error("Load() should fail when no config file exists and clusters are not defined")
 	}
 }
 
@@ -919,23 +828,21 @@ func containsHelper(s, substr string) bool {
 func TestCircuitBreakerConfig(t *testing.T) {
 	resetViper()
 
-	tests := []struct {
-		name    string
-		config  string
-		wantCfg func(*Config) bool
-	}{
-		{
-			name: "uses optional defaults when not specified",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+	clusterPrefix := `
+clusters:
+  - name: test-cluster
+    mcp:
+      endpoint: "http://localhost:8080/mcp"
+`
+
+	// Base config without circuit breaker settings (uses defaults)
+	baseConfigNoCircuitBreaker := clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
@@ -948,25 +855,16 @@ sse_reconnect_max_backoff: 60
 sse_read_timeout: 120
 failure_threshold_for_alert: 3
 anthropic_api_key: "test-key"
-`,
-			wantCfg: func(cfg *Config) bool {
-				return cfg.NotifyOnAgentFailure == false &&
-					cfg.FailureThresholdForAlert == 3 &&
-					cfg.UploadFailedInvestigations == false
-			},
-		},
-		{
-			name: "custom values",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+`
+
+	// Custom config with custom circuit breaker settings
+	customConfig := clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
@@ -981,7 +879,25 @@ anthropic_api_key: "test-key"
 notify_on_agent_failure: false
 failure_threshold_for_alert: 5
 upload_failed_investigations: true
-`,
+`
+
+	tests := []struct {
+		name    string
+		config  string
+		wantCfg func(*Config) bool
+	}{
+		{
+			name:   "uses optional defaults when not specified",
+			config: baseConfigNoCircuitBreaker,
+			wantCfg: func(cfg *Config) bool {
+				return cfg.NotifyOnAgentFailure == false &&
+					cfg.FailureThresholdForAlert == 3 &&
+					cfg.UploadFailedInvestigations == false
+			},
+		},
+		{
+			name:   "custom values",
+			config: customConfig,
 			wantCfg: func(cfg *Config) bool {
 				return cfg.NotifyOnAgentFailure == false &&
 					cfg.FailureThresholdForAlert == 5 &&
@@ -1017,59 +933,28 @@ upload_failed_investigations: true
 func TestCircuitBreakerConfigFromEnv(t *testing.T) {
 	resetViper()
 
-	// Set all required env vars
-	os.Setenv("K8S_CLUSTER_MCP_ENDPOINT", "http://localhost:8080/mcp")
-	os.Setenv("SUBSCRIBE_MODE", "faults")
-	os.Setenv("WORKSPACE_ROOT", "./incidents")
-	os.Setenv("AGENT_SCRIPT_PATH", "./agent-container/run-agent.sh")
-	os.Setenv("AGENT_TIMEOUT", "300")
-	os.Setenv("AGENT_MODEL", "sonnet")
-	os.Setenv("AGENT_CLI", "claude")
-	os.Setenv("AGENT_IMAGE", "nightcrier-agent:latest")
-	os.Setenv("AGENT_PROMPT", "Test prompt")
-	os.Setenv("SEVERITY_THRESHOLD", "ERROR")
-	os.Setenv("MAX_CONCURRENT_AGENTS", "5")
-	os.Setenv("GLOBAL_QUEUE_SIZE", "100")
-	os.Setenv("CLUSTER_QUEUE_SIZE", "10")
-	os.Setenv("DEDUP_WINDOW_SECONDS", "300")
-	os.Setenv("QUEUE_OVERFLOW_POLICY", "drop")
-	os.Setenv("SHUTDOWN_TIMEOUT_SECONDS", "30")
-	os.Setenv("SSE_RECONNECT_INITIAL_BACKOFF", "1")
-	os.Setenv("SSE_RECONNECT_MAX_BACKOFF", "60")
-	os.Setenv("SSE_READ_TIMEOUT_SECONDS", "120")
+	// Create a config file with clusters (required) and default circuit breaker settings
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfig()
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	// Set env vars to override circuit breaker settings
 	os.Setenv("NOTIFY_ON_AGENT_FAILURE", "false")
 	os.Setenv("FAILURE_THRESHOLD_FOR_ALERT", "10")
 	os.Setenv("UPLOAD_FAILED_INVESTIGATIONS", "true")
-	defer setTestAPIKey(t)()
 
 	defer func() {
-		os.Unsetenv("K8S_CLUSTER_MCP_ENDPOINT")
-		os.Unsetenv("SUBSCRIBE_MODE")
-		os.Unsetenv("WORKSPACE_ROOT")
-		os.Unsetenv("AGENT_SCRIPT_PATH")
-		os.Unsetenv("AGENT_TIMEOUT")
-		os.Unsetenv("AGENT_MODEL")
-		os.Unsetenv("AGENT_CLI")
-		os.Unsetenv("AGENT_IMAGE")
-		os.Unsetenv("AGENT_PROMPT")
-		os.Unsetenv("SEVERITY_THRESHOLD")
-		os.Unsetenv("MAX_CONCURRENT_AGENTS")
-		os.Unsetenv("GLOBAL_QUEUE_SIZE")
-		os.Unsetenv("CLUSTER_QUEUE_SIZE")
-		os.Unsetenv("DEDUP_WINDOW_SECONDS")
-		os.Unsetenv("QUEUE_OVERFLOW_POLICY")
-		os.Unsetenv("SHUTDOWN_TIMEOUT_SECONDS")
-		os.Unsetenv("SSE_RECONNECT_INITIAL_BACKOFF")
-		os.Unsetenv("SSE_RECONNECT_MAX_BACKOFF")
-		os.Unsetenv("SSE_READ_TIMEOUT_SECONDS")
 		os.Unsetenv("NOTIFY_ON_AGENT_FAILURE")
 		os.Unsetenv("FAILURE_THRESHOLD_FOR_ALERT")
 		os.Unsetenv("UPLOAD_FAILED_INVESTIGATIONS")
 	}()
 
-	cfg, err := Load()
+	cfg, err := LoadWithConfigFile(configPath)
 	if err != nil {
-		t.Fatalf("Load() failed: %v", err)
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
 	}
 
 	if cfg.NotifyOnAgentFailure != false {
@@ -1160,8 +1045,8 @@ func TestCircuitBreakerConfig_IntegrationTest(t *testing.T) {
 	}
 
 	// Verify other settings still work
-	if cfg.MCPEndpoint != "http://localhost:8080/mcp" {
-		t.Errorf("MCPEndpoint = %q, want %q", cfg.MCPEndpoint, "http://localhost:8080/mcp")
+	if len(cfg.Clusters) != 1 || cfg.Clusters[0].MCP.Endpoint != "http://localhost:8080/mcp" {
+		t.Errorf("Clusters[0].MCP.Endpoint = %q, want %q", cfg.Clusters[0].MCP.Endpoint, "http://localhost:8080/mcp")
 	}
 	if cfg.MaxConcurrentAgents != 10 {
 		t.Errorf("MaxConcurrentAgents = %d, want 10", cfg.MaxConcurrentAgents)
@@ -1173,6 +1058,14 @@ func TestCircuitBreakerConfig_IntegrationTest(t *testing.T) {
 
 // TestValidation_MissingRequiredFields tests that all required fields generate helpful error messages
 func TestValidation_MissingRequiredFields(t *testing.T) {
+	// Cluster config prefix for tests that need clusters defined
+	clusterPrefix := `
+clusters:
+  - name: test-cluster
+    mcp:
+      endpoint: "http://localhost:8080/mcp"
+`
+
 	tests := []struct {
 		name              string
 		config            string
@@ -1180,33 +1073,27 @@ func TestValidation_MissingRequiredFields(t *testing.T) {
 		expectedEnvVar    string
 	}{
 		{
-			name:              "missing mcp_endpoint",
+			name:              "missing clusters",
 			config:            `anthropic_api_key: "test-key"`,
-			expectedFieldName: "mcp_endpoint",
-			expectedEnvVar:    "K8S_CLUSTER_MCP_ENDPOINT",
+			expectedFieldName: "clusters",
+			expectedEnvVar:    "",
 		},
 		{
-			name: "missing subscribe_mode",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-anthropic_api_key: "test-key"`,
+			name:              "missing subscribe_mode",
+			config:            clusterPrefix + `anthropic_api_key: "test-key"`,
 			expectedFieldName: "subscribe_mode",
 			expectedEnvVar:    "SUBSCRIBE_MODE",
 		},
 		{
 			name: "missing workspace_root",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 anthropic_api_key: "test-key"`,
 			expectedFieldName: "workspace_root",
 			expectedEnvVar:    "WORKSPACE_ROOT",
 		},
 		{
 			name: "missing agent_script_path",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 anthropic_api_key: "test-key"`,
 			expectedFieldName: "agent_script_path",
@@ -1214,9 +1101,7 @@ anthropic_api_key: "test-key"`,
 		},
 		{
 			name: "missing agent_timeout",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 anthropic_api_key: "test-key"`,
@@ -1225,9 +1110,7 @@ anthropic_api_key: "test-key"`,
 		},
 		{
 			name: "missing agent_model",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
@@ -1237,9 +1120,7 @@ anthropic_api_key: "test-key"`,
 		},
 		{
 			name: "missing agent_cli",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
@@ -1250,9 +1131,7 @@ anthropic_api_key: "test-key"`,
 		},
 		{
 			name: "missing agent_image",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
@@ -1263,48 +1142,27 @@ anthropic_api_key: "test-key"`,
 			expectedEnvVar:    "AGENT_IMAGE",
 		},
 		{
-			name: "missing agent_prompt",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
-workspace_root: "./incidents"
-agent_script_path: "./run-agent.sh"
-agent_timeout: 300
-agent_model: "sonnet"
-agent_cli: "claude"
-agent_image: "nightcrier-agent:latest"
-anthropic_api_key: "test-key"`,
-			expectedFieldName: "agent_prompt",
-			expectedEnvVar:    "AGENT_PROMPT",
-		},
-		{
 			name: "missing severity_threshold",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 anthropic_api_key: "test-key"`,
 			expectedFieldName: "severity_threshold",
 			expectedEnvVar:    "SEVERITY_THRESHOLD",
 		},
 		{
 			name: "missing max_concurrent_agents",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "ERROR"
 anthropic_api_key: "test-key"`,
 			expectedFieldName: "max_concurrent_agents",
@@ -1312,16 +1170,13 @@ anthropic_api_key: "test-key"`,
 		},
 		{
 			name: "missing global_queue_size",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 anthropic_api_key: "test-key"`,
@@ -1330,16 +1185,13 @@ anthropic_api_key: "test-key"`,
 		},
 		{
 			name: "missing cluster_queue_size",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
@@ -1349,16 +1201,13 @@ anthropic_api_key: "test-key"`,
 		},
 		{
 			name: "missing queue_overflow_policy",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
@@ -1370,16 +1219,13 @@ anthropic_api_key: "test-key"`,
 		},
 		{
 			name: "missing shutdown_timeout",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
@@ -1392,16 +1238,13 @@ anthropic_api_key: "test-key"`,
 		},
 		{
 			name: "missing sse_reconnect_initial_backoff",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
@@ -1415,16 +1258,13 @@ anthropic_api_key: "test-key"`,
 		},
 		{
 			name: "missing sse_reconnect_max_backoff",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
@@ -1439,16 +1279,13 @@ anthropic_api_key: "test-key"`,
 		},
 		{
 			name: "missing sse_read_timeout",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
@@ -1464,16 +1301,13 @@ anthropic_api_key: "test-key"`,
 		},
 		{
 			name: "missing failure_threshold_for_alert",
-			config: `
-mcp_endpoint: "http://localhost:8080/mcp"
-subscribe_mode: "faults"
+			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 agent_script_path: "./run-agent.sh"
 agent_timeout: 300
 agent_model: "sonnet"
 agent_cli: "claude"
 agent_image: "nightcrier-agent:latest"
-agent_prompt: "Test prompt"
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
@@ -1511,13 +1345,13 @@ anthropic_api_key: "test-key"`,
 				t.Errorf("error message should contain field name %q, got: %v", tt.expectedFieldName, err)
 			}
 
-			// Verify error message contains the environment variable name
-			if !contains(err.Error(), tt.expectedEnvVar) {
+			// Verify error message contains the environment variable name (if applicable)
+			if tt.expectedEnvVar != "" && !contains(err.Error(), tt.expectedEnvVar) {
 				t.Errorf("error message should contain environment variable %q, got: %v", tt.expectedEnvVar, err)
 			}
 
-			// Verify error message references config.example.yaml
-			if !contains(err.Error(), "config.example.yaml") {
+			// Verify error message references config.example.yaml (skip for clusters which has different error)
+			if tt.expectedFieldName != "clusters" && !contains(err.Error(), "config.example.yaml") {
 				t.Errorf("error message should reference config.example.yaml, got: %v", err)
 			}
 		})

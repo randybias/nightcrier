@@ -300,6 +300,7 @@ func generateIndexHTML(incidentID string, artifactURLs map[string]string, expire
 		"investigation.md":                  {"Investigation Report (Raw)", "Markdown source for programmatic access", "secondary"},
 		"incident.json":                     {"Incident Data", "Complete incident context including event, status, and result metadata", "success"},
 		"incident_cluster_permissions.json": {"Cluster Permissions", "Validated Kubernetes permissions the agent had during investigation", "success"},
+		"prompt-sent.md":                    {"Prompt Sent to Agent", "Full system prompt and additional context sent to the agent for audit", "secondary"},
 		"agent-stdout.log":                  {"Agent Standard Output", "Agent's final output and results (DEBUG mode only)", "secondary"},
 		"agent-stderr.log":                  {"Agent Standard Error", "Agent's diagnostic output and errors (DEBUG mode only)", "secondary"},
 		"agent-full.log":                    {"Agent Combined Log", "Complete timestamped agent execution log (DEBUG mode only)", "secondary"},
@@ -307,7 +308,7 @@ func generateIndexHTML(incidentID string, artifactURLs map[string]string, expire
 	}
 
 	// Sort files for consistent display - logs and session archive last since operators only need them for troubleshooting
-	orderedFiles := []string{"investigation.html", "investigation.md", "incident.json", "incident_cluster_permissions.json", "agent-stdout.log", "agent-stderr.log", "agent-full.log", "claude-session.tar.gz"}
+	orderedFiles := []string{"investigation.html", "investigation.md", "incident.json", "incident_cluster_permissions.json", "prompt-sent.md", "agent-stdout.log", "agent-stderr.log", "agent-full.log", "claude-session.tar.gz"}
 	for _, filename := range orderedFiles {
 		if url, exists := artifactURLs[filename]; exists {
 			desc := fileDescriptions[filename]
@@ -379,10 +380,11 @@ func (a *AzureStorage) SaveIncident(ctx context.Context, incidentID string, arti
 
 	// Define artifact mappings
 	artifactFiles := map[string][]byte{
-		"incident.json":                    artifacts.IncidentJSON,
-		"investigation.md":                 artifacts.InvestigationMD,
-		"investigation.html":               artifacts.InvestigationHTML,
+		"incident.json":                     artifacts.IncidentJSON,
+		"investigation.md":                  artifacts.InvestigationMD,
+		"investigation.html":                artifacts.InvestigationHTML,
 		"incident_cluster_permissions.json": artifacts.ClusterPermissionsJSON,
+		"prompt-sent.md":                    artifacts.PromptSent,
 	}
 
 	result := &SaveResult{

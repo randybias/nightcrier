@@ -67,6 +67,15 @@ func (fs *FilesystemStorage) SaveIncident(ctx context.Context, incidentID string
 		artifactURLs["incident_cluster_permissions.json"] = permissionsPath
 	}
 
+	// Write prompt-sent.md if present (optional artifact)
+	if len(artifacts.PromptSent) > 0 {
+		promptSentPath := filepath.Join(incidentDir, "prompt-sent.md")
+		if err := os.WriteFile(promptSentPath, artifacts.PromptSent, 0600); err != nil {
+			return nil, fmt.Errorf("failed to write prompt-sent.md: %w", err)
+		}
+		artifactURLs["prompt-sent.md"] = promptSentPath
+	}
+
 	// Create logs subdirectory and write agent logs and session archive
 	logURLs := make(map[string]string)
 	if artifacts.AgentLogs.Stdout != nil || artifacts.AgentLogs.Stderr != nil || artifacts.AgentLogs.Combined != nil || len(artifacts.ClaudeSessionArchive) > 0 {
