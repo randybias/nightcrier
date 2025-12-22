@@ -106,6 +106,17 @@ cleanup() {
         fi
     fi
 
+    # Clean up agent containers (kept during DEBUG mode for inspection)
+    echo "Cleaning up agent containers..." >&2
+    local container_count
+    container_count=$(docker ps -a --filter "name=nightcrier-agent" --format "{{.ID}}" 2>/dev/null | wc -l)
+    if [ "$container_count" -gt 0 ]; then
+        docker ps -a --filter "name=nightcrier-agent" --format "{{.ID}}" | xargs docker rm 2>/dev/null || true
+        echo "Removed ${container_count} agent container(s)" >&2
+    else
+        echo "No agent containers to clean up" >&2
+    fi
+
     echo "=== Cleanup Complete ===" >&2
 }
 

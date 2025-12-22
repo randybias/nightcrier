@@ -79,7 +79,7 @@ build_claude_command() {
     fi
 
     # Tee output to file
-    cmd+=" 2>&1 | tee ${AGENT_HOME}/output/${OUTPUT_FILE}"
+    cmd+=" 2>&1 | tee ${WORKSPACE_DIR}/logs/${OUTPUT_FILE}"
 
     echo "$cmd"
 }

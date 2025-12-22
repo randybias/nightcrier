@@ -21,6 +21,7 @@ vendor/
 
 # Incidents (runtime data)
 incidents/
+tests/incidents/
 
 # Scratch/temp
 scratch/

@@ -42,11 +42,20 @@ if docker cp "$CONTAINER_NAME:/home/agent/.codex" "$SESSION_EXTRACT_DIR" 2>/dev/
     JSONL_FILE=$(find "$SESSION_EXTRACT_DIR/sessions" -name "*.jsonl" -type f 2>/dev/null | \
                  xargs ls -t 2>/dev/null | head -1)
 
-    # Extract commands from JSONL
+    # Extract commands from Codex JSONL format
     if [[ -n "$JSONL_FILE" && -f "$JSONL_FILE" ]]; then
-        extract_commands_from_jsonl \
-            "$JSONL_FILE" \
-            "$WORKSPACE_DIR/logs/agent-commands-executed.log"
+        CMD_LOG="$WORKSPACE_DIR/logs/agent-commands-executed.log"
+        write_command_log_header "$CMD_LOG" "$JSONL_FILE"
+
+        # Parse Codex JSONL: function_call with shell_command (wrapped in payload)
+        jq -r '
+            select(.type == "response_item" and .payload.type == "function_call" and .payload.name == "shell_command") |
+            .payload.arguments | fromjson |
+            "$ " + .command + (if .workdir then " # (in " + .workdir + ")" else "" end)
+        ' "$JSONL_FILE" 2>/dev/null >> "$CMD_LOG" || echo "# (command extraction failed)" >> "$CMD_LOG"
+
+        CMD_COUNT=$(grep -c '^\$' "$CMD_LOG" 2>/dev/null || echo "0")
+        log_debug "Extracted $CMD_COUNT commands to agent-commands-executed.log"
     else
         log_debug "Post-run: No Codex session JSONL file found for command extraction"
     fi

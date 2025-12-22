@@ -34,16 +34,31 @@ The baseline configuration tests the most appropriate model for each CLI tool:
 
 | Agent CLI | Model | Config Template |
 |-----------|-------|-----------------|
-| claude | sonnet-4.5 | `tests/config-templates/test-claude.yaml.tmpl` |
+| claude | claude-sonnet-4-5 | `tests/config-templates/test-claude.yaml.tmpl` |
 | codex | gpt-5.2 | `tests/config-templates/test-codex.yaml.tmpl` |
 | gemini | gemini-3-flash-preview | `tests/config-templates/test-gemini.yaml.tmpl` |
 
 **Model References**:
-- Claude models: https://docs.anthropic.com/en/docs/about-claude/models
+- Claude models: https://platform.claude.com/docs/en/about-claude/models/overview
 - OpenAI/Codex models: https://platform.openai.com/docs/models
 - Gemini models: https://ai.google.dev/gemini-api/docs/models
 
 **Note**: Model names must exactly match the API provider's model identifiers. Check the reference links above for valid model names before updating templates.
+
+**Looking Up Available Models**:
+
+```bash
+# Claude models
+# Check documentation: https://platform.claude.com/docs/en/about-claude/models/overview
+# Current shorthand: claude-sonnet-4-5
+
+# OpenAI/Codex models
+curl https://api.openai.com/v1/models \
+  -H "Authorization: Bearer $OPENAI_API_KEY" | grep '"id"' | grep gpt
+
+# Gemini models
+# Check documentation: https://ai.google.dev/gemini-api/docs/models
+```
 
 ### Changing Models
 
