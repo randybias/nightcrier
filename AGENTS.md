@@ -27,7 +27,7 @@ This repo hosts the Kubernetes MCP alerts event runner. Use these notes to keep 
 - `configs/`: sample config files, Kubernetes manifests, and alert routing templates.
 - `deploy/`: Helm chart or kustomize overlays for shipping to a cluster.
 - `scripts/`: helper scripts for setup, lint, and CI; keep them POSIX-sh compatible.
-- `docs/`: design notes and ADRs; add diagrams in `docs/diagrams/`.
+- `research-and-planning/`: design notes, research, and ADRs; add diagrams in `research-and-planning/diagrams/`.
 - `test/`: integration or end-to-end fixtures; unit tests live next to code as `*_test.go`.
 
 ## Build, Test, and Development Commands
@@ -54,4 +54,37 @@ This repo hosts the Kubernetes MCP alerts event runner. Use these notes to keep 
 
 ## Security & Configuration Tips
 - Do not commit kubeconfigs, tokens, or alert payloads; use `.gitignore` for secrets and `kubectl create secret ... --dry-run=client -o yaml` for templates.
-- Prefer env vars plus Kubernetes Secrets over inline config; rotate tokens and note required RBAC in `docs/`.
+- Prefer env vars plus Kubernetes Secrets over inline config; rotate tokens and note required RBAC in `research-and-planning/`.
+
+## File Organization
+
+### Working Files and Temporary Output
+
+**NEVER create working files in the repository root.** This includes:
+- Implementation summaries (e.g., `IMPLEMENTATION_SUMMARY.md`)
+- Testing summaries (e.g., `TESTING_SUMMARY.md`)
+- Progress reports, notes, or scratch work
+- Any temporary or intermediate output
+
+**Use `scratch/` for all working files.** The `scratch/` directory is gitignored and exists for this purpose.
+
+If documentation has lasting value, it belongs in:
+- `research-and-planning/` - Research notes, planning docs, proposals not yet in OpenSpec
+- The appropriate README (e.g., `tests/README.md`, `agent-container/README.md`)
+- OpenSpec change directories (only: `proposal.md`, `tasks.md`, `design.md`, `specs/*/spec.md`)
+
+### OpenSpec Archive Cleanup
+
+When archiving an OpenSpec change (`openspec archive <change-id>`):
+
+1. **Remove working files** - Delete any summaries, notes, or temporary files created during implementation from the repo root
+2. **Verify documentation** - Ensure relevant docs are in the proper location (READMEs, not loose files)
+3. **Check for stale references** - Remove references to worktrees or temporary paths that no longer exist
+
+The OpenSpec structure only allows these files in a change directory:
+- `proposal.md` - Why and what
+- `tasks.md` - Implementation checklist
+- `design.md` - Technical decisions (optional)
+- `specs/[capability]/spec.md` - Requirements and scenarios
+
+No other files (summaries, reports, etc.) belong in OpenSpec directories.
