@@ -126,42 +126,21 @@ build_debug_env_check() {
 # Session Extraction Utilities
 # =============================================================================
 
-# Extract commands from JSONL session files (Claude/Codex format)
-# Usage: extract_commands_from_jsonl <jsonl_file> <output_file>
-extract_commands_from_jsonl() {
-    local jsonl_file="$1"
-    local output_file="$2"
+# Write standard command log header
+# Usage: write_command_log_header <output_file> <session_file>
+write_command_log_header() {
+    local output_file="$1"
+    local session_file="$2"
 
-    if [[ ! -f "$jsonl_file" ]]; then
-        log_debug "No JSONL file found: $jsonl_file"
-        return 0
-    fi
-
-    log_debug "Extracting commands from: $jsonl_file"
-
-    # Extract Bash tool calls using jq
     {
         echo "# Agent Commands Executed"
         echo "# Agent: ${AGENT_CLI:-unknown}"
         echo "# Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
         echo "# Incident: ${INCIDENT_ID:-unknown}"
-        echo "# Session: $(basename "$jsonl_file")"
+        echo "# Session: $(basename "$session_file")"
         echo "#"
         echo ""
-
-        # Parse JSONL and extract Bash commands
-        jq -r '
-            select(.type == "assistant") |
-            .message.content[]? |
-            select(.type == "tool_use" and .name == "Bash") |
-            "$ " + .input.command + (if .input.description then " # " + .input.description else "" end)
-        ' "$jsonl_file" 2>/dev/null || echo "# (command extraction failed)"
-
     } > "$output_file"
-
-    local cmd_count
-    cmd_count=$(grep -c '^\$' "$output_file" 2>/dev/null || echo "0")
-    log_debug "Extracted $cmd_count commands to $(basename "$output_file")"
 }
 
 # Create a tar archive of a directory

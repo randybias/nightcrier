@@ -1,0 +1,58 @@
+# Test Configuration Template - Claude Agent
+# Generated from template by config-generator.sh
+
+clusters:
+  - name: ${CLUSTER_NAME}
+    environment: testing
+
+    mcp:
+      endpoint: "${MCP_ENDPOINT}"
+      api_key: "${MCP_API_KEY}"
+
+    triage:
+      enabled: true
+      kubeconfig: "${KUBECONFIG_PATH}"
+      allow_secrets_access: false
+
+subscribe_mode: "faults"
+workspace_root: "./tests/incidents"
+log_level: "${LOG_LEVEL}"
+
+# Agent configuration - Claude
+agent_script_path: "./agent-container/run-agent.sh"
+agent_system_prompt_file: "./configs/triage-system-prompt.md"
+agent_allowed_tools: "Read,Write,Grep,Glob,Bash,Skill"
+agent_model: "claude-sonnet-4-5"
+agent_cli: "claude"
+agent_timeout: 300
+agent_image: "nightcrier-agent:latest"
+agent_verbose: ${AGENT_VERBOSE}
+agent_debug: ${AGENT_DEBUG}
+
+# LLM API Keys (sourced from environment)
+anthropic_api_key: "${ANTHROPIC_API_KEY}"
+
+# Event processing
+severity_threshold: "ERROR"
+max_concurrent_agents: 5
+global_queue_size: 100
+cluster_queue_size: 10
+dedup_window_seconds: 300
+queue_overflow_policy: "drop"
+shutdown_timeout: 30
+
+# SSE/MCP reconnection
+sse_reconnect_initial_backoff: 1
+sse_reconnect_max_backoff: 60
+sse_read_timeout: 120
+
+# Notifications
+notify_on_agent_failure: true
+failure_threshold_for_alert: 3
+upload_failed_investigations: false
+slack_webhook_url: "${SLACK_WEBHOOK_URL}"
+
+# Azure Storage (optional)
+azure_storage_account: "${AZURE_STORAGE_ACCOUNT}"
+azure_storage_key: "${AZURE_STORAGE_KEY}"
+azure_storage_container: "${AZURE_STORAGE_CONTAINER}"

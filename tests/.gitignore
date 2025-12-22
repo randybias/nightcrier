@@ -1,0 +1,11 @@
+# Exclude test logs
+logs/
+
+# Exclude test incident artifacts
+incidents/
+
+# Exclude scratch directory
+scratch/
+
+# Exclude dev-secrets (contains test secrets)
+dev-secrets/
