@@ -14,13 +14,13 @@ The agent runner SHALL preload incident context before agent execution to minimi
 #### Scenario: Permissions preloading
 - **WHEN** run-agent.sh is invoked with a workspace containing incident_cluster_permissions.json
 - **THEN** the permissions file contents are read from the host
-- **AND** the contents are wrapped in `<permissions>` XML tags
+- **AND** the contents are wrapped in `<kubernetes_cluster_access_permissions>` XML tags
 - **AND** the tagged content is included in the agent's initial prompt
 
 #### Scenario: Baseline triage preloading
 - **WHEN** run-agent.sh is invoked and skill triage script is available
 - **THEN** the script is executed before agent starts
-- **AND** the triage output is wrapped in `<triage>` XML tags
+- **AND** the triage output is wrapped in `<initial_triage_report>` XML tags
 - **AND** the tagged output is included in the agent's initial prompt
 - **AND** execution is limited to 30 seconds timeout
 
@@ -41,6 +41,12 @@ The agent runner SHALL preload incident context before agent execution to minimi
 - **THEN** preloaded context is inserted between system prompt and user prompt
 - **AND** the system prompt remains generic (domain-agnostic)
 - **AND** the preloaded context provides domain-specific data
+
+#### Scenario: Audit trail accuracy
+- **WHEN** preloaded context is assembled
+- **THEN** the full preloaded context is appended to prompt-sent.md
+- **AND** the audit trail shows the complete prompt sent to the agent
+- **AND** this happens after preloading completes but before agent execution
 
 ## Cross-References
 

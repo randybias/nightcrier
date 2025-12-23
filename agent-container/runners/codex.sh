@@ -68,10 +68,19 @@ build_codex_command() {
         esac
     fi
 
+    # Preloaded context (incident + permissions + initial_triage_report)
+    local preloaded_context=""
+    if [[ -n "$PRELOADED_CONTEXT" ]]; then
+        preloaded_context=$(escape_single_quotes "$PRELOADED_CONTEXT")
+        preloaded_context="${preloaded_context}
+
+"
+    fi
+
     # Add the prompt (AGENTS.md is in /home/agent so Codex finds it automatically)
     local escaped_prompt
     escaped_prompt=$(escape_single_quotes "$PROMPT")
-    cmd+=" '${escaped_prompt}'"
+    cmd+=" '${preloaded_context}${escaped_prompt}'"
 
     # Tee output to file
     cmd+=" 2>&1 | tee ${AGENT_HOME}/logs/${OUTPUT_FILE}"

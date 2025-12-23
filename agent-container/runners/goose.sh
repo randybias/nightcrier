@@ -37,12 +37,21 @@ build_goose_command() {
     cmd+="export GOOSE_DISABLE_KEYRING=1 && "
 
     # Start Goose session with prompt
+    # Preloaded context (incident + permissions + initial_triage_report)
+    local preloaded_context=""
+    if [[ -n "$PRELOADED_CONTEXT" ]]; then
+        preloaded_context=$(escape_single_quotes "$PRELOADED_CONTEXT")
+        preloaded_context="${preloaded_context}
+
+"
+    fi
+
     local escaped_prompt
     escaped_prompt=$(escape_single_quotes "$PROMPT")
 
     # Goose uses 'goose run --text' for non-interactive execution with prompt
     # --no-session: Run without creating/storing session history for automation
-    cmd+="goose run --no-session --text '${escaped_prompt}'"
+    cmd+="goose run --no-session --text '${preloaded_context}${escaped_prompt}'"
 
     # Model selection (if specified)
     if [[ -n "$LLM_MODEL" ]]; then

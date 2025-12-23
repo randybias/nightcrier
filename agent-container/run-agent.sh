@@ -82,6 +82,7 @@ CONTAINER_CPUS="${CONTAINER_CPUS:-}"
 CONTAINER_NETWORK="${CONTAINER_NETWORK:-}"
 CONTAINER_USER="${CONTAINER_USER:-}"
 SKILLS_DIR="${SKILLS_DIR:-}"
+DISABLE_TRIAGE_PRELOAD="${DISABLE_TRIAGE_PRELOAD:-false}"
 DEBUG="${DEBUG:-}"
 INCIDENT_ID="${INCIDENT_ID:-}"
 
@@ -545,6 +546,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source common utilities
 # shellcheck source=./runners/common.sh
 source "$SCRIPT_DIR/runners/common.sh"
+
+# Preload incident context before building agent command
+if [[ -n "$WORKSPACE_DIR" ]]; then
+    log_debug "Preloading incident context..."
+    PRELOADED_CONTEXT=$(preload_incident_context "$WORKSPACE_DIR" "$SKILLS_DIR" "$DISABLE_TRIAGE_PRELOAD")
+
+    # Monitor context size
+    monitor_context_size "$PRELOADED_CONTEXT"
+
+    # Append preloaded context to audit trail (prompt-sent.md)
+    append_preloaded_context_to_audit "$WORKSPACE_DIR" "$PRELOADED_CONTEXT"
+
+    export PRELOADED_CONTEXT
+    log_debug "Context preloading complete"
+fi
 
 # Export environment variables needed by sub-runners
 export AGENT_CLI

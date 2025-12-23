@@ -100,6 +100,19 @@ agent_image: "nightcrier-agent:latest"
 # additional_agent_prompt: "SLO: 99.9% uptime. Escalation: page oncall@example.com for P1 issues."
 
 # =============================================================================
+# Skills Configuration (Optional)
+# =============================================================================
+# Directory where skills are cached (downloaded triage skills like k8s4agents)
+# Default: ./agent-home/skills (relative to nightcrier working directory)
+# Environment variable: SKILLS_CACHE_DIR
+skills:
+  cache_dir: "./agent-home/skills"
+  # Optional: Disable triage script preloading (default: false)
+  # When disabled, agent will run triage scripts itself
+  # Environment variable: SKILLS_DISABLE_TRIAGE_PRELOAD
+  disable_triage_preload: false
+
+# =============================================================================
 # LLM API Keys (At least one required)
 # =============================================================================
 # REQUIRED: At least one LLM API key must be provided.

@@ -21,6 +21,7 @@ import (
 	"github.com/rbias/nightcrier/internal/health"
 	"github.com/rbias/nightcrier/internal/incident"
 	"github.com/rbias/nightcrier/internal/reporting"
+	"github.com/rbias/nightcrier/internal/skills"
 	"github.com/rbias/nightcrier/internal/storage"
 	"github.com/rbias/nightcrier/internal/storage/postgres"
 	"github.com/rbias/nightcrier/internal/storage/sqlite"
@@ -104,6 +105,12 @@ func run(cmd *cobra.Command, args []string) error {
 	setupLogging(cfg.LogLevel)
 	slog.Info("tuning configuration loaded")
 
+	// Ensure skills are cached (non-fatal - agent will run triage itself if cloning fails)
+	if err := skills.EnsureSkillsCached(cfg.Skills.CacheDir); err != nil {
+		slog.Warn("failed to ensure skills are cached - agent will run triage itself",
+			"error", err)
+	}
+
 	// Print startup banner
 	printStartupBanner(cfg, config.GetConfigFile())
 
@@ -154,17 +161,19 @@ func run(cmd *cobra.Command, args []string) error {
 	executors := make(map[string]*agent.Executor)
 	for _, clusterCfg := range cfg.Clusters {
 		executors[clusterCfg.Name] = agent.NewExecutorWithConfig(agent.ExecutorConfig{
-			ScriptPath:       agentScript,
-			SystemPromptFile: cfg.AgentSystemPromptFile,
-			AllowedTools:     cfg.AgentAllowedTools,
-			Model:            cfg.AgentModel,
-			Timeout:          cfg.AgentTimeout,
-			AgentCLI:         cfg.AgentCLI,
-			AgentImage:       cfg.AgentImage,
-			AdditionalPrompt: cfg.AdditionalAgentPrompt,
-			Debug:            cfg.LogLevel == "debug",
-			Verbose:          cfg.AgentVerbose || cfg.LogLevel == "debug",
-			Kubeconfig:       clusterCfg.Triage.Kubeconfig,
+			ScriptPath:           agentScript,
+			SystemPromptFile:     cfg.AgentSystemPromptFile,
+			AllowedTools:         cfg.AgentAllowedTools,
+			Model:                cfg.AgentModel,
+			Timeout:              cfg.AgentTimeout,
+			AgentCLI:             cfg.AgentCLI,
+			AgentImage:           cfg.AgentImage,
+			AdditionalPrompt:     cfg.AdditionalAgentPrompt,
+			Debug:                cfg.LogLevel == "debug",
+			Verbose:              cfg.AgentVerbose || cfg.LogLevel == "debug",
+			Kubeconfig:           clusterCfg.Triage.Kubeconfig,
+			SkillsCacheDir:       cfg.Skills.CacheDir,
+			DisableTriagePreload: cfg.Skills.DisableTriagePreload,
 		}, tuning)
 		slog.Info("executor created for cluster",
 			"cluster", clusterCfg.Name,
@@ -477,6 +486,23 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 		if err := stateStore.UpdateIncidentStatus(ctx, incidentID, incident.StatusInvestigating, &startedAt); err != nil {
 			slog.Error("failed to update incident status in state store", "incident_id", incidentID, "error", err)
 		}
+
+		// Record agent execution start in state store
+		slog.Debug("recording agent execution start in state store", "incident_id", incidentID)
+		agentExec := &storage.AgentExecution{
+			ExecutionID:  incidentID, // Use incident ID as execution ID for now
+			IncidentID:   incidentID,
+			StartedAt:    startedAt,
+			CompletedAt:  nil,
+			ExitCode:     nil,
+			ErrorMessage: "",
+			LogPaths:     nil,
+		}
+		if err := stateStore.RecordAgentExecution(ctx, agentExec); err != nil {
+			slog.Error("failed to record agent execution start in state store", "incident_id", incidentID, "error", err)
+		} else {
+			slog.Info("agent execution start recorded in state store", "incident_id", incidentID, "execution_id", agentExec.ExecutionID)
+		}
 	}
 
 	// Execute agent
@@ -492,9 +518,9 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 		"agent-full.log":   logPaths.Combined,
 	}
 
-	// Record agent execution in state store
+	// Update agent execution with completion info in state store
 	if stateStore != nil {
-		slog.Debug("recording agent execution in state store", "incident_id", incidentID, "exit_code", exitCode)
+		slog.Debug("updating agent execution with completion info in state store", "incident_id", incidentID, "exit_code", exitCode)
 		completedAt := time.Now()
 		execErrMsg := ""
 		if execErr != nil {
@@ -510,12 +536,12 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 			LogPaths:     inc.LogPaths,
 		}
 		if err := stateStore.RecordAgentExecution(ctx, agentExec); err != nil {
-			slog.Error("failed to record agent execution in state store", "incident_id", incidentID, "error", err)
+			slog.Error("failed to update agent execution completion in state store", "incident_id", incidentID, "error", err)
 		} else {
-			slog.Info("agent execution recorded in state store", "incident_id", incidentID, "execution_id", agentExec.ExecutionID)
+			slog.Info("agent execution completion recorded in state store", "incident_id", incidentID, "execution_id", agentExec.ExecutionID)
 		}
 	} else {
-		slog.Warn("stateStore is nil, skipping agent execution recording", "incident_id", incidentID)
+		slog.Warn("stateStore is nil, skipping agent execution update", "incident_id", incidentID)
 	}
 
 	// Detect agent failures (exit code 0 but missing or invalid output)

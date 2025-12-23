@@ -47,6 +47,11 @@ log_info() {
     echo "INFO: $*" >&2
 }
 
+# Log a warning message
+log_warning() {
+    echo "WARNING: $*" >&2
+}
+
 # Log an error message
 log_error() {
     echo "ERROR: $*" >&2
@@ -167,5 +172,119 @@ create_archive() {
     else
         log_debug "Failed to create archive: $output_file"
         return 1
+    fi
+}
+
+# =============================================================================
+# Context Preloading Utilities
+# =============================================================================
+
+# Preload incident context files and optionally run K8s triage script
+# Returns formatted context string with XML-style tags
+# Usage: preload_incident_context <workspace_dir> <skills_cache_dir> [disable_triage]
+preload_incident_context() {
+    local workspace_dir="$1"
+    local skills_cache_dir="$2"
+    local disable_triage="${3:-false}"
+    local context=""
+
+    log_debug "Preloading incident context from: $workspace_dir"
+
+    # Read incident.json
+    if [[ -f "$workspace_dir/incident.json" ]]; then
+        log_debug "Reading incident.json"
+        context+="<incident>\n"
+        context+="$(cat "$workspace_dir/incident.json")\n"
+        context+="</incident>\n\n"
+    else
+        log_debug "incident.json not found"
+    fi
+
+    # Read incident_cluster_permissions.json
+    if [[ -f "$workspace_dir/incident_cluster_permissions.json" ]]; then
+        log_debug "Reading incident_cluster_permissions.json"
+        context+="<kubernetes_cluster_access_permissions>\n"
+        context+="$(cat "$workspace_dir/incident_cluster_permissions.json")\n"
+        context+="</kubernetes_cluster_access_permissions>\n\n"
+    else
+        log_debug "incident_cluster_permissions.json not found"
+    fi
+
+    # Run K8s triage script if not disabled
+    if [[ "$disable_triage" != "true" && -n "$skills_cache_dir" ]]; then
+        local triage_script="${skills_cache_dir}/k8s4agents/skills/k8s-troubleshooter/scripts/incident_triage.sh"
+
+        if [[ -x "$triage_script" ]]; then
+            log_debug "Executing K8s triage script: $triage_script"
+            local triage_output
+            if triage_output=$(timeout 30 "$triage_script" --skip-dump 2>&1); then
+                context+="<initial_triage_report>\n"
+                context+="${triage_output}\n"
+                context+="</initial_triage_report>\n\n"
+                log_debug "K8s triage completed successfully"
+            else
+                log_warning "K8s triage script failed or timed out, agent will run triage itself"
+            fi
+        else
+            log_debug "K8s triage script not found or not executable: $triage_script"
+            log_debug "Agent will run triage via skill"
+        fi
+    elif [[ "$disable_triage" == "true" ]]; then
+        log_debug "Triage preloading disabled, agent will run triage itself"
+    fi
+
+    echo -e "$context"
+}
+
+# Append preloaded context to prompt-sent.md for audit trail
+# Usage: append_preloaded_context_to_audit <workspace_dir> <preloaded_context>
+append_preloaded_context_to_audit() {
+    local workspace_dir="$1"
+    local context="$2"
+    local prompt_file="${workspace_dir}/prompt-sent.md"
+
+    if [[ ! -f "$prompt_file" ]]; then
+        log_warning "prompt-sent.md not found at: $prompt_file"
+        return 1
+    fi
+
+    if [[ -z "$context" ]]; then
+        log_debug "No preloaded context to append"
+        return 0
+    fi
+
+    log_debug "Appending preloaded context to prompt-sent.md"
+
+    # Append the preloaded context section
+    {
+        cat << 'PRELOAD_MARKER'
+
+## Preloaded Context
+
+The following context was preloaded into the agent's system prompt before execution:
+
+PRELOAD_MARKER
+        echo '```'
+        echo -e "$context"
+        echo '```'
+    } >> "$prompt_file"
+
+    log_debug "Preloaded context appended to audit trail"
+}
+
+# Monitor context size and warn if too large
+# Usage: monitor_context_size <context_string>
+monitor_context_size() {
+    local context="$1"
+    local char_count=${#context}
+    local token_estimate=$((char_count / 4))
+
+    if [[ $token_estimate -gt 10000 ]]; then
+        log_warning "Preloaded context is very large: ~${token_estimate} tokens (may hit model limits)"
+        # TODO: Implement truncation strategy if needed
+    elif [[ $token_estimate -gt 8000 ]]; then
+        log_warning "Preloaded context is large: ~${token_estimate} tokens"
+    else
+        log_debug "Preloaded context size: ~${token_estimate} tokens"
     fi
 }

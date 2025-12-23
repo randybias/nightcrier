@@ -77,6 +77,11 @@ type Config struct {
 	// Configures where incident state is persisted. Supports filesystem (backward compatible),
 	// SQLite (embedded), and PostgreSQL (centralized). Default: filesystem
 	StateStorage StateStorage `mapstructure:"state_storage"`
+
+	// Skills Configuration
+	// Configures where downloaded skills (like k8s4agents) are cached and
+	// whether to preload triage scripts
+	Skills SkillsConfig `mapstructure:"skills"`
 }
 
 // StateStorage configures persistent state storage for incidents, agent executions, and triage reports.
@@ -135,6 +140,22 @@ type StateStorage struct {
 	MigrationsPath string `mapstructure:"migrations_path"`
 }
 
+// SkillsConfig configures the skills subsystem for the agent.
+// Skills are external tools and utilities that extend agent capabilities,
+// such as downloaded triage scripts (k8s4agents).
+type SkillsConfig struct {
+	// CacheDir is the directory where downloaded skills are cached
+	// Default: "{workspace_root}/agent-home/skills"
+	// Environment variable: SKILLS_CACHE_DIR
+	CacheDir string `mapstructure:"cache_dir"`
+
+	// DisableTriagePreload controls whether triage scripts should be preloaded
+	// When false (default), the system preloads triage scripts from the cache
+	// When true, the agent runs triage scripts itself
+	// Default: false
+	// Environment variable: SKILLS_DISABLE_TRIAGE_PRELOAD
+	DisableTriagePreload bool `mapstructure:"disable_triage_preload"`
+}
 
 // bindEnvVars binds environment variables to viper keys.
 // Environment variables use uppercase with underscores (e.g., WORKSPACE_ROOT).
@@ -186,6 +207,8 @@ func bindEnvVars() {
 		"state_storage.postgres_user":                       "STATE_STORAGE_POSTGRES_USER",
 		"state_storage.postgres_password":                   "STATE_STORAGE_POSTGRES_PASSWORD",
 		"state_storage.migrations_path":                     "STATE_STORAGE_MIGRATIONS_PATH",
+		"skills.cache_dir":                                  "SKILLS_CACHE_DIR",
+		"skills.disable_triage_preload":                     "SKILLS_DISABLE_TRIAGE_PRELOAD",
 	}
 
 	for key, envVar := range envBindings {

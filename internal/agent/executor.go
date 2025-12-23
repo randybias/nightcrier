@@ -18,17 +18,19 @@ import (
 
 // ExecutorConfig holds configuration for the agent executor
 type ExecutorConfig struct {
-	ScriptPath       string
-	SystemPromptFile string
-	AllowedTools     string
-	Model            string
-	Timeout          int    // seconds
-	AgentCLI         string // claude, codex, goose, gemini
-	AgentImage       string // Docker image for agent container
-	AdditionalPrompt string // Optional additional context for the agent
-	Debug            bool   // Enable debug output in run-agent.sh
-	Verbose          bool   // Enable verbose agent output (shows thinking/tool usage)
-	Kubeconfig       string // Path to kubeconfig file for cluster access
+	ScriptPath           string
+	SystemPromptFile     string
+	AllowedTools         string
+	Model                string
+	Timeout              int    // seconds
+	AgentCLI             string // claude, codex, goose, gemini
+	AgentImage           string // Docker image for agent container
+	AdditionalPrompt     string // Optional additional context for the agent
+	Debug                bool   // Enable debug output in run-agent.sh
+	Verbose              bool   // Enable verbose agent output (shows thinking/tool usage)
+	Kubeconfig           string // Path to kubeconfig file for cluster access
+	SkillsCacheDir       string // Path to skills cache directory
+	DisableTriagePreload bool   // Disable preloading of triage scripts
 }
 
 // Executor runs the agent script in a workspace directory.
@@ -327,6 +329,14 @@ func (e *Executor) ExecuteWithPrompt(ctx context.Context, workspacePath string, 
 	// Add kubeconfig path for cluster access (Phase 2: multi-cluster support)
 	if e.config.Kubeconfig != "" {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("KUBECONFIG=%s", e.config.Kubeconfig))
+	}
+
+	// Skills configuration for context preloading
+	if e.config.SkillsCacheDir != "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("SKILLS_DIR=%s", e.config.SkillsCacheDir))
+	}
+	if e.config.DisableTriagePreload {
+		cmd.Env = append(cmd.Env, "DISABLE_TRIAGE_PRELOAD=true")
 	}
 
 	// Capture stdout and stderr

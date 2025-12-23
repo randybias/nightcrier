@@ -66,10 +66,19 @@ map_tools_to_gemini() {
 build_gemini_command() {
     local cmd=""
 
+    # Preloaded context (incident + permissions + initial_triage_report)
+    local preloaded_context=""
+    if [[ -n "$PRELOADED_CONTEXT" ]]; then
+        preloaded_context=$(escape_single_quotes "$PRELOADED_CONTEXT")
+        preloaded_context="${preloaded_context}
+
+"
+    fi
+
     # Start Gemini command
     local escaped_prompt
     escaped_prompt=$(escape_single_quotes "$PROMPT")
-    cmd="gemini -p '${escaped_prompt}'"
+    cmd="gemini -p '${preloaded_context}${escaped_prompt}'"
 
     # Model
     if [[ -n "$LLM_MODEL" ]]; then

@@ -68,6 +68,13 @@ build_claude_command() {
         cmd+=" --append-system-prompt-file /tmp/system-prompt.txt"
     fi
 
+    # Preloaded context (incident + permissions + initial_triage_report)
+    if [[ -n "$PRELOADED_CONTEXT" ]]; then
+        local escaped_context
+        escaped_context=$(escape_single_quotes "$PRELOADED_CONTEXT")
+        cmd+=" --append-system-prompt '${escaped_context}'"
+    fi
+
     # Verbose
     if [[ "$AGENT_VERBOSE" == "true" ]]; then
         cmd+=" --verbose"

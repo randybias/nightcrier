@@ -418,9 +418,20 @@ func TestExecutorConfig_AllFieldsExplicit(t *testing.T) {
 	if cfg.AdditionalPrompt != "" {
 		t.Error("ExecutorConfig.AdditionalPrompt should have no default")
 	}
+	if cfg.Kubeconfig != "" {
+		t.Error("ExecutorConfig.Kubeconfig should have no default")
+	}
+	if cfg.SkillsCacheDir != "" {
+		t.Error("ExecutorConfig.SkillsCacheDir should have no default")
+	}
 
 	// Timeout should be zero by default
 	if cfg.Timeout != 0 {
 		t.Error("ExecutorConfig.Timeout should have no default")
+	}
+
+	// Boolean fields should be false by default
+	if cfg.DisableTriagePreload {
+		t.Error("ExecutorConfig.DisableTriagePreload should have no default")
 	}
 }
