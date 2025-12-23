@@ -215,6 +215,34 @@ sse_read_timeout: 120
 # azure_sas_expiry: "168h"  # 7 days
 
 # =============================================================================
+# State Storage Configuration (Optional)
+# =============================================================================
+# Persistent storage backend for incident state tracking
+# Type: "filesystem", "sqlite", or "postgres"
+# Default: "filesystem" (backward compatible)
+# Environment variable: STATE_STORAGE_TYPE
+#
+# SQLite (embedded database, recommended for single-node deployments):
+state_storage:
+  type: "sqlite"
+  sqlite_path: "./data/nightcrier.db"
+  migrations_path: "./migrations"
+
+# PostgreSQL (for multi-node deployments requiring shared state):
+# state_storage:
+#   type: "postgres"
+#   # Option 1: Use connection string
+#   # postgres_connection_string: "postgres://user:password@localhost:5432/nightcrier?sslmode=disable"
+#   #
+#   # Option 2: Use individual fields
+#   postgres_host: "localhost"
+#   postgres_port: 5432
+#   postgres_database: "nightcrier"
+#   postgres_user: "postgres"
+#   postgres_password: "your-password-here"
+#   migrations_path: "./migrations"
+
+# =============================================================================
 # Circuit Breaker and Failure Notifications (Required/Optional)
 # =============================================================================
 # Optional: Whether to send notifications when agent failures occur
