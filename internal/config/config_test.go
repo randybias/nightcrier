@@ -1357,3 +1357,472 @@ anthropic_api_key: "test-key"`,
 		})
 	}
 }
+
+// TestStateStorage_DefaultToFilesystem tests that state storage defaults to filesystem for backward compatibility
+func TestStateStorage_DefaultToFilesystem(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfig() // No state_storage section
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if cfg.StateStorage.Type != "filesystem" {
+		t.Errorf("StateStorage.Type = %q, want %q (default)", cfg.StateStorage.Type, "filesystem")
+	}
+
+	if cfg.IsSQLStorageEnabled() {
+		t.Error("IsSQLStorageEnabled() = true, want false for default filesystem storage")
+	}
+
+	if cfg.GetStateStorageType() != "filesystem" {
+		t.Errorf("GetStateStorageType() = %q, want %q", cfg.GetStateStorageType(), "filesystem")
+	}
+}
+
+// TestStateStorage_SQLiteConfiguration tests SQLite storage configuration
+func TestStateStorage_SQLiteConfiguration(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWith(`
+state_storage:
+  type: "sqlite"
+  sqlite_path: "/custom/path/nightcrier.db"
+  migrations_path: "./custom/migrations"
+`)
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if cfg.StateStorage.Type != "sqlite" {
+		t.Errorf("StateStorage.Type = %q, want %q", cfg.StateStorage.Type, "sqlite")
+	}
+
+	if cfg.StateStorage.SQLitePath != "/custom/path/nightcrier.db" {
+		t.Errorf("StateStorage.SQLitePath = %q, want %q", cfg.StateStorage.SQLitePath, "/custom/path/nightcrier.db")
+	}
+
+	if cfg.StateStorage.MigrationsPath != "./custom/migrations" {
+		t.Errorf("StateStorage.MigrationsPath = %q, want %q", cfg.StateStorage.MigrationsPath, "./custom/migrations")
+	}
+
+	if !cfg.IsSQLStorageEnabled() {
+		t.Error("IsSQLStorageEnabled() = false, want true for sqlite storage")
+	}
+}
+
+// TestStateStorage_SQLiteDefaultPath tests that SQLite uses default path when not specified
+func TestStateStorage_SQLiteDefaultPath(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWith(`
+state_storage:
+  type: "sqlite"
+`)
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	expectedPath := filepath.Join("./incidents", "nightcrier.db")
+	if cfg.StateStorage.SQLitePath != expectedPath {
+		t.Errorf("StateStorage.SQLitePath = %q, want %q (default)", cfg.StateStorage.SQLitePath, expectedPath)
+	}
+
+	if cfg.StateStorage.MigrationsPath != "./migrations" {
+		t.Errorf("StateStorage.MigrationsPath = %q, want %q (default)", cfg.StateStorage.MigrationsPath, "./migrations")
+	}
+}
+
+// TestStateStorage_PostgresWithConnectionString tests PostgreSQL configuration with connection string
+func TestStateStorage_PostgresWithConnectionString(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWith(`
+state_storage:
+  type: "postgres"
+  postgres_connection_string: "postgres://user:pass@localhost:5432/nightcrier?sslmode=disable"
+  migrations_path: "./migrations"
+`)
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if cfg.StateStorage.Type != "postgres" {
+		t.Errorf("StateStorage.Type = %q, want %q", cfg.StateStorage.Type, "postgres")
+	}
+
+	if cfg.StateStorage.PostgresConnectionString != "postgres://user:pass@localhost:5432/nightcrier?sslmode=disable" {
+		t.Errorf("StateStorage.PostgresConnectionString = %q, unexpected value", cfg.StateStorage.PostgresConnectionString)
+	}
+
+	if !cfg.IsSQLStorageEnabled() {
+		t.Error("IsSQLStorageEnabled() = false, want true for postgres storage")
+	}
+}
+
+// TestStateStorage_PostgresWithIndividualFields tests PostgreSQL configuration with individual fields
+func TestStateStorage_PostgresWithIndividualFields(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWith(`
+state_storage:
+  type: "postgres"
+  postgres_host: "db.example.com"
+  postgres_port: 5433
+  postgres_database: "nightcrier_prod"
+  postgres_user: "nightcrier_user"
+  postgres_password: "secret"
+`)
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if cfg.StateStorage.PostgresHost != "db.example.com" {
+		t.Errorf("StateStorage.PostgresHost = %q, want %q", cfg.StateStorage.PostgresHost, "db.example.com")
+	}
+
+	if cfg.StateStorage.PostgresPort != 5433 {
+		t.Errorf("StateStorage.PostgresPort = %d, want %d", cfg.StateStorage.PostgresPort, 5433)
+	}
+
+	if cfg.StateStorage.PostgresDatabase != "nightcrier_prod" {
+		t.Errorf("StateStorage.PostgresDatabase = %q, want %q", cfg.StateStorage.PostgresDatabase, "nightcrier_prod")
+	}
+
+	if cfg.StateStorage.PostgresUser != "nightcrier_user" {
+		t.Errorf("StateStorage.PostgresUser = %q, want %q", cfg.StateStorage.PostgresUser, "nightcrier_user")
+	}
+
+	if cfg.StateStorage.PostgresPassword != "secret" {
+		t.Errorf("StateStorage.PostgresPassword = %q, want %q", cfg.StateStorage.PostgresPassword, "secret")
+	}
+}
+
+// TestStateStorage_PostgresDefaultPort tests that PostgreSQL uses default port when not specified
+func TestStateStorage_PostgresDefaultPort(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWith(`
+state_storage:
+  type: "postgres"
+  postgres_host: "localhost"
+  postgres_database: "nightcrier"
+  postgres_user: "postgres"
+`)
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if cfg.StateStorage.PostgresPort != 5432 {
+		t.Errorf("StateStorage.PostgresPort = %d, want %d (default)", cfg.StateStorage.PostgresPort, 5432)
+	}
+}
+
+// TestStateStorage_InvalidType tests validation of invalid storage type
+func TestStateStorage_InvalidType(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWith(`
+state_storage:
+  type: "invalid"
+`)
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	_, err := LoadWithConfigFile(configPath)
+	if err == nil {
+		t.Error("LoadWithConfigFile() should fail with invalid storage type")
+	}
+
+	if !contains(err.Error(), "invalid state_storage.type") {
+		t.Errorf("error should mention invalid type, got: %v", err)
+	}
+}
+
+// TestStateStorage_PostgresMissingHost tests validation when postgres host is missing
+func TestStateStorage_PostgresMissingHost(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWith(`
+state_storage:
+  type: "postgres"
+  postgres_database: "nightcrier"
+  postgres_user: "postgres"
+`)
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	_, err := LoadWithConfigFile(configPath)
+	if err == nil {
+		t.Error("LoadWithConfigFile() should fail when postgres host is missing")
+	}
+
+	if !contains(err.Error(), "STATE_STORAGE_POSTGRES_HOST") {
+		t.Errorf("error should mention missing host, got: %v", err)
+	}
+}
+
+// TestStateStorage_PostgresMissingDatabase tests validation when postgres database is missing
+func TestStateStorage_PostgresMissingDatabase(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWith(`
+state_storage:
+  type: "postgres"
+  postgres_host: "localhost"
+  postgres_user: "postgres"
+`)
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	_, err := LoadWithConfigFile(configPath)
+	if err == nil {
+		t.Error("LoadWithConfigFile() should fail when postgres database is missing")
+	}
+
+	if !contains(err.Error(), "STATE_STORAGE_POSTGRES_DATABASE") {
+		t.Errorf("error should mention missing database, got: %v", err)
+	}
+}
+
+// TestStateStorage_PostgresMissingUser tests validation when postgres user is missing
+func TestStateStorage_PostgresMissingUser(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWith(`
+state_storage:
+  type: "postgres"
+  postgres_host: "localhost"
+  postgres_database: "nightcrier"
+`)
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	_, err := LoadWithConfigFile(configPath)
+	if err == nil {
+		t.Error("LoadWithConfigFile() should fail when postgres user is missing")
+	}
+
+	if !contains(err.Error(), "STATE_STORAGE_POSTGRES_USER") {
+		t.Errorf("error should mention missing user, got: %v", err)
+	}
+}
+
+// TestStateStorage_InvalidConnectionString tests validation of invalid postgres connection strings
+func TestStateStorage_InvalidConnectionString(t *testing.T) {
+	tests := []struct {
+		name   string
+		connStr string
+	}{
+		{"empty", ""},
+		{"no protocol", "user:pass@localhost:5432/dbname"},
+		{"no @", "postgres://userpass:localhost:5432/dbname"},
+		{"wrong protocol", "mysql://user:pass@localhost:5432/dbname"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetViper()
+
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+			configContent := completeTestConfigWith(fmt.Sprintf(`
+state_storage:
+  type: "postgres"
+  postgres_connection_string: "%s"
+`, tt.connStr))
+			if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+				t.Fatalf("failed to write config file: %v", err)
+			}
+
+			_, err := LoadWithConfigFile(configPath)
+			if err == nil {
+				t.Errorf("LoadWithConfigFile() should fail with invalid connection string: %q", tt.connStr)
+			}
+		})
+	}
+}
+
+// TestStateStorage_FromEnvVars tests loading state storage config from environment variables
+func TestStateStorage_FromEnvVars(t *testing.T) {
+	resetViper()
+
+	// Create a minimal config file
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfig()
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	// Set env vars for SQLite storage
+	os.Setenv("STATE_STORAGE_TYPE", "sqlite")
+	os.Setenv("STATE_STORAGE_SQLITE_PATH", "/env/path/nightcrier.db")
+	os.Setenv("STATE_STORAGE_MIGRATIONS_PATH", "/env/migrations")
+
+	defer func() {
+		os.Unsetenv("STATE_STORAGE_TYPE")
+		os.Unsetenv("STATE_STORAGE_SQLITE_PATH")
+		os.Unsetenv("STATE_STORAGE_MIGRATIONS_PATH")
+	}()
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if cfg.StateStorage.Type != "sqlite" {
+		t.Errorf("StateStorage.Type = %q, want %q", cfg.StateStorage.Type, "sqlite")
+	}
+
+	if cfg.StateStorage.SQLitePath != "/env/path/nightcrier.db" {
+		t.Errorf("StateStorage.SQLitePath = %q, want %q", cfg.StateStorage.SQLitePath, "/env/path/nightcrier.db")
+	}
+
+	if cfg.StateStorage.MigrationsPath != "/env/migrations" {
+		t.Errorf("StateStorage.MigrationsPath = %q, want %q", cfg.StateStorage.MigrationsPath, "/env/migrations")
+	}
+}
+
+// TestStateStorage_PostgresFromEnvVars tests loading postgres config from environment variables
+func TestStateStorage_PostgresFromEnvVars(t *testing.T) {
+	resetViper()
+
+	// Create a minimal config file
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfig()
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	// Set env vars for PostgreSQL storage
+	os.Setenv("STATE_STORAGE_TYPE", "postgres")
+	os.Setenv("STATE_STORAGE_POSTGRES_HOST", "env.db.example.com")
+	os.Setenv("STATE_STORAGE_POSTGRES_PORT", "5433")
+	os.Setenv("STATE_STORAGE_POSTGRES_DATABASE", "env_nightcrier")
+	os.Setenv("STATE_STORAGE_POSTGRES_USER", "env_user")
+	os.Setenv("STATE_STORAGE_POSTGRES_PASSWORD", "env_pass")
+
+	defer func() {
+		os.Unsetenv("STATE_STORAGE_TYPE")
+		os.Unsetenv("STATE_STORAGE_POSTGRES_HOST")
+		os.Unsetenv("STATE_STORAGE_POSTGRES_PORT")
+		os.Unsetenv("STATE_STORAGE_POSTGRES_DATABASE")
+		os.Unsetenv("STATE_STORAGE_POSTGRES_USER")
+		os.Unsetenv("STATE_STORAGE_POSTGRES_PASSWORD")
+	}()
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if cfg.StateStorage.Type != "postgres" {
+		t.Errorf("StateStorage.Type = %q, want %q", cfg.StateStorage.Type, "postgres")
+	}
+
+	if cfg.StateStorage.PostgresHost != "env.db.example.com" {
+		t.Errorf("StateStorage.PostgresHost = %q, want %q", cfg.StateStorage.PostgresHost, "env.db.example.com")
+	}
+
+	if cfg.StateStorage.PostgresPort != 5433 {
+		t.Errorf("StateStorage.PostgresPort = %d, want %d", cfg.StateStorage.PostgresPort, 5433)
+	}
+
+	if cfg.StateStorage.PostgresDatabase != "env_nightcrier" {
+		t.Errorf("StateStorage.PostgresDatabase = %q, want %q", cfg.StateStorage.PostgresDatabase, "env_nightcrier")
+	}
+
+	if cfg.StateStorage.PostgresUser != "env_user" {
+		t.Errorf("StateStorage.PostgresUser = %q, want %q", cfg.StateStorage.PostgresUser, "env_user")
+	}
+
+	if cfg.StateStorage.PostgresPassword != "env_pass" {
+		t.Errorf("StateStorage.PostgresPassword = %q, want %q", cfg.StateStorage.PostgresPassword, "env_pass")
+	}
+}
+
+// TestStateStorage_CaseInsensitiveType tests that storage type is case-insensitive
+func TestStateStorage_CaseInsensitiveType(t *testing.T) {
+	cases := []string{"SQLITE", "SQLite", "SqLiTe", "sqlite"}
+
+	for _, tc := range cases {
+		t.Run(tc, func(t *testing.T) {
+			resetViper()
+
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+			configContent := completeTestConfigWith(fmt.Sprintf(`
+state_storage:
+  type: "%s"
+`, tc))
+			if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+				t.Fatalf("failed to write config file: %v", err)
+			}
+
+			cfg, err := LoadWithConfigFile(configPath)
+			if err != nil {
+				t.Fatalf("LoadWithConfigFile() failed: %v", err)
+			}
+
+			if cfg.StateStorage.Type != "sqlite" {
+				t.Errorf("StateStorage.Type = %q, want %q (normalized)", cfg.StateStorage.Type, "sqlite")
+			}
+		})
+	}
+}

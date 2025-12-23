@@ -501,6 +501,11 @@ fi
 mkdir -p "${OUTPUT_DIR}"
 DOCKER_ARGS+=("-v" "${OUTPUT_DIR}:${AGENT_HOME}/output")
 
+# Mount logs directory into agent home (read-write for tee to write execution logs)
+LOGS_DIR="${WORKSPACE_DIR}/logs"
+mkdir -p "${LOGS_DIR}"
+DOCKER_ARGS+=("-v" "${LOGS_DIR}:${AGENT_HOME}/logs")
+
 # Mount kubeconfig
 if [[ -f "$KUBECONFIG_PATH" ]]; then
     DOCKER_ARGS+=("-v" "${KUBECONFIG_PATH}:${AGENT_HOME}/.kube/config:ro")

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -71,6 +72,67 @@ type Config struct {
 	NotifyOnAgentFailure        bool `mapstructure:"notify_on_agent_failure"`
 	FailureThresholdForAlert    int  `mapstructure:"failure_threshold_for_alert"`
 	UploadFailedInvestigations  bool `mapstructure:"upload_failed_investigations"`
+
+	// State Storage Configuration (SQL Support)
+	// Configures where incident state is persisted. Supports filesystem (backward compatible),
+	// SQLite (embedded), and PostgreSQL (centralized). Default: filesystem
+	StateStorage StateStorage `mapstructure:"state_storage"`
+}
+
+// StateStorage configures persistent state storage for incidents, agent executions, and triage reports.
+// Supports three storage backends:
+//   - filesystem: Legacy filesystem-based storage (default for backward compatibility)
+//   - sqlite: Embedded SQLite database (single-node, file-based)
+//   - postgres: PostgreSQL database (multi-node, centralized)
+type StateStorage struct {
+	// Type specifies the storage backend: "filesystem", "sqlite", or "postgres"
+	// Default: "filesystem" (maintains backward compatibility)
+	// Environment variable: STATE_STORAGE_TYPE
+	Type string `mapstructure:"type"`
+
+	// SQLitePath specifies the path to the SQLite database file
+	// Only used when Type is "sqlite"
+	// Default: "{workspace_root}/nightcrier.db"
+	// Environment variable: STATE_STORAGE_SQLITE_PATH
+	SQLitePath string `mapstructure:"sqlite_path"`
+
+	// PostgresConnectionString is a complete PostgreSQL connection string
+	// Format: "postgres://user:password@host:port/dbname?sslmode=disable"
+	// Only used when Type is "postgres"
+	// Takes precedence over individual Postgres* fields if provided
+	// Environment variable: STATE_STORAGE_POSTGRES_CONNECTION_STRING
+	PostgresConnectionString string `mapstructure:"postgres_connection_string"`
+
+	// PostgresHost is the PostgreSQL server hostname
+	// Only used when Type is "postgres" and PostgresConnectionString is not provided
+	// Environment variable: STATE_STORAGE_POSTGRES_HOST
+	PostgresHost string `mapstructure:"postgres_host"`
+
+	// PostgresPort is the PostgreSQL server port
+	// Default: 5432
+	// Only used when Type is "postgres" and PostgresConnectionString is not provided
+	// Environment variable: STATE_STORAGE_POSTGRES_PORT
+	PostgresPort int `mapstructure:"postgres_port"`
+
+	// PostgresDatabase is the PostgreSQL database name
+	// Only used when Type is "postgres" and PostgresConnectionString is not provided
+	// Environment variable: STATE_STORAGE_POSTGRES_DATABASE
+	PostgresDatabase string `mapstructure:"postgres_database"`
+
+	// PostgresUser is the PostgreSQL username
+	// Only used when Type is "postgres" and PostgresConnectionString is not provided
+	// Environment variable: STATE_STORAGE_POSTGRES_USER
+	PostgresUser string `mapstructure:"postgres_user"`
+
+	// PostgresPassword is the PostgreSQL password
+	// Only used when Type is "postgres" and PostgresConnectionString is not provided
+	// Environment variable: STATE_STORAGE_POSTGRES_PASSWORD
+	PostgresPassword string `mapstructure:"postgres_password"`
+
+	// MigrationsPath is the path to the directory containing SQL migration files
+	// Default: "./migrations"
+	// Environment variable: STATE_STORAGE_MIGRATIONS_PATH
+	MigrationsPath string `mapstructure:"migrations_path"`
 }
 
 
@@ -115,6 +177,15 @@ func bindEnvVars() {
 		"notify_on_agent_failure":         "NOTIFY_ON_AGENT_FAILURE",
 		"failure_threshold_for_alert":     "FAILURE_THRESHOLD_FOR_ALERT",
 		"upload_failed_investigations":    "UPLOAD_FAILED_INVESTIGATIONS",
+		"state_storage.type":                                "STATE_STORAGE_TYPE",
+		"state_storage.sqlite_path":                         "STATE_STORAGE_SQLITE_PATH",
+		"state_storage.postgres_connection_string":          "STATE_STORAGE_POSTGRES_CONNECTION_STRING",
+		"state_storage.postgres_host":                       "STATE_STORAGE_POSTGRES_HOST",
+		"state_storage.postgres_port":                       "STATE_STORAGE_POSTGRES_PORT",
+		"state_storage.postgres_database":                   "STATE_STORAGE_POSTGRES_DATABASE",
+		"state_storage.postgres_user":                       "STATE_STORAGE_POSTGRES_USER",
+		"state_storage.postgres_password":                   "STATE_STORAGE_POSTGRES_PASSWORD",
+		"state_storage.migrations_path":                     "STATE_STORAGE_MIGRATIONS_PATH",
 	}
 
 	for key, envVar := range envBindings {
@@ -365,6 +436,11 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	// Validate state storage configuration
+	if err := c.ValidateStateStorage(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -520,4 +596,99 @@ func validateConnectionString(connStr string) error {
 	}
 
 	return nil
+}
+
+// ValidateStateStorage validates state storage configuration based on the selected storage type.
+// Returns an error if the configuration is invalid or missing required fields.
+func (c *Config) ValidateStateStorage() error {
+	// Default to filesystem if not specified (backward compatibility)
+	if c.StateStorage.Type == "" {
+		c.StateStorage.Type = "filesystem"
+	}
+
+	// Normalize type to lowercase
+	c.StateStorage.Type = strings.ToLower(c.StateStorage.Type)
+
+	// Validate storage type
+	validTypes := map[string]bool{"filesystem": true, "sqlite": true, "postgres": true}
+	if !validTypes[c.StateStorage.Type] {
+		return fmt.Errorf("invalid state_storage.type '%s': must be 'filesystem', 'sqlite', or 'postgres'", c.StateStorage.Type)
+	}
+
+	// Set default migrations path if not specified
+	if c.StateStorage.MigrationsPath == "" {
+		c.StateStorage.MigrationsPath = "./migrations"
+	}
+
+	// Validate SQLite configuration
+	if c.StateStorage.Type == "sqlite" {
+		// Set default SQLite path if not specified
+		if c.StateStorage.SQLitePath == "" {
+			c.StateStorage.SQLitePath = filepath.Join(c.WorkspaceRoot, "nightcrier.db")
+		}
+	}
+
+	// Validate PostgreSQL configuration
+	if c.StateStorage.Type == "postgres" {
+		// If connection string is provided, validate it
+		if c.StateStorage.PostgresConnectionString != "" {
+			if err := validatePostgresConnectionString(c.StateStorage.PostgresConnectionString); err != nil {
+				return fmt.Errorf("invalid STATE_STORAGE_POSTGRES_CONNECTION_STRING: %w", err)
+			}
+		} else {
+			// Validate individual connection parameters
+			if c.StateStorage.PostgresHost == "" {
+				return fmt.Errorf("STATE_STORAGE_POSTGRES_HOST is required when state_storage.type is 'postgres' and connection string is not provided")
+			}
+			if c.StateStorage.PostgresDatabase == "" {
+				return fmt.Errorf("STATE_STORAGE_POSTGRES_DATABASE is required when state_storage.type is 'postgres' and connection string is not provided")
+			}
+			if c.StateStorage.PostgresUser == "" {
+				return fmt.Errorf("STATE_STORAGE_POSTGRES_USER is required when state_storage.type is 'postgres' and connection string is not provided")
+			}
+			// Password is optional (could use peer auth, SSL certs, etc.)
+
+			// Set default port if not specified
+			if c.StateStorage.PostgresPort == 0 {
+				c.StateStorage.PostgresPort = 5432
+			}
+		}
+	}
+
+	return nil
+}
+
+// validatePostgresConnectionString performs basic validation on PostgreSQL connection string format.
+// It checks for the presence of required components but doesn't validate their actual values.
+func validatePostgresConnectionString(connStr string) error {
+	if connStr == "" {
+		return fmt.Errorf("connection string is empty")
+	}
+
+	// Basic validation: should start with postgres:// or postgresql://
+	if !strings.HasPrefix(connStr, "postgres://") && !strings.HasPrefix(connStr, "postgresql://") {
+		return fmt.Errorf("connection string must start with 'postgres://' or 'postgresql://'")
+	}
+
+	// Should contain @ symbol (separating user info from host)
+	if !strings.Contains(connStr, "@") {
+		return fmt.Errorf("connection string must contain '@' to separate credentials from host")
+	}
+
+	return nil
+}
+
+// IsSQLStorageEnabled returns true if SQL-based storage (SQLite or PostgreSQL) is configured.
+// Returns false if using filesystem storage (default).
+func (c *Config) IsSQLStorageEnabled() bool {
+	return c.StateStorage.Type == "sqlite" || c.StateStorage.Type == "postgres"
+}
+
+// GetStateStorageType returns the configured state storage type.
+// Defaults to "filesystem" if not configured.
+func (c *Config) GetStateStorageType() string {
+	if c.StateStorage.Type == "" {
+		return "filesystem"
+	}
+	return c.StateStorage.Type
 }
