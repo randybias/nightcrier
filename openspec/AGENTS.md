@@ -2,17 +2,6 @@
 
 Instructions for AI coding assistants using OpenSpec for spec-driven development.
 
-## REQUIRED READING: Project Context
-
-**Before working on any task, read [../README.md](../README.md) to understand:**
-- What nightcrier is and is NOT
-- Architecture philosophy and design decisions
-- The distinction between Events, Fault Events, and Incidents
-- Why filtering happens upstream in kubernetes-mcp-server
-- Scale requirements (100s to 1000s of MCP servers)
-
-This context is critical for making appropriate architectural decisions.
-
 ## TL;DR Quick Checklist
 
 - Search existing work: `openspec spec list --long`, `openspec list` (use `rg` only for full-text search)
