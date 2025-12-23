@@ -78,8 +78,8 @@ build_claude_command() {
         cmd+=" --max-turns $AGENT_MAX_TURNS"
     fi
 
-    # Tee output to file
-    cmd+=" 2>&1 | tee ${WORKSPACE_DIR}/logs/${OUTPUT_FILE}"
+    # Tee output to file (uses container path that's mounted from host)
+    cmd+=" 2>&1 | tee ${AGENT_HOME}/logs/${OUTPUT_FILE}"
 
     echo "$cmd"
 }

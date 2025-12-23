@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -21,6 +22,8 @@ import (
 	"github.com/rbias/nightcrier/internal/incident"
 	"github.com/rbias/nightcrier/internal/reporting"
 	"github.com/rbias/nightcrier/internal/storage"
+	"github.com/rbias/nightcrier/internal/storage/postgres"
+	"github.com/rbias/nightcrier/internal/storage/sqlite"
 	"github.com/spf13/cobra"
 )
 
@@ -179,18 +182,18 @@ func run(cmd *cobra.Command, args []string) error {
 	circuitBreaker := reporting.NewCircuitBreaker(cfg.FailureThresholdForAlert, tuning)
 	slog.Info("circuit breaker initialized", "threshold", cfg.FailureThresholdForAlert)
 
-	// Initialize storage backend based on configuration
+	// Initialize artifact storage backend (for investigation reports and logs)
 	storageBackend, err := storage.NewStorage(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to initialize storage backend: %w", err)
+		return fmt.Errorf("failed to initialize artifact storage backend: %w", err)
 	}
-	storageMode := "filesystem"
+	artifactStorageMode := "local_filesystem"
 	if cfg.IsAzureStorageEnabled() {
-		storageMode = "azure"
+		artifactStorageMode = "azure_blob"
 	}
-	slog.Info("storage backend initialized", "mode", storageMode)
+	slog.Info("artifact storage initialized", "backend", artifactStorageMode)
 
-	// Setup context with cancellation for graceful shutdown
+	// Setup context with cancellation for graceful shutdown (needed for postgres.New)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -202,6 +205,90 @@ func run(cmd *cobra.Command, args []string) error {
 		slog.Info("received shutdown signal", "signal", sig)
 		cancel()
 	}()
+
+	// Initialize state store (SQL persistence) based on configuration
+	var stateStore storage.StateStore
+	storageType := cfg.GetStateStorageType()
+
+	switch storageType {
+	case "filesystem":
+		// No SQL backend needed for filesystem storage
+		slog.Info("state store disabled (using filesystem storage)")
+
+	case "sqlite":
+		dbPath := cfg.StateStorage.SQLitePath
+		migrationsPath := cfg.StateStorage.MigrationsPath
+		slog.Info("initializing SQLite state store", "path", dbPath, "migrations", migrationsPath)
+
+		// Run migrations
+		slog.Info("running database migrations", "driver", "sqlite", "path", migrationsPath)
+		migrationCfg := &storage.MigrationConfig{
+			MigrationsPath: migrationsPath,
+			DatabaseType:   "sqlite",
+			DatabasePath:   dbPath,
+		}
+		if err := storage.RunMigrations(migrationCfg); err != nil {
+			return fmt.Errorf("failed to run SQLite migrations: %w", err)
+		}
+
+		// Create SQLite store
+		sqliteCfg := &sqlite.Config{
+			Path: dbPath,
+		}
+		stateStore, err = sqlite.New(sqliteCfg)
+		if err != nil {
+			return fmt.Errorf("failed to create SQLite store: %w", err)
+		}
+		defer stateStore.Close()
+		slog.Info("SQLite state store initialized successfully")
+
+	case "postgres":
+		var connStr string
+		if cfg.StateStorage.PostgresConnectionString != "" {
+			connStr = cfg.StateStorage.PostgresConnectionString
+		} else {
+			// URL-encode credentials to handle special characters
+			connStr = fmt.Sprintf(
+				"postgres://%s:%s@%s:%d/%s?sslmode=disable",
+				url.QueryEscape(cfg.StateStorage.PostgresUser),
+				url.QueryEscape(cfg.StateStorage.PostgresPassword),
+				cfg.StateStorage.PostgresHost,
+				cfg.StateStorage.PostgresPort,
+				cfg.StateStorage.PostgresDatabase,
+			)
+		}
+		migrationsPath := cfg.StateStorage.MigrationsPath
+
+		slog.Info("initializing PostgreSQL state store",
+			"host", cfg.StateStorage.PostgresHost,
+			"database", cfg.StateStorage.PostgresDatabase,
+			"migrations", migrationsPath)
+
+		// Run migrations
+		slog.Info("running database migrations", "driver", "postgres", "path", migrationsPath)
+		migrationCfg := &storage.MigrationConfig{
+			MigrationsPath: migrationsPath,
+			DatabaseType:   "postgres",
+			DatabaseURL:    connStr,
+		}
+		if err := storage.RunMigrations(migrationCfg); err != nil {
+			return fmt.Errorf("failed to run PostgreSQL migrations: %w", err)
+		}
+
+		// Create PostgreSQL store
+		postgresCfg := &postgres.Config{
+			ConnectionString: connStr,
+		}
+		stateStore, err = postgres.New(ctx, postgresCfg)
+		if err != nil {
+			return fmt.Errorf("failed to create PostgreSQL store: %w", err)
+		}
+		defer stateStore.Close()
+		slog.Info("PostgreSQL state store initialized successfully")
+
+	default:
+		return fmt.Errorf("unknown state storage type: %s", storageType)
+	}
 
 	// Phase 3: Initialize connection manager (validates cluster permissions)
 	// This runs kubectl auth can-i checks for all clusters with triage enabled
@@ -287,7 +374,7 @@ func run(cmd *cobra.Command, args []string) error {
 			}
 
 			// Process the event with cluster context (including permissions)
-			if err := processEvent(ctx, faultEvent, clusterName, kubeconfig, permissions, workspaceMgr, executor, slackNotifier, storageBackend, circuitBreaker, cfg, tuning); err != nil {
+			if err := processEvent(ctx, faultEvent, clusterName, kubeconfig, permissions, workspaceMgr, executor, slackNotifier, storageBackend, stateStore, circuitBreaker, cfg, tuning); err != nil {
 				slog.Error("failed to process event",
 					"cluster", clusterName,
 					"fault_id", faultEvent.FaultID,
@@ -299,13 +386,21 @@ func run(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func processEvent(ctx context.Context, event *events.FaultEvent, clusterName string, kubeconfig string, permissions *cluster.ClusterPermissions, workspaceMgr *agent.WorkspaceManager, executor *agent.Executor, slackNotifier *reporting.SlackNotifier, storageBackend storage.Storage, circuitBreaker *reporting.CircuitBreaker, cfg *config.Config, tuning *config.TuningConfig) error {
+func processEvent(ctx context.Context, event *events.FaultEvent, clusterName string, kubeconfig string, permissions *cluster.ClusterPermissions, workspaceMgr *agent.WorkspaceManager, executor *agent.Executor, slackNotifier *reporting.SlackNotifier, storageBackend storage.Storage, stateStore storage.StateStore, circuitBreaker *reporting.CircuitBreaker, cfg *config.Config, tuning *config.TuningConfig) error {
 	// Create incident from event
 	incidentID := uuid.New().String()
 	inc := incident.NewFromEvent(incidentID, event)
 
 	// Override cluster name with the one from ClusterEvent (Phase 2: multi-cluster support)
 	inc.Cluster = clusterName
+
+	// Persist incident to state store (SQL database)
+	if stateStore != nil {
+		if err := stateStore.CreateIncident(ctx, inc, event); err != nil {
+			slog.Error("failed to create incident in state store", "incident_id", incidentID, "error", err)
+			// Continue processing - don't fail the incident if database write fails
+		}
+	}
 
 	slog.Info("processing fault event",
 		"incident_id", incidentID,
@@ -377,6 +472,13 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 	startedAt := time.Now()
 	inc.StartedAt = &startedAt
 
+	// Update incident status to investigating in state store
+	if stateStore != nil {
+		if err := stateStore.UpdateIncidentStatus(ctx, incidentID, incident.StatusInvestigating, &startedAt); err != nil {
+			slog.Error("failed to update incident status in state store", "incident_id", incidentID, "error", err)
+		}
+	}
+
 	// Execute agent
 	exitCode, logPaths, execErr := executor.Execute(ctx, workspacePath, incidentID)
 
@@ -388,6 +490,32 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 		"agent-stdout.log": logPaths.Stdout,
 		"agent-stderr.log": logPaths.Stderr,
 		"agent-full.log":   logPaths.Combined,
+	}
+
+	// Record agent execution in state store
+	if stateStore != nil {
+		slog.Debug("recording agent execution in state store", "incident_id", incidentID, "exit_code", exitCode)
+		completedAt := time.Now()
+		execErrMsg := ""
+		if execErr != nil {
+			execErrMsg = execErr.Error()
+		}
+		agentExec := &storage.AgentExecution{
+			ExecutionID:  incidentID, // Use incident ID as execution ID for now
+			IncidentID:   incidentID,
+			StartedAt:    startedAt,
+			CompletedAt:  &completedAt,
+			ExitCode:     &exitCode,
+			ErrorMessage: execErrMsg,
+			LogPaths:     inc.LogPaths,
+		}
+		if err := stateStore.RecordAgentExecution(ctx, agentExec); err != nil {
+			slog.Error("failed to record agent execution in state store", "incident_id", incidentID, "error", err)
+		} else {
+			slog.Info("agent execution recorded in state store", "incident_id", incidentID, "execution_id", agentExec.ExecutionID)
+		}
+	} else {
+		slog.Warn("stateStore is nil, skipping agent execution recording", "incident_id", incidentID)
 	}
 
 	// Detect agent failures (exit code 0 but missing or invalid output)
@@ -464,6 +592,13 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 		}
 	}
 
+	// Mark incident as complete in state store
+	if stateStore != nil {
+		if err := stateStore.CompleteIncident(ctx, incidentID, exitCode, inc.FailureReason); err != nil {
+			slog.Error("failed to complete incident in state store", "incident_id", incidentID, "error", err)
+		}
+	}
+
 	// Write updated incident.json with completion info
 	if err := inc.WriteToFile(incidentPath); err != nil {
 		return fmt.Errorf("failed to update incident: %w", err)
@@ -487,6 +622,21 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 			if err != nil {
 				slog.Warn("failed to read incident artifacts for storage", "error", err)
 			} else {
+				// Record triage report in state store
+				if stateStore != nil {
+					report := &storage.TriageReport{
+						ReportID:       uuid.New().String(),
+						IncidentID:     incidentID,
+						ExecutionID:    incidentID, // Match the AgentExecution.ExecutionID
+						GeneratedAt:    time.Now(),
+						ReportMarkdown: string(artifacts.InvestigationMD),
+						ReportHTML:     string(artifacts.InvestigationHTML),
+					}
+					if err := stateStore.RecordTriageReport(ctx, report); err != nil {
+						slog.Error("failed to record triage report in state store", "incident_id", incidentID, "error", err)
+					}
+				}
+
 				// Upload artifacts to storage (Azure or filesystem)
 				saveResult, err := storageBackend.SaveIncident(ctx, incidentID, artifacts)
 				if err != nil {
@@ -753,10 +903,16 @@ func readIncidentArtifacts(workspacePath, incidentID string, logPaths agent.LogP
 
 // printStartupBanner displays configuration summary at startup
 func printStartupBanner(cfg *config.Config, configFile string) {
-	// Determine storage mode
-	storageMode := "filesystem"
+	// Determine artifact storage mode (for reports/logs)
+	artifactStorage := "local_filesystem"
 	if cfg.IsAzureStorageEnabled() {
-		storageMode = "azure"
+		artifactStorage = "azure_blob"
+	}
+
+	// Determine state storage mode (for incident metadata)
+	stateStorage := cfg.GetStateStorageType()
+	if stateStorage == "" {
+		stateStorage = "filesystem"
 	}
 
 	// Determine slack status
@@ -787,9 +943,10 @@ func printStartupBanner(cfg *config.Config, configFile string) {
 	fmt.Printf("║  Agent Timeout:  %-45s ║\n", fmt.Sprintf("%ds", cfg.AgentTimeout))
 	fmt.Printf("║  Allowed Tools:  %-45s ║\n", truncateString(cfg.AgentAllowedTools, 45))
 	fmt.Println("╠═══════════════════════════════════════════════════════════════╣")
-	fmt.Printf("║  Workspace Root: %-45s ║\n", truncateString(cfg.WorkspaceRoot, 45))
-	fmt.Printf("║  Storage Mode:   %-45s ║\n", storageMode)
-	fmt.Printf("║  Slack:          %-45s ║\n", slackStatus)
+	fmt.Printf("║  Workspace Root:     %-41s ║\n", truncateString(cfg.WorkspaceRoot, 41))
+	fmt.Printf("║  Artifact Storage:   %-41s ║\n", artifactStorage)
+	fmt.Printf("║  State Storage:      %-41s ║\n", stateStorage)
+	fmt.Printf("║  Slack:              %-41s ║\n", slackStatus)
 	fmt.Println("╠═══════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║  Log Level:      %-45s ║\n", cfg.LogLevel)
 	fmt.Printf("║  Max Concurrent: %-45s ║\n", fmt.Sprintf("%d agents", cfg.MaxConcurrentAgents))
