@@ -15,14 +15,15 @@ import (
 )
 
 // setupTestStore creates a new in-memory SQLite store for testing.
+// Uses MaxOpenConns: 1 to ensure all connections use the same :memory: database.
 func setupTestStore(t *testing.T) *Store {
 	t.Helper()
 
 	cfg := &Config{
 		Path:            ":memory:",
 		BusyTimeout:     5 * time.Second,
-		MaxOpenConns:    10,
-		MaxIdleConns:    2,
+		MaxOpenConns:    1, // Single connection ensures all goroutines use the same in-memory DB
+		MaxIdleConns:    1,
 		ConnMaxLifetime: time.Hour,
 	}
 
