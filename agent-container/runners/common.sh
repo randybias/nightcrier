@@ -217,7 +217,7 @@ preload_incident_context() {
         if [[ -x "$triage_script" ]]; then
             log_debug "Executing K8s triage script: $triage_script"
             local triage_output
-            if triage_output=$(timeout 30 "$triage_script" --skip-dump 2>&1); then
+            if triage_output=$(timeout 30 "$triage_script" --skip-dump --output-dir "${workspace_dir}/triage" 2>&1); then
                 context+="<initial_triage_report>\n"
                 context+="${triage_output}\n"
                 context+="</initial_triage_report>\n\n"
