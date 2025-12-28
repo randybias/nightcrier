@@ -11,12 +11,13 @@ The incident details have been preloaded into your context, including:
 
 ## Required First Step
 
-**CRITICAL**: Before investigating, you MUST read the skill documentation to understand the required report format:
+**CRITICAL**: Before investigating, you MUST read the skill documentation to understand the required report format.
 
-```bash
-# Read the skill documentation first
-cat ~/.claude/skills/k8s4agents/skills/k8s-troubleshooter/SKILL.md
-```
+The k8s-troubleshooter skill is available in your skills directory. Look for it in one of these locations (depending on your agent):
+- `~/.claude/skills/k8s-troubleshooter/SKILL.md`
+- `~/.codex/skills/k8s-troubleshooter/SKILL.md`
+- `~/.config/goose/skills/k8s-troubleshooter/SKILL.md`
+- `~/.gemini/skills/k8s-troubleshooter/SKILL.md`
 
 The skill defines a **mandatory 7-section report template** starting at "Report Template Overview". You MUST follow this exact structure, including:
 - Section 0: Executive Triage Card (with emoji status indicators)
@@ -43,6 +44,6 @@ Use the systematic diagnostic workflows defined in your skill:
 
 ## Output
 
-Write your investigation report to: `output/investigation.md`
+Write your investigation report to: `output/report.md`
 
 **The report MUST follow the 7-section structure defined in the skill's "Report Template Overview" section.**
