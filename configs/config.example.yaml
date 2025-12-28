@@ -202,30 +202,44 @@ sse_read_timeout: 120
 # slack_webhook_url: "https://hooks.slack.com/services/..."
 
 # =============================================================================
-# Azure Blob Storage (Optional)
+# Object Storage (Optional)
 # =============================================================================
-# When configured, incident artifacts are uploaded to Azure Blob Storage
-# and SAS URLs are included in Slack notifications for direct access.
+# When configured, incident artifacts are uploaded to cloud object storage
+# and signed URLs are included in Slack notifications for direct access.
+# Supports Azure Blob Storage, S3-compatible storage (AWS S3, MinIO, RustFS),
+# and in-memory storage (for testing).
 #
-# Authentication: Provide EITHER connection_string OR (account + key)
+# object_storage:
+#   # REQUIRED: Storage URL specifying provider and bucket/container
+#   # Environment variable: OBJECT_STORAGE_URL
+#   #
+#   # Azure Blob Storage:
+#   # url: "azblob://mycontainer"
+#   #
+#   # AWS S3:
+#   # url: "s3://mybucket?region=us-east-1"
+#   #
+#   # S3-compatible (MinIO, RustFS):
+#   # url: "s3://mybucket?endpoint=http://minio:9000&disable_https=true&use_path_style=true&region=us-east-1"
+#   #
+#   # In-memory (testing only):
+#   # url: "mem://"
 #
-# Full Azure connection string
-# Environment variable: AZURE_STORAGE_CONNECTION_STRING
-# azure_storage_connection_string: "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net"
+#   # Optional: Signed URL expiration duration (default: "168h" = 7 days)
+#   # Environment variable: OBJECT_STORAGE_SIGNED_URL_EXPIRY
+#   # signed_url_expiry: "168h"
 #
-# OR use separate account and key:
-# Environment variable: AZURE_STORAGE_ACCOUNT
-# azure_storage_account: "mystorageaccount"
-# Environment variable: AZURE_STORAGE_KEY
-# azure_storage_key: "..."
+#   # Azure credentials (required for azblob://)
+#   # Environment variable: AZURE_STORAGE_ACCOUNT
+#   # azure_storage_account: "mystorageaccount"
+#   # Environment variable: AZURE_STORAGE_KEY
+#   # azure_storage_key: "..."
 #
-# Blob container name (required if Azure storage is enabled)
-# Environment variable: AZURE_STORAGE_CONTAINER
-# azure_storage_container: "incidents"
-#
-# SAS URL expiration duration (Go duration format)
-# Environment variable: AZURE_SAS_EXPIRY
-# azure_sas_expiry: "168h"  # 7 days
+#   # AWS/S3 credentials (required for s3://)
+#   # Environment variable: AWS_ACCESS_KEY_ID
+#   # aws_access_key_id: "..."
+#   # Environment variable: AWS_SECRET_ACCESS_KEY
+#   # aws_secret_access_key: "..."
 
 # =============================================================================
 # State Storage Configuration (Optional)

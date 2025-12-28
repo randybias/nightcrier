@@ -52,7 +52,11 @@ failure_threshold_for_alert: 3
 upload_failed_investigations: false
 slack_webhook_url: "${SLACK_WEBHOOK_URL}"
 
-# Azure Storage (optional)
-azure_storage_account: "${AZURE_STORAGE_ACCOUNT}"
-azure_storage_key: "${AZURE_STORAGE_KEY}"
-azure_storage_container: "${AZURE_STORAGE_CONTAINER}"
+# Object Storage (optional - supports Azure, S3, MinIO, RustFS)
+object_storage:
+  url: "${OBJECT_STORAGE_URL}"
+  signed_url_expiry: "168h"
+  azure_storage_account: "${AZURE_STORAGE_ACCOUNT}"
+  azure_storage_key: "${AZURE_STORAGE_KEY}"
+  aws_access_key_id: "${AWS_ACCESS_KEY_ID}"
+  aws_secret_access_key: "${AWS_SECRET_ACCESS_KEY}"

@@ -61,12 +61,8 @@ type Config struct {
 	SSEReconnectMaxBackoff     int `mapstructure:"sse_reconnect_max_backoff"`     // seconds
 	SSEReadTimeout             int `mapstructure:"sse_read_timeout"`              // seconds
 
-	// Azure Storage Configuration (optional - used when cloud storage is enabled)
-	AzureStorageConnectionString string `mapstructure:"azure_storage_connection_string"`
-	AzureStorageAccount          string `mapstructure:"azure_storage_account"`
-	AzureStorageKey              string `mapstructure:"azure_storage_key"`
-	AzureStorageContainer        string `mapstructure:"azure_storage_container"`
-	AzureSASExpiry               string `mapstructure:"azure_sas_expiry"`
+	// Object Storage Configuration (optional - used when cloud storage is enabled)
+	ObjectStorage ObjectStorage `mapstructure:"object_storage"`
 
 	// Circuit Breaker and Notification Configuration (Phase 2)
 	NotifyOnAgentFailure        bool `mapstructure:"notify_on_agent_failure"`
@@ -157,6 +153,46 @@ type SkillsConfig struct {
 	DisableTriagePreload bool `mapstructure:"disable_triage_preload"`
 }
 
+// ObjectStorage configures the Go CDK-based object storage for incident artifacts.
+// Supports Azure Blob Storage, S3-compatible storage (AWS S3, MinIO, RustFS), and in-memory storage.
+// Storage is optional - if not configured, artifacts are stored locally in the filesystem.
+type ObjectStorage struct {
+	// URL is the Go CDK storage URL that specifies the provider and bucket/container
+	// Examples:
+	//   - Azure: "azblob://mycontainer"
+	//   - S3: "s3://mybucket?region=us-east-1"
+	//   - MinIO/S3-compatible: "s3://mybucket?endpoint=http://minio:9000&disableSSL=true&s3ForcePathStyle=true"
+	//   - In-memory (testing): "mem://"
+	// Environment variable: OBJECT_STORAGE_URL
+	URL string `mapstructure:"url"`
+
+	// SignedURLExpiry is the duration for which signed URLs remain valid
+	// Format: Go duration string (e.g., "168h" for 7 days)
+	// Default: "168h" (7 days)
+	// Environment variable: OBJECT_STORAGE_SIGNED_URL_EXPIRY
+	SignedURLExpiry string `mapstructure:"signed_url_expiry"`
+
+	// AWSAccessKeyID is the AWS access key ID for S3-compatible storage
+	// Used for S3, MinIO, and other S3-compatible providers
+	// Environment variable: AWS_ACCESS_KEY_ID
+	AWSAccessKeyID string `mapstructure:"aws_access_key_id"`
+
+	// AWSSecretAccessKey is the AWS secret access key for S3-compatible storage
+	// Used for S3, MinIO, and other S3-compatible providers
+	// Environment variable: AWS_SECRET_ACCESS_KEY
+	AWSSecretAccessKey string `mapstructure:"aws_secret_access_key"`
+
+	// AzureStorageAccount is the Azure storage account name
+	// Required when using Azure Blob Storage (azblob://)
+	// Environment variable: AZURE_STORAGE_ACCOUNT
+	AzureStorageAccount string `mapstructure:"azure_storage_account"`
+
+	// AzureStorageKey is the Azure storage account access key
+	// Required when using Azure Blob Storage (azblob://)
+	// Environment variable: AZURE_STORAGE_KEY
+	AzureStorageKey string `mapstructure:"azure_storage_key"`
+}
+
 // bindEnvVars binds environment variables to viper keys.
 // Environment variables use uppercase with underscores (e.g., WORKSPACE_ROOT).
 func bindEnvVars() {
@@ -187,15 +223,16 @@ func bindEnvVars() {
 		"dedup_window_seconds":            "DEDUP_WINDOW_SECONDS",
 		"queue_overflow_policy":           "QUEUE_OVERFLOW_POLICY",
 		"shutdown_timeout":                "SHUTDOWN_TIMEOUT_SECONDS",
-		"sse_reconnect_initial_backoff":   "SSE_RECONNECT_INITIAL_BACKOFF",
-		"sse_reconnect_max_backoff":       "SSE_RECONNECT_MAX_BACKOFF",
-		"sse_read_timeout":                "SSE_READ_TIMEOUT_SECONDS",
-		"azure_storage_connection_string": "AZURE_STORAGE_CONNECTION_STRING",
-		"azure_storage_account":           "AZURE_STORAGE_ACCOUNT",
-		"azure_storage_key":               "AZURE_STORAGE_KEY",
-		"azure_storage_container":         "AZURE_STORAGE_CONTAINER",
-		"azure_sas_expiry":                "AZURE_SAS_EXPIRY",
-		"notify_on_agent_failure":         "NOTIFY_ON_AGENT_FAILURE",
+		"sse_reconnect_initial_backoff":              "SSE_RECONNECT_INITIAL_BACKOFF",
+		"sse_reconnect_max_backoff":                  "SSE_RECONNECT_MAX_BACKOFF",
+		"sse_read_timeout":                           "SSE_READ_TIMEOUT_SECONDS",
+		"object_storage.url":                         "OBJECT_STORAGE_URL",
+		"object_storage.signed_url_expiry":           "OBJECT_STORAGE_SIGNED_URL_EXPIRY",
+		"object_storage.aws_access_key_id":           "AWS_ACCESS_KEY_ID",
+		"object_storage.aws_secret_access_key":       "AWS_SECRET_ACCESS_KEY",
+		"object_storage.azure_storage_account":       "AZURE_STORAGE_ACCOUNT",
+		"object_storage.azure_storage_key":           "AZURE_STORAGE_KEY",
+		"notify_on_agent_failure":                    "NOTIFY_ON_AGENT_FAILURE",
 		"failure_threshold_for_alert":     "FAILURE_THRESHOLD_FOR_ALERT",
 		"upload_failed_investigations":    "UPLOAD_FAILED_INVESTIGATIONS",
 		"state_storage.type":                                "STATE_STORAGE_TYPE",
@@ -454,8 +491,8 @@ func (c *Config) Validate() error {
 		return err
 	}
 
-	// Validate Azure configuration if enabled
-	if err := c.ValidateAzureConfig(); err != nil {
+	// Validate object storage configuration if enabled
+	if err := c.ValidateObjectStorageConfig(); err != nil {
 		return err
 	}
 
@@ -488,134 +525,115 @@ func GetConfigFile() string {
 	return viper.ConfigFileUsed()
 }
 
-// IsAzureStorageEnabled detects if Azure storage is configured.
-// Returns true if AZURE_STORAGE_ACCOUNT or AZURE_STORAGE_CONNECTION_STRING is set.
-func (c *Config) IsAzureStorageEnabled() bool {
-	return c.AzureStorageAccount != "" || c.AzureStorageConnectionString != ""
-}
-
 // GetWorkspaceRoot returns the configured workspace root directory.
 // This method is part of the StorageConfig interface.
 func (c *Config) GetWorkspaceRoot() string {
 	return c.WorkspaceRoot
 }
 
-// GetAzureConnectionString returns the Azure connection string.
-// This method is part of the AzureConfig interface.
-func (c *Config) GetAzureConnectionString() string {
-	return c.AzureStorageConnectionString
+// GetObjectStorageURL returns the Go CDK storage URL (empty if not configured).
+// This method is part of the StorageConfig interface.
+func (c *Config) GetObjectStorageURL() string {
+	return c.ObjectStorage.URL
 }
 
-// GetAzureAccount returns the Azure storage account name.
-// This method is part of the AzureConfig interface.
-func (c *Config) GetAzureAccount() string {
-	return c.AzureStorageAccount
-}
-
-// GetAzureKey returns the Azure storage account access key.
-// This method is part of the AzureConfig interface.
-func (c *Config) GetAzureKey() string {
-	return c.AzureStorageKey
-}
-
-// GetAzureContainer returns the Azure storage container name.
-// This method is part of the AzureConfig interface.
-func (c *Config) GetAzureContainer() string {
-	return c.AzureStorageContainer
-}
-
-// GetAzureSASExpiry returns the SAS token expiration duration.
-// This method is part of the AzureConfig interface.
-func (c *Config) GetAzureSASExpiry() time.Duration {
-	duration, err := time.ParseDuration(c.AzureSASExpiry)
+// GetObjectStorageExpiry returns the signed URL expiry duration.
+// This method is part of the StorageConfig interface.
+func (c *Config) GetObjectStorageExpiry() time.Duration {
+	if c.ObjectStorage.SignedURLExpiry == "" {
+		return 168 * time.Hour // Default 7 days
+	}
+	duration, err := time.ParseDuration(c.ObjectStorage.SignedURLExpiry)
 	if err != nil {
-		// Fall back to default (7 days) if parsing fails
-		return 168 * time.Hour
+		return 168 * time.Hour // Default on parse error
 	}
 	return duration
 }
 
-// ValidateAzureConfig validates Azure storage configuration if Azure storage is enabled.
-// Returns an error if Azure is enabled but required fields are missing or invalid.
-func (c *Config) ValidateAzureConfig() error {
-	// If Azure storage is not enabled, no validation needed
-	if !c.IsAzureStorageEnabled() {
+// GetAzureStorageAccount returns the Azure storage account name (for Azure provider).
+// This method is part of the StorageConfig interface.
+func (c *Config) GetAzureStorageAccount() string {
+	return c.ObjectStorage.AzureStorageAccount
+}
+
+// GetAzureStorageKey returns the Azure storage account key.
+func (c *Config) GetAzureStorageKey() string {
+	return c.ObjectStorage.AzureStorageKey
+}
+
+// GetAWSAccessKeyID returns the AWS access key ID for S3.
+func (c *Config) GetAWSAccessKeyID() string {
+	return c.ObjectStorage.AWSAccessKeyID
+}
+
+// GetAWSSecretAccessKey returns the AWS secret access key for S3.
+func (c *Config) GetAWSSecretAccessKey() string {
+	return c.ObjectStorage.AWSSecretAccessKey
+}
+
+// IsAzureStorageEnabled detects if object storage is configured.
+// This method maintains backward compatibility with the StorageConfig interface.
+// It returns true if any object storage URL is configured.
+// Deprecated: This method will be removed once the storage layer is refactored to use ObjectStorage.
+func (c *Config) IsAzureStorageEnabled() bool {
+	return c.ObjectStorage.URL != ""
+}
+
+// ValidateObjectStorageConfig validates object storage configuration if object storage is enabled.
+// Returns an error if object storage is enabled but required fields are missing or invalid.
+func (c *Config) ValidateObjectStorageConfig() error {
+	// If object storage URL is not set, no validation needed
+	if c.ObjectStorage.URL == "" {
 		return nil
 	}
 
-	// Validate container is provided (required for Azure storage)
-	if c.AzureStorageContainer == "" {
-		return fmt.Errorf("AZURE_STORAGE_CONTAINER is required when Azure storage is enabled")
+	// Extract URL scheme to determine provider
+	parts := strings.SplitN(c.ObjectStorage.URL, "://", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid OBJECT_STORAGE_URL format: must be in the form 'scheme://path'")
+	}
+	scheme := parts[0]
+
+	// Validate URL scheme is supported
+	supportedSchemes := map[string]bool{
+		"azblob": true,
+		"s3":     true,
+		"mem":    true,
+	}
+	if !supportedSchemes[scheme] {
+		return fmt.Errorf("unsupported OBJECT_STORAGE_URL scheme '%s': must be one of azblob, s3, mem", scheme)
 	}
 
-	// Validate authentication: either connection string OR account+key must be provided
-	hasConnectionString := c.AzureStorageConnectionString != ""
-	hasAccountAndKey := c.AzureStorageAccount != "" && c.AzureStorageKey != ""
-
-	if !hasConnectionString && !hasAccountAndKey {
-		return fmt.Errorf("Azure storage requires either AZURE_STORAGE_CONNECTION_STRING or both AZURE_STORAGE_ACCOUNT and AZURE_STORAGE_KEY")
+	// Skip credential validation for in-memory storage
+	if scheme == "mem" {
+		return nil
 	}
 
-	// If connection string is provided, validate it's parseable
-	if hasConnectionString {
-		if err := validateConnectionString(c.AzureStorageConnectionString); err != nil {
-			return fmt.Errorf("invalid AZURE_STORAGE_CONNECTION_STRING: %w", err)
+	// Validate Azure credentials if using Azure Blob Storage
+	if scheme == "azblob" {
+		if c.ObjectStorage.AzureStorageAccount == "" {
+			return fmt.Errorf("AZURE_STORAGE_ACCOUNT is required when using azblob:// storage")
+		}
+		if c.ObjectStorage.AzureStorageKey == "" {
+			return fmt.Errorf("AZURE_STORAGE_KEY is required when using azblob:// storage")
 		}
 	}
 
-	// Validate SAS expiry is a valid duration
-	if c.AzureSASExpiry != "" {
-		if _, err := time.ParseDuration(c.AzureSASExpiry); err != nil {
-			return fmt.Errorf("invalid AZURE_SAS_EXPIRY duration '%s': %w", c.AzureSASExpiry, err)
+	// Validate AWS credentials if using S3-compatible storage
+	if scheme == "s3" {
+		if c.ObjectStorage.AWSAccessKeyID == "" {
+			return fmt.Errorf("AWS_ACCESS_KEY_ID is required when using s3:// storage")
+		}
+		if c.ObjectStorage.AWSSecretAccessKey == "" {
+			return fmt.Errorf("AWS_SECRET_ACCESS_KEY is required when using s3:// storage")
 		}
 	}
 
-	return nil
-}
-
-// validateConnectionString performs basic validation on Azure connection string format.
-// It checks for the presence of required key-value pairs but doesn't validate their actual values.
-func validateConnectionString(connStr string) error {
-	if connStr == "" {
-		return fmt.Errorf("connection string is empty")
-	}
-
-	// Connection string should contain key=value pairs separated by semicolons
-	// Required fields: AccountName and either AccountKey or SharedAccessSignature
-	parts := strings.Split(connStr, ";")
-	if len(parts) < 2 {
-		return fmt.Errorf("connection string must contain at least 2 key-value pairs")
-	}
-
-	hasAccountName := false
-	hasAuth := false
-
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
+	// Validate signed URL expiry if provided
+	if c.ObjectStorage.SignedURLExpiry != "" {
+		if _, err := time.ParseDuration(c.ObjectStorage.SignedURLExpiry); err != nil {
+			return fmt.Errorf("invalid OBJECT_STORAGE_SIGNED_URL_EXPIRY duration '%s': %w", c.ObjectStorage.SignedURLExpiry, err)
 		}
-
-		kvPair := strings.SplitN(part, "=", 2)
-		if len(kvPair) != 2 {
-			return fmt.Errorf("invalid key-value pair in connection string: %s", part)
-		}
-
-		key := strings.TrimSpace(kvPair[0])
-		switch key {
-		case "AccountName":
-			hasAccountName = true
-		case "AccountKey", "SharedAccessSignature":
-			hasAuth = true
-		}
-	}
-
-	if !hasAccountName {
-		return fmt.Errorf("connection string must contain AccountName")
-	}
-
-	if !hasAuth {
-		return fmt.Errorf("connection string must contain either AccountKey or SharedAccessSignature")
 	}
 
 	return nil

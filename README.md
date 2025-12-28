@@ -41,7 +41,7 @@ Nightcrier subscribes to **high-quality fault events only** from 100s to 1000s o
 
 ## Overview
 
-This system listens for fault events from a Kubernetes MCP server and spawns AI agents to autonomously investigate and triage incidents. It provides automated root cause analysis with configurable storage backends (filesystem or Azure Blob Storage) and Slack notifications.
+This system listens for fault events from a Kubernetes MCP server and spawns AI agents to autonomously investigate and triage incidents. It provides automated root cause analysis with configurable storage backends (filesystem, Azure Blob Storage, AWS S3, or S3-compatible storage like MinIO) and Slack notifications.
 
 ## Architecture
 
@@ -51,7 +51,7 @@ This system listens for fault events from a Kubernetes MCP server and spawns AI 
 kubernetes-mcp-server -> MCP Events -> Nightcrier -> AI Agent -> Investigation Report
                                             |
                                             v
-                                    Storage (Azure/Filesystem)
+                                    Storage (Object/Filesystem)
                                             |
                                             v
                                     Slack Notification (with Report URL)
@@ -131,7 +131,7 @@ kubernetes-mcp-server -> MCP Events -> Nightcrier -> AI Agent -> Investigation R
 │             v                                               │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │ 4. Upload to Storage (if validated)                  │  │
-│  │    - Azure Blob Storage (with SAS URLs)              │  │
+│  │    - Object Storage (Azure/S3/S3-compatible)         │  │
 │  │    - OR Filesystem storage                           │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                          │                                   │
@@ -156,9 +156,9 @@ Circuit Breaker States:
 
 - Automated incident detection via MCP server integration
 - AI-powered root cause analysis using Claude agents
-- Multi-backend storage support (filesystem and Azure Blob Storage)
+- Multi-backend storage support (filesystem, Azure Blob Storage, AWS S3, S3-compatible)
 - Slack notifications with investigation reports
-- Secure artifact storage with SAS URL generation (Azure mode)
+- Secure artifact storage with signed URL generation
 - Containerized agent execution environment
 - Circuit breaker for agent failure handling
 - Intelligent validation to prevent spurious notifications
@@ -169,7 +169,7 @@ Circuit Breaker States:
 - Go 1.23 or later
 - Docker (for containerized agent execution)
 - Kubernetes cluster with MCP server (for production use)
-- Azure Storage Account (optional, for cloud storage)
+- Object storage (optional): Azure Blob Storage, AWS S3, or S3-compatible (MinIO, RustFS)
 - Slack webhook (optional, for notifications)
 
 ## Installation
@@ -625,61 +625,93 @@ If upgrading from a version with implicit defaults:
 - `FAILURE_THRESHOLD_FOR_ALERT` - Number of consecutive failures before sending alert (default: `3`)
 - `UPLOAD_FAILED_INVESTIGATIONS` - Upload failed investigation attempts to storage (default: `false`)
 
-#### Optional - Azure Blob Storage
+#### Optional - Object Storage
 
-When Azure storage is configured, incident artifacts are automatically uploaded to Azure Blob Storage and SAS URLs are generated for secure access. If Azure is not configured, the system falls back to filesystem storage.
+When object storage is configured, incident artifacts are automatically uploaded to cloud storage and signed URLs are generated for secure access. If object storage is not configured, the system falls back to filesystem storage.
 
-##### Option 1: Connection String (Recommended)
+Nightcrier supports multiple storage backends through Go Cloud Development Kit (CDK):
+- **Azure Blob Storage** - Azure's cloud object storage
+- **AWS S3** - Amazon's Simple Storage Service
+- **S3-compatible storage** - MinIO, RustFS, and other S3-compatible providers
 
-- `AZURE_STORAGE_CONNECTION_STRING` - Full Azure connection string
-- `AZURE_STORAGE_CONTAINER` - Blob container name (required)
-- `AZURE_SAS_EXPIRY` - SAS URL expiration duration (default: `168h` / 7 days)
+##### Configuration via URL
 
-Example:
+Object storage is configured using a single URL that specifies the provider and bucket/container:
+
+- `OBJECT_STORAGE_URL` - Storage URL (required for cloud storage)
+- `OBJECT_STORAGE_SIGNED_URL_EXPIRY` - Signed URL expiration duration (default: `168h` / 7 days)
+
+**Azure Blob Storage:**
 ```bash
-export AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=https;AccountName=myaccount;AccountKey=xxxxx;EndpointSuffix=core.windows.net"
-export AZURE_STORAGE_CONTAINER="incident-reports"
-export AZURE_SAS_EXPIRY="168h"
+export OBJECT_STORAGE_URL="azblob://mycontainer"
+export AZURE_STORAGE_ACCOUNT="mystorageaccount"
+export AZURE_STORAGE_KEY="your-account-key"
+export OBJECT_STORAGE_SIGNED_URL_EXPIRY="168h"
 ```
 
-##### Option 2: Account + Key
-
-- `AZURE_STORAGE_ACCOUNT` - Storage account name
-- `AZURE_STORAGE_KEY` - Storage account access key
-- `AZURE_STORAGE_CONTAINER` - Blob container name (required)
-- `AZURE_SAS_EXPIRY` - SAS URL expiration duration (default: `168h` / 7 days)
-
-Example:
+**AWS S3:**
 ```bash
-export AZURE_STORAGE_ACCOUNT="myaccount"
-export AZURE_STORAGE_KEY="xxxxx"
-export AZURE_STORAGE_CONTAINER="incident-reports"
+export OBJECT_STORAGE_URL="s3://mybucket?region=us-east-1"
+export AWS_ACCESS_KEY_ID="your-access-key-id"
+export AWS_SECRET_ACCESS_KEY="your-secret-access-key"
+export OBJECT_STORAGE_SIGNED_URL_EXPIRY="168h"
 ```
 
-### Storage Mode Detection
+**S3-compatible (MinIO, RustFS):**
+```bash
+export OBJECT_STORAGE_URL="s3://mybucket?endpoint=http://minio:9000&disable_https=true&use_path_style=true&region=us-east-1"
+export AWS_ACCESS_KEY_ID="minioadmin"
+export AWS_SECRET_ACCESS_KEY="minioadmin"
+export OBJECT_STORAGE_SIGNED_URL_EXPIRY="168h"
+```
+
+**In-memory (testing only):**
+```bash
+export OBJECT_STORAGE_URL="mem://"
+```
+
+##### Credential Requirements by Provider
+
+**Azure Blob Storage** (azblob://):
+- `AZURE_STORAGE_ACCOUNT` - Storage account name (required)
+- `AZURE_STORAGE_KEY` - Storage account access key (required)
+
+**AWS S3** (s3://):
+- `AWS_ACCESS_KEY_ID` - AWS access key ID (required)
+- `AWS_SECRET_ACCESS_KEY` - AWS secret access key (required)
+
+**S3-compatible** (s3:// with endpoint):
+- `AWS_ACCESS_KEY_ID` - Access key ID for the S3-compatible service (required)
+- `AWS_SECRET_ACCESS_KEY` - Secret access key for the S3-compatible service (required)
+- URL parameters (Go CDK uses snake_case):
+  - `endpoint` - Service endpoint URL (e.g., `http://minio:9000`)
+  - `disable_https=true` - Disable SSL for local/development setups
+  - `use_path_style=true` - Use path-style addressing (required for MinIO)
+  - `region` - Region name (can be any value for MinIO, typically `us-east-1`)
+
+**In-memory** (mem://):
+- No credentials required (testing only, data lost on restart)
+
+##### Storage Mode Detection
 
 The system automatically detects which storage backend to use:
-- **Azure Storage**: Used when `AZURE_STORAGE_ACCOUNT` or `AZURE_STORAGE_CONNECTION_STRING` is set
-- **Filesystem Storage**: Used as fallback when Azure is not configured
+- **Object Storage**: Used when `OBJECT_STORAGE_URL` is set
+- **Filesystem Storage**: Used as fallback when object storage is not configured
 
-### Azure Blob Storage Setup
+##### What the System Does
 
-1. Create a storage account in Azure Portal
-2. Create a blob container for incident reports
-3. Get connection string or account keys from the Azure Portal
-4. Set environment variables as shown above
+When object storage is configured, the system will:
+- Upload all artifacts to `<bucket/container>/<incident-id>/` structure
+- Generate signed URLs with read-only access
+- Include signed URLs in Slack notifications and result.json
+- Set URL expiration based on `OBJECT_STORAGE_SIGNED_URL_EXPIRY`
+- Store both signed URLs (temporary) and canonical URLs (permanent) in result.json
 
-The system will:
-- Upload all artifacts to `<container>/<incident-id>/` structure
-- Generate SAS URLs with read-only access
-- Include URLs in Slack notifications and result.json
-- Set URL expiration based on `AZURE_SAS_EXPIRY`
+##### Bucket/Container Structure
 
-### Container Requirements
-
-The container must have the following structure:
+The bucket/container must have the following structure:
 ```
-<container>/
+<bucket or container>/
   <incident-id>/
     event.json              # Original fault event
     result.json             # Execution result with URLs
@@ -799,13 +831,53 @@ All configuration can be overridden via CLI flags:
 - `--script-path` - Path to agent script
 - `--log-level` - Log level (debug, info, warn, error)
 
-## Local Development with Azurite
+## Local Development and Testing
 
-For local development and testing without an Azure account, use Azurite (Azure Storage Emulator).
+### Using MinIO (S3-compatible)
 
-### Using Docker Compose
+For local development and testing with S3-compatible storage, use MinIO:
 
-Create `docker-compose.yml`:
+```yaml
+version: '3.8'
+
+services:
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"  # API
+      - "9001:9001"  # Console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+
+volumes:
+  minio-data:
+```
+
+Start MinIO:
+```bash
+docker-compose up -d
+```
+
+Configure Nightcrier for MinIO:
+```bash
+export OBJECT_STORAGE_URL="s3://incident-reports?endpoint=http://localhost:9000&disable_https=true&use_path_style=true&region=us-east-1"
+export AWS_ACCESS_KEY_ID="minioadmin"
+export AWS_SECRET_ACCESS_KEY="minioadmin"
+```
+
+Create the bucket using MinIO Console (http://localhost:9001) or AWS CLI:
+```bash
+# Using AWS CLI configured for MinIO
+aws --endpoint-url http://localhost:9000 s3 mb s3://incident-reports
+```
+
+### Using Azurite (Azure-compatible)
+
+For local development and testing with Azure Blob Storage compatibility, use Azurite:
 
 ```yaml
 version: '3.8'
@@ -830,19 +902,18 @@ Start Azurite:
 docker-compose up -d
 ```
 
-### Configure for Azurite
-
-Use the default Azurite connection string:
-
+Configure Nightcrier for Azurite:
 ```bash
-export AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
-export AZURE_STORAGE_CONTAINER="incident-reports"
+export OBJECT_STORAGE_URL="azblob://incident-reports"
+export AZURE_STORAGE_ACCOUNT="devstoreaccount1"
+export AZURE_STORAGE_KEY="Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
 ```
 
 Create the container (one-time setup):
 ```bash
 # Install Azure CLI or use Azure Storage Explorer
-az storage container create --name incident-reports --connection-string "$AZURE_STORAGE_CONNECTION_STRING"
+az storage container create --name incident-reports \
+  --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
 ```
 
 Or using curl:
@@ -852,15 +923,28 @@ curl -X PUT "http://127.0.0.1:10000/devstoreaccount1/incident-reports?restype=co
   -H "x-ms-version: 2021-08-06"
 ```
 
-### Verify Azurite Setup
-
+Verify Azurite Setup:
 ```bash
 # List containers
-az storage container list --connection-string "$AZURE_STORAGE_CONNECTION_STRING" --output table
+az storage container list \
+  --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;" \
+  --output table
 
 # After running an incident, list blobs
-az storage blob list --container-name incident-reports --connection-string "$AZURE_STORAGE_CONNECTION_STRING" --output table
+az storage blob list --container-name incident-reports \
+  --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;" \
+  --output table
 ```
+
+### Using In-Memory Storage (Testing Only)
+
+For unit tests and quick testing without any external storage service:
+
+```bash
+export OBJECT_STORAGE_URL="mem://"
+```
+
+Note: Data is lost when the process restarts.
 
 ## Testing
 
@@ -884,9 +968,20 @@ go test ./internal/config/... -v
 # Test storage backends
 go test ./internal/storage/... -v
 
+# Test with in-memory storage (no external dependencies)
+export OBJECT_STORAGE_URL="mem://"
+go test ./internal/storage/... -v
+
 # Test with Azurite (requires Azurite running)
-export AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
-export AZURE_STORAGE_CONTAINER="test-incidents"
+export OBJECT_STORAGE_URL="azblob://test-incidents"
+export AZURE_STORAGE_ACCOUNT="devstoreaccount1"
+export AZURE_STORAGE_KEY="Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+go test ./internal/storage/... -tags=integration
+
+# Test with MinIO (requires MinIO running)
+export OBJECT_STORAGE_URL="s3://test-incidents?endpoint=http://localhost:9000&disable_https=true&use_path_style=true&region=us-east-1"
+export AWS_ACCESS_KEY_ID="minioadmin"
+export AWS_SECRET_ACCESS_KEY="minioadmin"
 go test ./internal/storage/... -tags=integration
 ```
 
@@ -896,18 +991,41 @@ Since we can't trigger real Kubernetes incidents in a test environment, here's t
 
 #### 1. Setup Test Environment
 
+**Option A: Using MinIO (S3-compatible)**
+```bash
+# Start MinIO
+docker-compose up -d
+
+# Configure for MinIO
+export OBJECT_STORAGE_URL="s3://incident-reports?endpoint=http://localhost:9000&disable_https=true&use_path_style=true&region=us-east-1"
+export AWS_ACCESS_KEY_ID="minioadmin"
+export AWS_SECRET_ACCESS_KEY="minioadmin"
+export K8S_CLUSTER_MCP_ENDPOINT="http://localhost:8080"
+export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+
+# Create bucket (using AWS CLI or MinIO Console)
+aws --endpoint-url http://localhost:9000 s3 mb s3://incident-reports
+
+# Build and run
+go build -o runner ./cmd/runner
+./runner --log-level debug
+```
+
+**Option B: Using Azurite (Azure-compatible)**
 ```bash
 # Start Azurite
 docker-compose up -d
 
 # Configure for Azurite
-export AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
-export AZURE_STORAGE_CONTAINER="incident-reports"
+export OBJECT_STORAGE_URL="azblob://incident-reports"
+export AZURE_STORAGE_ACCOUNT="devstoreaccount1"
+export AZURE_STORAGE_KEY="Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
 export K8S_CLUSTER_MCP_ENDPOINT="http://localhost:8080"
 export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
 
 # Create container
-az storage container create --name incident-reports --connection-string "$AZURE_STORAGE_CONNECTION_STRING"
+az storage container create --name incident-reports \
+  --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
 
 # Build and run
 go build -o runner ./cmd/runner
@@ -920,7 +1038,7 @@ Use the MCP server to send a test fault event. The runner will:
 1. Receive the event
 2. Create a workspace
 3. Execute the AI agent
-4. Upload artifacts to Azure/filesystem
+4. Upload artifacts to object storage/filesystem
 5. Send Slack notification with report URL
 
 #### 3. Verify Results
@@ -928,17 +1046,28 @@ Use the MCP server to send a test fault event. The runner will:
 **Check Logs:**
 ```bash
 # Look for these log entries:
-# - "storage backend initialized" (mode: azure or filesystem)
+# - "storage backend initialized" (mode: objectstore or filesystem)
 # - "incident artifacts saved to storage"
 # - "slack notification sent"
 ```
 
-**Check Azure Storage:**
+**Check Object Storage (MinIO):**
+```bash
+# List uploaded artifacts
+aws --endpoint-url http://localhost:9000 s3 ls s3://incident-reports/ --recursive
+
+# Download and view investigation report
+aws --endpoint-url http://localhost:9000 s3 cp \
+  s3://incident-reports/<incident-id>/output/investigation.md \
+  investigation.md
+```
+
+**Check Object Storage (Azurite):**
 ```bash
 # List uploaded artifacts
 az storage blob list \
   --container-name incident-reports \
-  --connection-string "$AZURE_STORAGE_CONNECTION_STRING" \
+  --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;" \
   --output table
 
 # Download and view investigation report
@@ -946,29 +1075,30 @@ az storage blob download \
   --container-name incident-reports \
   --name "<incident-id>/output/investigation.md" \
   --file investigation.md \
-  --connection-string "$AZURE_STORAGE_CONNECTION_STRING"
+  --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
 ```
 
 **Check Slack:**
 - Verify notification received
 - Click "View Report" button
-- Confirm SAS URL works and report is accessible
+- Confirm signed URL works and report is accessible
 
 **Check Result JSON:**
 ```bash
-# View result with presigned URLs
+# View result with signed URLs
 cat ./incidents/<incident-id>/result.json
 
 # Should contain:
-# - "presigned_urls": {"event.json": "...", "investigation.md": "..."}
-# - "presigned_urls_expire_at": "2025-12-25T..."
+# - "artifact_urls": {"event.json": "...", "investigation.md": "..."} (signed URLs)
+# - "canonical_urls": {"event.json": "...", "investigation.md": "..."} (permanent URLs)
+# - "artifact_urls_expire_at": "2025-12-25T..."
 ```
 
 #### 4. Test URL Expiration
 
-Wait for SAS URL to expire (or set short expiry for testing):
+Wait for signed URL to expire (or set short expiry for testing):
 ```bash
-export AZURE_SAS_EXPIRY="1m"
+export OBJECT_STORAGE_SIGNED_URL_EXPIRY="1m"
 ```
 
 Then verify URL becomes inaccessible after expiration.
@@ -976,10 +1106,12 @@ Then verify URL becomes inaccessible after expiration.
 #### 5. Test Filesystem Fallback
 
 ```bash
-# Unset Azure config
-unset AZURE_STORAGE_CONNECTION_STRING
+# Unset object storage config
+unset OBJECT_STORAGE_URL
 unset AZURE_STORAGE_ACCOUNT
 unset AZURE_STORAGE_KEY
+unset AWS_ACCESS_KEY_ID
+unset AWS_SECRET_ACCESS_KEY
 
 # Run again
 ./runner
@@ -1002,17 +1134,17 @@ unset AZURE_STORAGE_KEY
       investigation.md      # AI-generated investigation report
 ```
 
-### Azure Storage
+### Object Storage (Azure/S3/S3-compatible)
 ```
-<container>/
+<bucket or container>/
   <incident-id>/
-    event.json
-    result.json
+    event.json              # Original fault event
+    result.json             # Execution result with URLs
     output/
-      investigation.md
+      investigation.md      # AI-generated investigation report
 ```
 
-Plus SAS URLs in result.json and Slack notifications.
+Plus signed URLs and canonical URLs in result.json and Slack notifications.
 
 ## Slack Notification Format
 
@@ -1020,7 +1152,7 @@ When Slack is configured, notifications include:
 - Incident metadata (cluster, namespace, resource)
 - Root cause analysis with confidence level
 - Investigation duration
-- **"View Report" button** (when Azure storage is enabled)
+- **"View Report" button** (when object storage is enabled)
 - File path (when filesystem storage is used)
 
 ## Troubleshooting
@@ -1106,34 +1238,50 @@ Once the underlying issue is fixed, the system will automatically detect the nex
 - Set `UPLOAD_FAILED_INVESTIGATIONS=true` to upload failed attempts to storage
 - Failed investigations remain in local workspace: `./incidents/<incident-id>/`
 
-### Azure Storage Issues
+### Object Storage Issues
 
-**Problem**: "failed to initialize Azure storage"
-- Check connection string format
-- Verify account name and key are correct
-- Ensure container exists
-- Check network connectivity to Azure
+**Problem**: "failed to initialize object storage" or "failed to open bucket"
+- Check `OBJECT_STORAGE_URL` format is correct
+- Verify credentials are set (Azure: `AZURE_STORAGE_ACCOUNT`/`AZURE_STORAGE_KEY`, S3: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`)
+- Ensure bucket/container exists
+- Check network connectivity to storage service
+- For S3-compatible: Verify endpoint URL is correct and accessible
 
-**Problem**: "failed to upload blob"
-- Verify container exists and has correct permissions
-- Check storage account access keys
-- Ensure container name is lowercase (Azure requirement)
+**Problem**: "failed to upload blob" or "failed to upload artifact"
+- Verify bucket/container exists and has correct permissions
+- Check storage account access keys or AWS credentials
+- Ensure bucket/container name is valid (lowercase for Azure, DNS-compatible for S3)
+- For MinIO: Verify `use_path_style=true` is in the URL
 
-**Problem**: SAS URL returns 403 Forbidden
-- Check URL hasn't expired
-- Verify SAS token permissions (should include read)
-- Ensure blob exists at the path
+**Problem**: Signed URL returns 403 Forbidden or Access Denied
+- Check URL hasn't expired (default: 7 days)
+- Verify credentials have permissions to generate signed URLs
+- For Azure: Ensure storage key (not SAS token) is used for credentials
+- For S3: Ensure IAM permissions allow `s3:GetObject`
+- Ensure blob/object exists at the path
 
-### Azurite Issues
+**Problem**: Connection refused to MinIO
+- Ensure MinIO is running: `docker-compose ps`
+- Check ports 9000 (API) and 9001 (Console) are accessible
+- Verify endpoint URL in `OBJECT_STORAGE_URL`
+- For local development: Use `http://localhost:9000` not `https://`
 
 **Problem**: Connection refused to Azurite
 - Ensure Azurite is running: `docker-compose ps`
 - Check port 10000 is accessible
-- Verify connection string uses `http://` not `https://`
+- Verify Azurite endpoint in connection (uses `http://` not `https://`)
 
-**Problem**: Container not found
-- Create container: `az storage container create --name incident-reports --connection-string "$AZURE_STORAGE_CONNECTION_STRING"`
-- Verify with: `az storage container list --connection-string "$AZURE_STORAGE_CONNECTION_STRING"`
+**Problem**: Bucket/Container not found
+- For MinIO: Create bucket via Console (http://localhost:9001) or AWS CLI
+  ```bash
+  aws --endpoint-url http://localhost:9000 s3 mb s3://incident-reports
+  ```
+- For Azurite: Create container via Azure CLI
+  ```bash
+  az storage container create --name incident-reports \
+    --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
+  ```
+- For AWS S3: Ensure bucket exists in specified region
 
 ### Debug Mode
 

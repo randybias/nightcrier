@@ -682,19 +682,22 @@ func TestAzureStorageEnabled(t *testing.T) {
 			enabled: false,
 		},
 		{
-			name: "enabled with connection string",
+			name: "enabled with Azure storage URL",
 			config: completeTestConfigWith(`
-azure_storage_connection_string: "AccountName=test;AccountKey=key123"
-azure_storage_container: "incidents"
+object_storage:
+  url: "azblob://incidents"
+  azure_storage_account: "test"
+  azure_storage_key: "key123"
 `),
 			enabled: true,
 		},
 		{
 			name: "enabled with account and key",
 			config: completeTestConfigWith(`
-azure_storage_account: "teststorage"
-azure_storage_key: "key123"
-azure_storage_container: "incidents"
+object_storage:
+  url: "azblob://incidents"
+  azure_storage_account: "teststorage"
+  azure_storage_key: "key123"
 `),
 			enabled: true,
 		},
@@ -722,32 +725,10 @@ azure_storage_container: "incidents"
 	}
 }
 
-func TestGetAzureSASExpiry(t *testing.T) {
-	resetViper()
-
-	tests := []struct {
-		name    string
-		expiry  string
-		wantHrs int
-	}{
-		{"default", "", 168}, // 7 days
-		{"24 hours", "24h", 24},
-		{"48 hours", "48h", 48},
-		{"invalid", "invalid", 168}, // Falls back to default
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{AzureSASExpiry: tt.expiry}
-			got := cfg.GetAzureSASExpiry()
-			wantDur := float64(tt.wantHrs)
-			gotHrs := got.Hours()
-			if gotHrs != wantDur {
-				t.Errorf("GetAzureSASExpiry() = %v hours, want %v hours", gotHrs, wantDur)
-			}
-		})
-	}
-}
+// TestGetAzureSASExpiry has been removed as the GetAzureSASExpiry method
+// is deprecated and will be removed when the storage layer is refactored.
+// Signed URL expiry is now configured via ObjectStorage.SignedURLExpiry
+// and validated in ValidateObjectStorageConfig().
 
 func TestValidation_RequiresLLMAPIKey(t *testing.T) {
 	resetViper()
@@ -1020,10 +1001,12 @@ func TestCircuitBreakerConfig_IntegrationTest(t *testing.T) {
 		"notify_on_agent_failure":       false,
 		"failure_threshold_for_alert":   5,
 		"upload_failed_investigations":  true,
-		"azure_storage_account":         "teststorage",
-		"azure_storage_key":             "testkey",
-		"azure_storage_container":       "incidents",
-	})
+	}) + `
+object_storage:
+  url: "azblob://incidents"
+  azure_storage_account: "teststorage"
+  azure_storage_key: "testkey"
+`
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("failed to write config file: %v", err)
 	}
@@ -1051,8 +1034,8 @@ func TestCircuitBreakerConfig_IntegrationTest(t *testing.T) {
 	if cfg.MaxConcurrentAgents != 10 {
 		t.Errorf("MaxConcurrentAgents = %d, want 10", cfg.MaxConcurrentAgents)
 	}
-	if cfg.AzureStorageAccount != "teststorage" {
-		t.Errorf("AzureStorageAccount = %q, want %q", cfg.AzureStorageAccount, "teststorage")
+	if cfg.ObjectStorage.AzureStorageAccount != "teststorage" {
+		t.Errorf("ObjectStorage.AzureStorageAccount = %q, want %q", cfg.ObjectStorage.AzureStorageAccount, "teststorage")
 	}
 }
 

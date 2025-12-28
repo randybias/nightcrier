@@ -191,20 +191,20 @@ func run(cmd *cobra.Command, args []string) error {
 	circuitBreaker := reporting.NewCircuitBreaker(cfg.FailureThresholdForAlert, tuning)
 	slog.Info("circuit breaker initialized", "threshold", cfg.FailureThresholdForAlert)
 
+	// Setup context with cancellation for graceful shutdown (needed for object storage and postgres.New)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Initialize artifact storage backend (for investigation reports and logs)
-	storageBackend, err := storage.NewStorage(cfg)
+	storageBackend, err := storage.NewStorage(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to initialize artifact storage backend: %w", err)
 	}
 	artifactStorageMode := "local_filesystem"
-	if cfg.IsAzureStorageEnabled() {
-		artifactStorageMode = "azure_blob"
+	if cfg.ObjectStorage.URL != "" {
+		artifactStorageMode = "object_storage"
 	}
 	slog.Info("artifact storage initialized", "backend", artifactStorageMode)
-
-	// Setup context with cancellation for graceful shutdown (needed for postgres.New)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	// Handle shutdown signals
 	sigChan := make(chan os.Signal, 1)
