@@ -53,3 +53,4 @@ logs/
 # Temp files
 unwedge.txt
 bin/
+checkpoint-info.txt
