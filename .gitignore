@@ -1,5 +1,6 @@
 # Binaries (root level only)
 /runner
+/nightcrier
 *.exe
 
 # IDE/Editor
@@ -54,3 +55,4 @@ logs/
 unwedge.txt
 bin/
 checkpoint-info.txt
+*.pid
