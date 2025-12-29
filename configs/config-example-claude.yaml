@@ -65,3 +65,15 @@ state_storage:
 notify_on_agent_failure: true
 failure_threshold_for_alert: 3
 upload_failed_investigations: false
+
+# Object Storage (optional)
+# URL formats:
+#   Azure:  azblob://container-name
+#   AWS S3: s3://bucket-name?region=us-east-1
+#   RustFS: s3://bucket-name?endpoint=http://localhost:8080&disable_https=true&use_path_style=true&awssdk=v2&region=us-east-1
+#   Memory: mem:// (for testing only)
+# object_storage:
+#   url: "azblob://incident-reports"
+#   signed_url_expiry: "168h"
+#   azure_storage_account: "mystorageaccount"
+#   azure_storage_key: "YOUR_AZURE_STORAGE_KEY_HERE"
