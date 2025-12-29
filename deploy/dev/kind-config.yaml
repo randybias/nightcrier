@@ -1,0 +1,9 @@
+# Kind cluster configuration for local Nightcrier development
+# Simple single-node cluster for testing the K8s-native agent executor
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: nightcrier-dev
+
+nodes:
+  - role: control-plane

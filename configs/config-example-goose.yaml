@@ -1,6 +1,6 @@
 # Nightcrier Configuration - Goose Example
-# Copy to config.yaml and set your OPENAI_API_KEY
-# Goose is pre-configured with OpenAI gpt-4.1 for cost-effective testing
+# Copy to config.yaml and set your ANTHROPIC_API_KEY
+# Goose uses Claude models (haiku, sonnet, opus)
 
 # Single cluster configuration
 clusters:
@@ -27,18 +27,20 @@ log_level: "info"
 
 # Agent configuration - Goose with .goosehints context files
 agent_script_path: "./agent-container/run-agent.sh"
-agent_system_prompt_file: "./configs/triage-system-prompt.md"
+agent_system_prompt_file: "./configs/base-triage-prompt.md"
 agent_allowed_tools: "Read,Write,Grep,Glob,Bash,Skill"
 
-# Goose model selection (configured for OpenAI gpt-4.1 by default)
-agent_model: "gpt-4.1"       # Use OpenAI model names (gpt-4.1, gpt-4o, etc.)
+# Goose model selection
+agent_model: "haiku"         # Default: haiku (fast, cost-effective)
+# agent_model: "sonnet"      # Alternative: balanced performance
+# agent_model: "opus"        # Alternative: highest capability
 agent_cli: "goose"
 agent_timeout: 300
 agent_image: "nightcrier-agent:latest"
 
 # LLM API Keys
-# Set via environment variable: export OPENAI_API_KEY="sk-..."
-# openai_api_key: "sk-..."
+# Set via environment variable: export ANTHROPIC_API_KEY="sk-ant-..."
+# anthropic_api_key: "sk-ant-..."
 
 # Event processing
 severity_threshold: "ERROR"

@@ -26,11 +26,13 @@ log_level: "info"
 
 # Agent configuration - Claude with native skills
 agent_script_path: "./agent-container/run-agent.sh"
-agent_system_prompt_file: "./configs/triage-system-prompt.md"
+agent_system_prompt_file: "./configs/base-triage-prompt.md"
 agent_allowed_tools: "Read,Write,Grep,Glob,Bash,Skill"
 
 # Claude model selection
-agent_model: "sonnet"        # Options: sonnet, opus, haiku
+agent_model: "haiku"         # Default: haiku (fast, cost-effective)
+# agent_model: "sonnet"      # Alternative: balanced performance
+# agent_model: "opus"        # Alternative: highest capability
 agent_cli: "claude"
 agent_timeout: 300
 agent_image: "nightcrier-agent:latest"

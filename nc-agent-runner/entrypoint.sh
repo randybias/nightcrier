@@ -133,39 +133,45 @@ setup_agent_paths() {
 }
 
 #######################################
-# Build the system prompt with incident context
-# This is passed via --append-system-prompt, not -p
+# Build the complete triage prompt
+# This is the unified prompt passed to all agents as the last positional argument
+# Combines:
+#   1. Base triage prompt (from mounted ConfigMap)
+#   2. Incident data (JSON)
+#   3. Cluster permissions (JSON)
 # Globals:
 #   None
 # Arguments:
 #   None
 # Outputs:
-#   Combined system prompt to stdout
+#   Complete triage prompt to stdout
 #######################################
-build_system_prompt_with_context() {
-    local system_content=""
+build_triage_prompt() {
+    local prompt=""
 
-    # 1. Read system prompt
-    if [[ -f /home/agent/system-prompt.md ]]; then
-        system_content=$(cat /home/agent/system-prompt.md)
-        system_content+="\n\n"
+    # 1. Base triage prompt (from mounted ConfigMap)
+    if [[ -f /home/agent/base-triage-prompt.md ]]; then
+        prompt+="$(cat /home/agent/base-triage-prompt.md)"
+        prompt+=$'\n\n'
     fi
 
-    # 2. Add incident context
+    # 2. Incident Context (from mounted ConfigMap)
     if [[ -f /home/agent/incident.json ]]; then
-        system_content+="<incident>\n"
-        system_content+=$(cat /home/agent/incident.json)
-        system_content+="\n</incident>\n\n"
+        prompt+="## Incident Data"$'\n\n'
+        prompt+="<incident>"$'\n'
+        prompt+="$(cat /home/agent/incident.json)"
+        prompt+=$'\n'"</incident>"$'\n\n'
     fi
 
-    # 3. Add permissions context
+    # 3. Cluster Permissions (from mounted ConfigMap)
     if [[ -f /home/agent/incident_cluster_permissions.json ]]; then
-        system_content+="<kubernetes_cluster_access_permissions>\n"
-        system_content+=$(cat /home/agent/incident_cluster_permissions.json)
-        system_content+="\n</kubernetes_cluster_access_permissions>\n\n"
+        prompt+="## Cluster Access Permissions"$'\n\n'
+        prompt+="<kubernetes_cluster_access_permissions>"$'\n'
+        prompt+="$(cat /home/agent/incident_cluster_permissions.json)"
+        prompt+=$'\n'"</kubernetes_cluster_access_permissions>"$'\n'
     fi
 
-    echo -e "$system_content"
+    echo "$prompt"
 }
 
 #######################################
@@ -173,9 +179,10 @@ build_system_prompt_with_context() {
 # Captures stdout/stderr to both console and log file using tee
 # Globals:
 #   AGENT_CLI
-#   PROMPT
 #   LLM_MODEL
 #   EXIT_CODE
+#   AGENT_VERBOSE
+#   DEBUG
 # Arguments:
 #   None
 #######################################
@@ -188,49 +195,54 @@ run_agent() {
     echo "Log file: $log_file"
     echo "=========================================="
 
-    # Build the system prompt with incident context and save to file
-    # Using a file avoids issues with long strings and special characters
-    local system_prompt_file="/tmp/combined-system-prompt.md"
-    build_system_prompt_with_context > "$system_prompt_file"
+    # Build the complete triage prompt (same for all agents)
+    local triage_prompt
+    triage_prompt=$(build_triage_prompt)
 
-    # The investigation prompt (from PROMPT env var or empty for autonomous mode)
-    local investigation_prompt="${PROMPT:-Investigate this incident and generate a report.}"
+    # Determine if verbose mode is enabled (Claude only)
+    local verbose_flag=""
+    if [[ "${AGENT_VERBOSE:-false}" == "true" || "${DEBUG:-false}" == "true" ]]; then
+        verbose_flag="--verbose"
+    fi
 
     # Run agent with tee for real-time output + file capture
     # Capture exit code for result.json
     case "$AGENT_CLI" in
         claude)
-            echo "DEBUG: About to execute claude command"
-            echo "DEBUG: log_file=$log_file"
-            set -x
-            claude -p "Investigate this incident and generate a report." --model claude-sonnet-4-5-20250929 --allowedTools Read,Grep,Glob,Bash,Write --append-system-prompt-file /tmp/combined-system-prompt.md --max-turns 50 2>&1 | tee "$log_file" || EXIT_CODE=$?
-            set +x
-            echo "DEBUG: Command completed with EXIT_CODE=$EXIT_CODE"
+            # Claude: -p flag (print mode), prompt is last positional
+            claude -p \
+              --model "$LLM_MODEL" \
+              --allowedTools "Read,Grep,Glob,Bash,Write" \
+              --max-turns 50 $verbose_flag "$triage_prompt" \
+              2>&1 | tee "$log_file" || EXIT_CODE=$?
             ;;
         codex)
-            # Combine system prompt with investigation prompt (like old agent-container setup)
-            # Codex exec expects the full prompt as a positional argument
-            echo "DEBUG: Building combined prompt"
-            echo "DEBUG: System prompt file exists: $(test -f /tmp/combined-system-prompt.md && echo YES || echo NO)"
-            echo "DEBUG: System prompt file size: $(wc -c < /tmp/combined-system-prompt.md 2>/dev/null || echo 0) bytes"
-            echo "DEBUG: Investigation prompt: $investigation_prompt"
-
-            local combined_prompt
-            combined_prompt="$(cat /tmp/combined-system-prompt.md)
-
-${investigation_prompt}"
-
-            echo "DEBUG: Combined prompt length: ${#combined_prompt} characters"
-            echo "DEBUG: Combined prompt first 200 chars: ${combined_prompt:0:200}"
-
-            # Use same flags as old working setup
-            codex exec --skip-git-repo-check --enable skills --dangerously-bypass-approvals-and-sandbox -m "$LLM_MODEL" "$combined_prompt" 2>&1 | tee "$log_file" || EXIT_CODE=$?
+            # Codex: no json output option, prompt is last positional
+            codex exec \
+                --skip-git-repo-check \
+                --enable skills \
+                --dangerously-bypass-approvals-and-sandbox \
+                -m "$LLM_MODEL" \
+                "$triage_prompt" \
+                2>&1 | tee "$log_file" || EXIT_CODE=$?
             ;;
         gemini)
-            gemini -p "$investigation_prompt" --model "$LLM_MODEL" 2>&1 | tee "$log_file" || EXIT_CODE=$?
+            # Gemini: --yolo for auto-approval, positional prompt
+            gemini \
+                --model "$LLM_MODEL" \
+                --yolo \
+                "$triage_prompt" \
+                2>&1 | tee "$log_file" || EXIT_CODE=$?
             ;;
         goose)
-            goose session start --profile "$LLM_MODEL" --prompt "$investigation_prompt" 2>&1 | tee "$log_file" || EXIT_CODE=$?
+            # Goose: use 'goose run' with --text for headless mode
+            #
+            # TODO: make sure we can pass in an llm provider using the nightcrier config; until that is done this won't work. however, have verified that this is the correct arguments and structure to do it.
+            goose run \
+                --model "$LLM_MODEL" \
+                --provider "$LLM_PROVIDER" \
+                --text "$triage_prompt" \
+                2>&1 | tee "$log_file" || EXIT_CODE=$?
             ;;
         *)
             echo "Error: Unknown AGENT_CLI: $AGENT_CLI" | tee "$log_file"
@@ -280,16 +292,47 @@ extract_commands() {
             fi
             ;;
         codex)
-            # Find most recent JSONL file in sessions directory
-            local jsonl
-            jsonl=$(find ~/.codex/sessions -name "*.jsonl" -type f -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1)
+            # Codex logs command executions directly in its output as "exec" lines
+            # Extract these from the agent.log file instead of parsing JSONL
+            echo "Extracting Codex commands from agent.log..."
+            local log_file="/home/agent/logs/agent.log"
 
-            if [[ -f "$jsonl" ]]; then
-                echo "Found Codex session: $jsonl"
-                jq -r 'select(.type == "response_item" and .payload.type == "function_call" and .payload.name == "shell_command") |
-                    .payload.arguments | fromjson | "$ " + .command' "$jsonl" > "$commands_file" 2>/dev/null || true
+            if [[ -f "$log_file" ]]; then
+                echo "Found agent log: $log_file ($(wc -c < "$log_file") bytes)"
+
+                # Extract lines that start with "exec" (Codex command execution format)
+                # Format: exec <command> in <workdir> succeeded/failed in <time>
+                # We want to capture the command part
+                grep -E "^exec$" "$log_file" -A 1 2>/dev/null | grep -v "^exec$" | grep -v "^--$" | while read -r line; do
+                    # Clean up the line and prefix with $
+                    echo "$ $line"
+                done > "$commands_file" 2>/dev/null || touch "$commands_file"
+
+                # If that didn't work, try alternative pattern
+                if [[ ! -s "$commands_file" ]]; then
+                    echo "DEBUG: Trying alternative extraction from agent output..."
+                    # Look for lines that contain command execution patterns
+                    grep -E "bash -lc|kubectl |echo " "$log_file" 2>/dev/null | head -20 | while read -r line; do
+                        # Extract just the command part
+                        if [[ "$line" =~ bash\ -lc\ \'(.+)\' ]]; then
+                            echo "$ ${BASH_REMATCH[1]}"
+                        elif [[ "$line" =~ (kubectl[^\'\"]+) ]]; then
+                            echo "$ ${BASH_REMATCH[1]}"
+                        fi
+                    done > "$commands_file" 2>/dev/null || touch "$commands_file"
+                fi
+
+                if [[ -s "$commands_file" ]]; then
+                    local cmd_count
+                    cmd_count=$(wc -l < "$commands_file" | tr -d ' ')
+                    echo "SUCCESS: Extracted $cmd_count commands from agent.log"
+                else
+                    echo "WARN: No commands extracted from agent.log"
+                    echo "DEBUG: Showing sample lines from log:"
+                    head -50 "$log_file" | tail -20
+                fi
             else
-                echo "No Codex session data found"
+                echo "ERROR: Agent log file not found at $log_file"
                 touch "$commands_file"
             fi
             ;;

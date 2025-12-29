@@ -15,18 +15,24 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rbias/nightcrier/internal/agent"
+	"github.com/rbias/nightcrier/internal/agent/k8s"
 	"github.com/rbias/nightcrier/internal/cluster"
 	"github.com/rbias/nightcrier/internal/config"
 	"github.com/rbias/nightcrier/internal/events"
 	"github.com/rbias/nightcrier/internal/health"
 	"github.com/rbias/nightcrier/internal/incident"
 	"github.com/rbias/nightcrier/internal/reporting"
-	"github.com/rbias/nightcrier/internal/skills"
 	"github.com/rbias/nightcrier/internal/storage"
 	"github.com/rbias/nightcrier/internal/storage/postgres"
 	"github.com/rbias/nightcrier/internal/storage/sqlite"
 	"github.com/spf13/cobra"
 )
+
+// AgentExecutor is the interface that both Docker and K8s executors implement
+type AgentExecutor interface {
+	Execute(ctx context.Context, workspacePath string, incidentID string) (int, agent.LogPaths, error)
+	ExecuteWithPrompt(ctx context.Context, workspacePath string, incidentID string, prompt string) (int, agent.LogPaths, error)
+}
 
 var (
 	// Version information (set via ldflags at build time)
@@ -75,6 +81,9 @@ func init() {
 	// Health monitoring flags
 	rootCmd.Flags().IntVar(&healthPort, "health-port", 8080, "Port for health monitoring HTTP endpoint (0 to disable)")
 
+	// Test mode flags
+	rootCmd.Flags().Bool("single-run", false, "Process one fault event then exit (for test harnesses)")
+
 	// Bind flags to viper for precedence handling
 	config.BindFlags(rootCmd.Flags())
 }
@@ -88,6 +97,9 @@ func run(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Git Commit: %s\n", GitCommit)
 		return nil
 	}
+
+	// Handle --single-run flag (test mode: process one event then exit)
+	singleRun, _ := cmd.Flags().GetBool("single-run")
 
 	// Load configuration with precedence: flags > env vars > config file > defaults
 	cfg, err := config.LoadWithConfigFile(configFile)
@@ -105,25 +117,8 @@ func run(cmd *cobra.Command, args []string) error {
 	setupLogging(cfg.LogLevel)
 	slog.Info("tuning configuration loaded")
 
-	// Ensure skills are cached (non-fatal - agent will run triage itself if cloning fails)
-	if err := skills.EnsureSkillsCached(cfg.Skills.CacheDir); err != nil {
-		slog.Warn("failed to ensure skills are cached - agent will run triage itself",
-			"error", err)
-	}
-
 	// Print startup banner
 	printStartupBanner(cfg, config.GetConfigFile())
-
-	// Determine script path (CLI flag overrides config)
-	agentScript := scriptPath
-	if agentScript == "" {
-		agentScript = cfg.AgentScriptPath
-	}
-
-	// Verify script exists
-	if _, err := os.Stat(agentScript); os.IsNotExist(err) {
-		return fmt.Errorf("agent script not found: %s", agentScript)
-	}
 
 	// Verify system prompt file exists
 	if _, err := os.Stat(cfg.AgentSystemPromptFile); os.IsNotExist(err) {
@@ -157,29 +152,6 @@ func run(cmd *cobra.Command, args []string) error {
 
 	workspaceMgr := agent.NewWorkspaceManager(cfg.WorkspaceRoot)
 
-	// Create executors per cluster (each cluster has its own kubeconfig)
-	executors := make(map[string]*agent.Executor)
-	for _, clusterCfg := range cfg.Clusters {
-		executors[clusterCfg.Name] = agent.NewExecutorWithConfig(agent.ExecutorConfig{
-			ScriptPath:           agentScript,
-			SystemPromptFile:     cfg.AgentSystemPromptFile,
-			AllowedTools:         cfg.AgentAllowedTools,
-			Model:                cfg.AgentModel,
-			Timeout:              cfg.AgentTimeout,
-			AgentCLI:             cfg.AgentCLI,
-			AgentImage:           cfg.AgentImage,
-			AdditionalPrompt:     cfg.AdditionalAgentPrompt,
-			Debug:                cfg.LogLevel == "debug",
-			Verbose:              cfg.AgentVerbose || cfg.LogLevel == "debug",
-			Kubeconfig:           clusterCfg.Triage.Kubeconfig,
-			SkillsCacheDir:       cfg.Skills.CacheDir,
-			DisableTriagePreload: cfg.Skills.DisableTriagePreload,
-		}, tuning)
-		slog.Info("executor created for cluster",
-			"cluster", clusterCfg.Name,
-			"kubeconfig", clusterCfg.Triage.Kubeconfig)
-	}
-
 	// Create Slack notifier (optional - only if webhook URL configured)
 	var slackNotifier *reporting.SlackNotifier
 	if cfg.SlackWebhookURL != "" {
@@ -205,6 +177,69 @@ func run(cmd *cobra.Command, args []string) error {
 		artifactStorageMode = "object_storage"
 	}
 	slog.Info("artifact storage initialized", "backend", artifactStorageMode)
+
+	// Initialize Object Store (required for artifact uploads)
+	if cfg.ObjectStorage.URL == "" {
+		return fmt.Errorf("object_storage.url must be configured")
+	}
+
+	expiry, err := time.ParseDuration(cfg.ObjectStorage.SignedURLExpiry)
+	if err != nil {
+		return fmt.Errorf("invalid signed URL expiry duration: %w", err)
+	}
+	objectStore, err := storage.NewObjectStore(ctx, cfg.ObjectStorage.URL, expiry)
+	if err != nil {
+		return fmt.Errorf("failed to initialize object store: %w", err)
+	}
+	slog.Info("object store initialized",
+		"url", cfg.ObjectStorage.URL,
+		"signed_url_expiry", expiry)
+
+	// Initialize K8s client for executor
+	k8sClient, err := k8s.NewClient(k8s.ClientConfig{
+		Kubeconfig: cfg.KubeconfigPath,
+		Context:    cfg.KubernetesContext,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create K8s client: %w", err)
+	}
+	slog.Info("K8s client initialized",
+		"kubeconfig", cfg.KubeconfigPath,
+		"context", cfg.KubernetesContext,
+		"namespace", cfg.K8sNamespace)
+
+	// Create K8s executors per cluster
+	executors := make(map[string]AgentExecutor)
+	k8sExecutorRefs := make(map[string]*agent.K8sExecutor) // Keep refs to inject stateStore later
+
+	for _, clusterCfg := range cfg.Clusters {
+		k8sExecCfg := agent.K8sExecutorConfig{
+			Namespace:        cfg.K8sNamespace,
+			Image:            cfg.K8sImage,
+			Timeout:          cfg.K8sTimeout,
+			MemoryLimit:      cfg.K8sMemoryLimit,
+			CPULimit:         cfg.K8sCPULimit,
+			CleanupTTL:       int32(cfg.K8sCleanupTTL),
+			AgentCLI:         cfg.AgentCLI,
+			Model:            cfg.AgentModel,
+			SystemPromptFile: cfg.AgentSystemPromptFile,
+			Debug:            cfg.LogLevel == "debug",
+		}
+		k8sExec := agent.NewK8sExecutor(
+			k8sExecCfg,
+			k8sClient,
+			objectStore,
+			nil, // stateStore will be set later after it's initialized
+			storageBackend,
+			tuning,
+		)
+		executors[clusterCfg.Name] = k8sExec
+		k8sExecutorRefs[clusterCfg.Name] = k8sExec
+		slog.Info("K8s executor created for cluster",
+			"cluster", clusterCfg.Name,
+			"namespace", cfg.K8sNamespace,
+			"image", cfg.K8sImage)
+	}
 
 	// Handle shutdown signals
 	sigChan := make(chan os.Signal, 1)
@@ -299,6 +334,14 @@ func run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unknown state storage type: %s", storageType)
 	}
 
+	// Inject stateStore into K8s executors now that it's initialized
+	if stateStore != nil {
+		for clusterName, k8sExec := range k8sExecutorRefs {
+			k8sExec.SetStateStore(stateStore)
+			slog.Debug("stateStore injected into K8s executor", "cluster", clusterName)
+		}
+	}
+
 	// Phase 3: Initialize connection manager (validates cluster permissions)
 	// This runs kubectl auth can-i checks for all clusters with triage enabled
 	slog.Info("initializing connection manager - validating permissions")
@@ -330,6 +373,9 @@ func run(cmd *cobra.Command, args []string) error {
 	slog.Info("connection manager started, processing events",
 		"cluster_count", len(cfg.Clusters))
 
+	// Track if we've processed an event in single-run mode
+	singleRunProcessed := false
+
 	// Event processing loop
 	for {
 		select {
@@ -341,6 +387,12 @@ func run(cmd *cobra.Command, args []string) error {
 			if !ok {
 				slog.Info("event channel closed")
 				return nil
+			}
+
+			// Single-run mode: skip any events after the first one
+			if singleRun && singleRunProcessed {
+				slog.Debug("single-run mode: dropping event, shutdown in progress")
+				continue
 			}
 
 			// Type assert event from interface{} to map[string]interface{}
@@ -389,13 +441,20 @@ func run(cmd *cobra.Command, args []string) error {
 					"fault_id", faultEvent.FaultID,
 					"error", err)
 			}
+
+			// Single-run mode: exit after first event is processed
+			if singleRun {
+				singleRunProcessed = true
+				slog.Info("single-run mode: event processed, initiating shutdown")
+				cancel()
+			}
 		}
 	}
 
 	return nil
 }
 
-func processEvent(ctx context.Context, event *events.FaultEvent, clusterName string, kubeconfig string, permissions *cluster.ClusterPermissions, workspaceMgr *agent.WorkspaceManager, executor *agent.Executor, slackNotifier *reporting.SlackNotifier, storageBackend storage.Storage, stateStore storage.StateStore, circuitBreaker *reporting.CircuitBreaker, cfg *config.Config, tuning *config.TuningConfig) error {
+func processEvent(ctx context.Context, event *events.FaultEvent, clusterName string, kubeconfig string, permissions *cluster.ClusterPermissions, workspaceMgr *agent.WorkspaceManager, executor AgentExecutor, slackNotifier *reporting.SlackNotifier, storageBackend storage.Storage, stateStore storage.StateStore, circuitBreaker *reporting.CircuitBreaker, cfg *config.Config, tuning *config.TuningConfig) error {
 	// Create incident from event
 	incidentID := uuid.New().String()
 	inc := incident.NewFromEvent(incidentID, event)
@@ -545,7 +604,7 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 	}
 
 	// Detect agent failures (exit code 0 but missing or invalid output)
-	agentFailed, failureReason := detectAgentFailure(workspacePath, exitCode, execErr, tuning)
+	agentFailed, failureReason := detectAgentFailure(exitCode, execErr)
 	if agentFailed {
 		inc.Status = incident.StatusAgentFailed
 		inc.FailureReason = failureReason
@@ -634,8 +693,25 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 	duration := inc.CompletedAt.Sub(startedAt)
 
 	// Save incident artifacts to storage
+	// For K8s executor, artifacts are already uploaded and info is in logPaths
+	// For Docker executor, we need to read and upload artifacts here
 	var reportURL string
-	if storageBackend != nil {
+	var rootCause string
+	var confidence string
+
+	// Check if K8s executor already provided artifact information
+	if logPaths.ReportURL != "" {
+		// K8s executor path - artifacts already uploaded, info in logPaths
+		reportURL = logPaths.ReportURL
+		rootCause = logPaths.RootCause
+		confidence = logPaths.Confidence
+		slog.Info("using artifact info from K8s executor",
+			"incident_id", incidentID,
+			"report_url", reportURL,
+			"root_cause", rootCause,
+			"confidence", confidence)
+	} else if storageBackend != nil {
+		// Docker executor path - need to read and upload artifacts
 		// Skip storage upload for agent failures (missing/invalid output) unless configured otherwise
 		if inc.Status == incident.StatusAgentFailed && !cfg.UploadFailedInvestigations {
 			slog.Info("skipping storage upload due to agent failure",
@@ -703,11 +779,15 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 				"reason", inc.FailureReason,
 				"note", "circuit breaker will send aggregated alert if threshold reached")
 		} else {
-			rootCause, confidence, err := reporting.ExtractSummaryFromReport(workspacePath)
-			if err != nil {
-				slog.Warn("failed to extract report summary for slack", "error", err)
-				rootCause = "See investigation report"
-				confidence = "UNKNOWN"
+			// Extract root cause and confidence if not already available from K8s executor
+			if rootCause == "" {
+				var err error
+				rootCause, confidence, err = reporting.ExtractSummaryFromReport(workspacePath)
+				if err != nil {
+					slog.Warn("failed to extract report summary for slack", "error", err)
+					rootCause = "See investigation report"
+					confidence = "UNKNOWN"
+				}
 			}
 
 			summary := &reporting.IncidentSummary{
@@ -743,11 +823,13 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 // detectAgentFailure validates agent execution and returns whether the agent failed and a reason string.
 // It checks:
 // 1. Exit code is 0
-// 2. output/investigation.md file exists
-// 3. investigation.md file size meets minimum threshold from tuning config
+// 2. No execution error
+//
+// Note: Artifact validation (report exists, proper size) is handled by the K8s executor
+// during artifact retrieval from blob storage.
 //
 // Returns (failed bool, reason string)
-func detectAgentFailure(workspacePath string, exitCode int, err error, tuning *config.TuningConfig) (bool, string) {
+func detectAgentFailure(exitCode int, err error) (bool, string) {
 	// Check if there was an execution error
 	if err != nil {
 		return true, fmt.Sprintf("agent execution error: %v", err)
@@ -756,22 +838,6 @@ func detectAgentFailure(workspacePath string, exitCode int, err error, tuning *c
 	// Check exit code
 	if exitCode != 0 {
 		return true, fmt.Sprintf("agent exited with non-zero code: %d", exitCode)
-	}
-
-	// Check if investigation.md exists
-	investigationPath := filepath.Join(workspacePath, "output", "investigation.md")
-	info, err := os.Stat(investigationPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return true, "investigation.md file not found"
-		}
-		return true, fmt.Sprintf("error checking investigation.md: %v", err)
-	}
-
-	// Check file size against tuning threshold
-	minSize := int64(tuning.Agent.InvestigationMinSizeBytes)
-	if info.Size() < minSize {
-		return true, fmt.Sprintf("investigation.md too small: %d bytes (expected >= %d)", info.Size(), minSize)
 	}
 
 	// All checks passed
@@ -893,16 +959,17 @@ func readIncidentArtifacts(workspacePath, incidentID string, logPaths agent.LogP
 			"size", len(permsData))
 	}
 
-	// Read Claude Code session archive if present (DEBUG mode only)
-	var claudeSessionArchive []byte
-	sessionArchivePath := filepath.Join(workspacePath, "logs", "claude-session.tar.gz")
+	// Read agent session archive if present (DEBUG mode only)
+	// Archive name depends on agent: claude-session.tar.gz for Claude, etc.
+	var agentSessionArchive []byte
+	sessionArchivePath := filepath.Join(workspacePath, "logs", "agent-session.tar.gz")
 	if sessionData, err := os.ReadFile(sessionArchivePath); err != nil {
-		slog.Debug("claude session archive not found (this is normal in production mode)",
+		slog.Debug("agent session archive not found (this is normal in production mode)",
 			"path", sessionArchivePath,
 			"error", err)
 	} else {
-		claudeSessionArchive = sessionData
-		slog.Debug("read claude session archive",
+		agentSessionArchive = sessionData
+		slog.Debug("read agent session archive",
 			"path", sessionArchivePath,
 			"size", len(sessionData))
 	}
@@ -922,7 +989,7 @@ func readIncidentArtifacts(workspacePath, incidentID string, logPaths agent.LogP
 		InvestigationHTML:      investigationHTML,
 		ClusterPermissionsJSON: clusterPermissionsJSON,
 		AgentLogs:              agentLogs,
-		ClaudeSessionArchive:   claudeSessionArchive,
+		AgentSessionArchive:    agentSessionArchive,
 		PromptSent:             promptSent,
 	}, nil
 }

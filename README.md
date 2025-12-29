@@ -48,16 +48,27 @@ This system listens for fault events from a Kubernetes MCP server and spawns AI 
 ### High-Level Flow
 
 ```
-kubernetes-mcp-server -> MCP Events -> Nightcrier -> AI Agent -> Investigation Report
+kubernetes-mcp-server -> MCP Events -> Nightcrier -> K8s Job (AI Agent) -> Investigation Report
                                             |
                                             v
-                                    Storage (Object/Filesystem)
+                                    Object Storage (Azure/S3)
                                             |
                                             v
                                     Slack Notification (with Report URL)
 ```
 
-### Detailed Validation Flow
+### Agent Execution Model
+
+Nightcrier uses **Kubernetes-native stateless agent execution**:
+
+1. **ConfigMap Creation** - Incident data (incident.json, permissions.json, system prompt) is stored in a ConfigMap
+2. **Job Creation** - A Kubernetes Job is created with the `nc-agent-runner` container image
+3. **Presigned URLs** - PUT URLs are generated for artifact upload (report.md, agent.log, session.tar.gz)
+4. **Agent Execution** - The Job runs an AI agent (Claude, Codex, Gemini, or Goose) to investigate
+5. **Artifact Upload** - Results are uploaded directly to Object Storage from within the container
+6. **Cleanup** - ConfigMap is deleted after Job completion
+
+### Detailed Execution Flow
 
 ```
 ┌─────────────────┐
@@ -70,25 +81,41 @@ kubernetes-mcp-server -> MCP Events -> Nightcrier -> AI Agent -> Investigation R
 │  Nightcrier                                                  │
 │                                                               │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │ 1. Create Workspace                                   │  │
-│  │    ./incidents/<incident-id>/                        │  │
+│  │ 1. Create Workspace & Generate Presigned URLs        │  │
+│  │    - incident.json, permissions.json                 │  │
+│  │    - PUT URLs for: report.md, agent.log,            │  │
+│  │      session.tar.gz, result.json                    │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                          │                                   │
+│                          v                                   │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ 2. Create K8s ConfigMap                              │  │
 │  │    - incident.json (event context)                   │  │
+│  │    - permissions.json (cluster access)               │  │
+│  │    - base-triage-prompt.md (system prompt)          │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                          │                                   │
 │                          v                                   │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │ 2. Execute AI Agent                                   │  │
-│  │    - Spawn container with LLM CLI                    │  │
-│  │    - Agent investigates incident                     │  │
-│  │    - Writes output/investigation.md                  │  │
+│  │ 3. Create K8s Job (nc-agent-runner)                  │  │
+│  │    - Mounts ConfigMap and Secrets (API keys)        │  │
+│  │    - Environment: presigned URLs, agent config      │  │
+│  │    - Runs: entrypoint.sh → AI agent → uploads       │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                          │                                   │
 │                          v                                   │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │ 3. Validate Output                                    │  │
-│  │    ✓ Exit code = 0?                                  │  │
-│  │    ✓ investigation.md exists?                        │  │
-│  │    ✓ File size > 100 bytes?                          │  │
+│  │ 4. Watch Job Completion                              │  │
+│  │    - Monitor via K8s Watch API                      │  │
+│  │    - Timeout with activeDeadlineSeconds             │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                          │                                   │
+│                          v                                   │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ 5. Retrieve Results from Object Storage             │  │
+│  │    - Download report.md, result.json                │  │
+│  │    - Convert markdown to HTML                       │  │
+│  │    - Record in database (StateStore)                │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                          │                                   │
 │              ┌───────────┴───────────┐                      │
@@ -126,20 +153,17 @@ kubernetes-mcp-server -> MCP Events -> Nightcrier -> AI Agent -> Investigation R
 │             │    └─────────────────────┘                  │
 │             │                                               │
 │             │  Skip individual notification                │
-│             │  Skip storage upload (by default)           │
 │             │                                               │
 │             v                                               │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │ 4. Upload to Storage (if validated)                  │  │
-│  │    - Object Storage (Azure/S3/S3-compatible)         │  │
-│  │    - OR Filesystem storage                           │  │
+│  │ 6. Send Slack Notification                           │  │
+│  │    - Incident details + root cause                   │  │
+│  │    - Link to investigation report (signed URL)       │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                          │                                   │
 │                          v                                   │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │ 5. Send Slack Notification (if validated)            │  │
-│  │    - Incident details + root cause                   │  │
-│  │    - Link to investigation report                    │  │
+│  │ 7. Cleanup ConfigMap                                 │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                                                               │
 └───────────────────────────────────────────────────────────────┘
@@ -155,21 +179,23 @@ Circuit Breaker States:
 ## Features
 
 - Automated incident detection via MCP server integration
-- AI-powered root cause analysis using Claude agents
-- Multi-backend storage support (filesystem, Azure Blob Storage, AWS S3, S3-compatible)
-- Slack notifications with investigation reports
-- Secure artifact storage with signed URL generation
-- Containerized agent execution environment
+- AI-powered root cause analysis using multiple agents (Claude, Codex, Gemini, Goose)
+- Kubernetes-native stateless agent execution via Jobs
+- Multi-backend storage support (Azure Blob Storage, AWS S3, S3-compatible)
+- Slack notifications with investigation reports and signed URLs
+- Secure artifact storage with presigned URL generation
 - Circuit breaker for agent failure handling
 - Intelligent validation to prevent spurious notifications
 - System health monitoring with degraded/recovered alerts
+- Multi-cluster support with independent triage configuration
 
 ## Prerequisites
 
 - Go 1.23 or later
-- Docker (for containerized agent execution)
-- Kubernetes cluster with MCP server (for production use)
-- Object storage (optional): Azure Blob Storage, AWS S3, or S3-compatible (MinIO, RustFS)
+- Kubernetes cluster (for agent execution via Jobs)
+- Docker (for building agent container image and running kind for local dev)
+- kubectl and kind (for local development)
+- Object storage: Azure Blob Storage, AWS S3, or S3-compatible (MinIO)
 - Slack webhook (optional, for notifications)
 
 ## Installation
@@ -181,13 +207,18 @@ Circuit Breaker States:
 git clone https://github.com/rbias/nightcrier.git
 cd nightcrier
 
-# Build the runner
-go build -o runner ./cmd/runner
+# Build the Nightcrier binary
+make build
 
-# Build the agent container
-cd agent-container
-docker build -t k8s-triage-agent:latest .
+# Build the agent container image
+cd nc-agent-runner
+make build
+
+# For local development with kind, load the image
+make load-kind
 ```
+
+For detailed local development setup, see [docs/DEV_SETUP.md](docs/DEV_SETUP.md).
 
 ## Configuration
 
@@ -561,15 +592,10 @@ Permission validation results are written to `incident_cluster_permissions.json`
 
 The following parameters **must** be provided. The application will fail fast on startup if any are missing:
 
-- `K8S_CLUSTER_MCP_ENDPOINT` - MCP server endpoint URL (e.g., `http://localhost:8080/mcp`)
-- `SUBSCRIBE_MODE` - Event subscription mode: `events` or `faults` (recommended: `faults`)
-- `WORKSPACE_ROOT` - Directory for incident artifacts (e.g., `./incidents`)
-- `AGENT_SCRIPT_PATH` - Path to agent execution script (e.g., `./agent-container/run-agent.sh`)
-- `AGENT_MODEL` - LLM model to use (e.g., `sonnet`, `opus`, `haiku`, `gpt-4o`)
-- `AGENT_TIMEOUT` - Agent timeout in seconds (e.g., `300`)
+- `WORKSPACE_ROOT` - Directory for incident artifacts (e.g., `./workspaces`)
+- `AGENT_MODEL` - LLM model to use (e.g., `claude-sonnet-4-5-20250929`, `gpt-4o`)
+- `AGENT_TIMEOUT` - Agent timeout in seconds (e.g., `600`)
 - `AGENT_CLI` - AI CLI tool to use: `claude`, `codex`, `goose`, or `gemini`
-- `AGENT_IMAGE` - Docker image for agent container (e.g., `nightcrier-agent:latest`)
-- `AGENT_PROMPT` - Prompt sent to agent for triage
 - `SEVERITY_THRESHOLD` - Minimum event severity: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
 - `MAX_CONCURRENT_AGENTS` - Maximum concurrent agent sessions
 - `GLOBAL_QUEUE_SIZE` - Global event queue size
@@ -582,6 +608,15 @@ The following parameters **must** be provided. The application will fail fast on
 - `SSE_READ_TIMEOUT` - SSE read timeout in seconds
 - `FAILURE_THRESHOLD_FOR_ALERT` - Failures before system degraded alert
 - At least one LLM API key: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`
+
+**K8s Executor Configuration:**
+- `K8S_NAMESPACE` - Namespace for Jobs and ConfigMaps (default: `nightcrier`)
+- `K8S_IMAGE` - Agent container image (default: `nc-agent-runner:latest`)
+- `K8S_TIMEOUT` - Job timeout in seconds (default: `600`)
+- `K8S_MEMORY_LIMIT` - Container memory limit (default: `2Gi`)
+- `K8S_CPU_LIMIT` - Container CPU limit (default: `1`)
+- `KUBECONFIG_PATH` - Path to kubeconfig for executor cluster access
+- `KUBERNETES_CONTEXT` - Kubernetes context to use for executor
 
 ### Optional Configuration
 
@@ -811,27 +846,33 @@ Event 5 → Agent runs → ✓ Valid → Upload + Notify
 
 ## Usage
 
-### Running the Runner
+### Running Nightcrier
 
 ```bash
-# With environment variables
-export K8S_CLUSTER_MCP_ENDPOINT="http://localhost:8080"
-export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
-./runner
+# With configuration file
+./bin/nightcrier --config configs/config.yaml
 
-# With command-line flags
-./runner --mcp-endpoint http://localhost:8080 --workspace-root ./incidents --log-level debug
+# With environment variables
+export WORKSPACE_ROOT="./workspaces"
+export AGENT_CLI="claude"
+export AGENT_MODEL="claude-sonnet-4-5-20250929"
+export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+./bin/nightcrier --config configs/config.yaml
+
+# With debug logging
+./bin/nightcrier --config configs/config.yaml --log-level debug
 ```
 
 ### Command-line Flags
 
-All configuration can be overridden via CLI flags:
-- `--mcp-endpoint` - MCP server endpoint URL
-- `--workspace-root` - Workspace root directory
-- `--script-path` - Path to agent script
+Configuration can be overridden via CLI flags:
+- `--config` - Path to configuration file
 - `--log-level` - Log level (debug, info, warn, error)
+- `--workspace-root` - Workspace root directory
 
 ## Local Development and Testing
+
+For comprehensive local development setup with kind (Kubernetes in Docker), see [docs/DEV_SETUP.md](docs/DEV_SETUP.md).
 
 ### Using MinIO (S3-compatible)
 
@@ -1124,27 +1165,36 @@ unset AWS_SECRET_ACCESS_KEY
 
 ## Output Structure
 
-### Filesystem Storage
-```
-./incidents/
-  <incident-id>/
-    event.json              # Original fault event
-    result.json             # Execution result
-    output/
-      investigation.md      # AI-generated investigation report
-```
-
 ### Object Storage (Azure/S3/S3-compatible)
+
+Artifacts are uploaded directly from the agent container to Object Storage:
+
 ```
 <bucket or container>/
-  <incident-id>/
-    event.json              # Original fault event
-    result.json             # Execution result with URLs
-    output/
-      investigation.md      # AI-generated investigation report
+  incidents/<incident-id>/
+    results/
+      report.md               # AI-generated investigation report (markdown)
+      investigation.html      # HTML-formatted report
+      agent.log               # Agent execution logs
+      session.tar.gz          # Agent session archive (debugging)
+      result.json             # Execution metadata with exit code
+      commands-executed.log   # Commands run by agent
+    incident.json             # Original incident data
 ```
 
-Plus signed URLs and canonical URLs in result.json and Slack notifications.
+### Local Workspace
+
+Local workspace contains metadata and prompt information:
+
+```
+./workspaces/
+  <incident-id>/
+    incident.json             # Incident metadata
+    permissions.json          # Cluster permissions
+    prompt-sent.md            # Full prompt sent to agent
+```
+
+Signed URLs and canonical URLs are stored in the database and included in Slack notifications.
 
 ## Slack Notification Format
 
@@ -1210,21 +1260,27 @@ curl https://api.anthropic.com/v1/messages \
 
 4. Check agent execution logs:
 ```bash
-# If using docker, check container logs
-docker ps -a | grep triage-agent
-docker logs <container-id>
+# Check Job logs via kubectl
+kubectl logs -n nightcrier -l app=nc-agent-runner --tail=100
+
+# Or watch a specific Job
+kubectl logs -n nightcrier job/nc-agent-<incident-id> -f
 ```
 
 **Common Solutions**:
 
 1. **API Key Issues**: Verify correct API key is set and not expired
 2. **Rate Limiting**: Increase delay between incidents or upgrade API tier
-3. **Timeouts**: Increase `AGENT_TIMEOUT` (default: 300s)
+3. **Timeouts**: Increase `K8S_TIMEOUT` (default: 600s)
 ```bash
-export AGENT_TIMEOUT=600
+export K8S_TIMEOUT=900
 ```
 4. **Network Issues**: Check firewall rules and proxy settings
-5. **Resource Constraints**: Increase container memory/CPU limits
+5. **Resource Constraints**: Increase container memory/CPU limits:
+```bash
+export K8S_MEMORY_LIMIT=4Gi
+export K8S_CPU_LIMIT=2
+```
 
 **Recovery**:
 Once the underlying issue is fixed, the system will automatically detect the next successful investigation and send a "System Recovered" alert.

@@ -14,7 +14,7 @@
 - [x] Implement `CreateIncidentConfigMap()` function
 - [x] Add incident.json to ConfigMap data
 - [x] Add permissions.json to ConfigMap data
-- [x] Add system-prompt.md to ConfigMap data
+- [x] Add base-triage-prompt.md to ConfigMap data
 - [x] Add labels for incident identification
 - [x] Implement `DeleteConfigMap()` function
 - [x] Add unit tests with fake clientset
@@ -235,8 +235,8 @@
 - [x] Create `scripts/dev-setup.sh` to bootstrap kind cluster
 - [x] Create `scripts/dev-teardown.sh` to clean up
 - [x] Update Makefile with dev targets (`make build`, `make load-kind`)
-- [ ] Add `make dev-cluster` target (optional - scripts work well)
-- [ ] Add `make dev-secrets` target (optional - handled by dev-setup.sh)
+- [x] Add `make dev-cluster` target
+- [x] Add `make dev-secrets` target
 
 ### 6.3 Documentation
 - [x] Create `docs/DEV_SETUP.md` with kind-based local dev instructions
@@ -247,17 +247,15 @@
 
 ## Phase 7: Cleanup and Migration
 
-### 7.1 Move Docker Scripts to Reference
-- [ ] Create `agent-container/reference/` directory
-- [ ] Move `agent-container/run-agent.sh` to reference
-- [ ] Move `agent-container/runners/` to reference
-- [ ] Move `agent-container/test_*.sh` to reference
-- [ ] Add README in reference/ explaining these are historical
+### 7.1 Remove Docker Scripts
+- [x] Delete `agent-container/` directory (git history preserves if needed)
 
 ### 7.2 Remove Docker Execution Code
-- [ ] Remove Docker execution logic from `internal/agent/executor.go`
-- [ ] Remove `agent.runtime` config option if present
-- [ ] Update any imports/dependencies
+- [x] Delete `internal/agent/executor.go` (Docker/subprocess executor)
+- [x] Delete `internal/agent/executor_test.go`
+- [x] Update `cmd/nightcrier/main.go` to always use K8s executor
+- [x] Simplify `detectAgentFailure()` to only check exit code and errors
+- [x] Update `cmd/nightcrier/main_test.go` for simplified function signature
 
 ### 7.3 Update Tests
 - [ ] Add K8s executor unit tests with fake clientset
@@ -267,8 +265,8 @@
 - [ ] Add tests for command extraction per agent type
 
 ### 7.4 Documentation Updates
-- [ ] Update agent-container/README.md (point to nc-agent-runner/)
-- [ ] Update main README.md
+- [x] agent-container/README.md removed with directory deletion
+- [x] Update main README.md
 
 ## Phase 8: Validation (Artifact Verification)
 

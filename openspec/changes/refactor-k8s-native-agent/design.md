@@ -257,13 +257,33 @@ extract_commands() {
 run_agent() {
     local log_file="/home/agent/logs/agent.log"
     mkdir -p /home/agent/logs
+    local triage_prompt=$(build_triage_prompt)
 
     # Run agent with tee for real-time output + file capture
     case "$AGENT_CLI" in
         claude)
-            claude -p "$PROMPT" --model "$LLM_MODEL" 2>&1 | tee "$log_file"
+            # Claude: -p flag (print mode), prompt is last positional
+            claude -p --model "$LLM_MODEL" \
+                --allowedTools "Read,Grep,Glob,Bash,Write" --max-turns 50 \
+                "$triage_prompt" 2>&1 | tee "$log_file"
             ;;
-        # ... other agents
+        codex)
+            # Codex: no json output option, prompt is last positional
+            codex exec --skip-git-repo-check --enable skills \
+                --dangerously-bypass-approvals-and-sandbox \
+                -m "$LLM_MODEL" "$triage_prompt" 2>&1 | tee "$log_file"
+            ;;
+        gemini)
+            # Gemini: --yolo for auto-approval, positional prompt
+            gemini --model "$LLM_MODEL" --yolo \
+                "$triage_prompt" 2>&1 | tee "$log_file"
+            ;;
+        goose)
+            # Goose: use 'goose run' with --text for headless mode
+            # Requires LLM_PROVIDER env var (e.g., openai, anthropic)
+            goose run --model "$LLM_MODEL" --provider "$LLM_PROVIDER" \
+                --text "$triage_prompt" 2>&1 | tee "$log_file"
+            ;;
     esac
 }
 ```
@@ -369,8 +389,8 @@ spec:
           subPath: permissions.json
           readOnly: true
         - name: incident-data
-          mountPath: /home/agent/system-prompt.md
-          subPath: system-prompt.md
+          mountPath: /home/agent/base-triage-prompt.md
+          subPath: base-triage-prompt.md
           readOnly: true
         - name: kubeconfig
           mountPath: /home/agent/.kube/config

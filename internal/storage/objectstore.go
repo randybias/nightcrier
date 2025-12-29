@@ -4,6 +4,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 	"time"
@@ -166,6 +167,33 @@ func (s *ObjectStore) SignedURL(ctx context.Context, key string) (string, time.T
 	return signedURL, expiryTime, nil
 }
 
+// SignedPutURL generates a temporary signed URL for uploading to the object.
+// Returns the signed URL and its expiration time.
+// The URL is valid for PUT operations only, providing write-only access.
+func (s *ObjectStore) SignedPutURL(ctx context.Context, key string, expiry time.Duration) (string, time.Time, error) {
+	if key == "" {
+		return "", time.Time{}, fmt.Errorf("key cannot be empty")
+	}
+
+	if expiry == 0 {
+		expiry = s.expiry
+	}
+
+	expiryTime := time.Now().Add(expiry)
+
+	opts := &blob.SignedURLOptions{
+		Expiry: expiry,
+		Method: "PUT",
+	}
+
+	signedURL, err := s.bucket.SignedURL(ctx, key, opts)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("failed to generate signed PUT URL for key %s: %w", key, err)
+	}
+
+	return signedURL, expiryTime, nil
+}
+
 // CanonicalURL returns the base URL for the object without authentication.
 // This URL is stable and can be stored long-term, but may not be directly accessible
 // depending on bucket permissions. Use SignCanonicalURL to add temporary authentication.
@@ -293,10 +321,38 @@ func (s *ObjectStore) extractKeyFromCanonicalURL(canonicalURL string) (string, e
 	}
 }
 
+// Download reads data from the object store at the specified key.
+// This is used to retrieve artifacts that were uploaded by the agent container.
+func (s *ObjectStore) Download(ctx context.Context, key string) ([]byte, error) {
+	if key == "" {
+		return nil, fmt.Errorf("key cannot be empty")
+	}
+
+	reader, err := s.bucket.NewReader(ctx, key, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create reader for key %s: %w", key, err)
+	}
+	defer reader.Close()
+
+	// Read all data from the reader
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read data for key %s: %w", key, err)
+	}
+
+	return data, nil
+}
+
 // SetAzureAccount sets the Azure storage account name for canonical URL generation.
 // This should be called after construction if the account name isn't available from the URL.
 func (s *ObjectStore) SetAzureAccount(account string) {
 	s.account = account
+}
+
+// Bucket returns the underlying blob.Bucket for advanced operations.
+// This is useful for operations not covered by the ObjectStore interface.
+func (s *ObjectStore) Bucket() *blob.Bucket {
+	return s.bucket
 }
 
 // Close closes the underlying bucket and releases any resources.

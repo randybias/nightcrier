@@ -27,6 +27,14 @@ type Client struct {
 	eventChan      chan *FaultEvent
 	subscriptionID string
 	mu             sync.Mutex
+	closeOnce      sync.Once
+}
+
+// closeChannel closes the event channel once
+func (c *Client) closeChannel() {
+	c.closeOnce.Do(func() {
+		close(c.eventChan)
+	})
 }
 
 // NewClient creates a new MCP client for the given endpoint
@@ -145,7 +153,7 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan *FaultEvent, error) {
 	// Connect to server
 	session, err := c.mcpClient.Connect(ctx, transport, nil)
 	if err != nil {
-		close(c.eventChan)
+		c.closeChannel()
 		return nil, fmt.Errorf("failed to connect to MCP server: %w", err)
 	}
 	c.session = session
@@ -158,7 +166,7 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan *FaultEvent, error) {
 	})
 	if err != nil {
 		c.session.Close()
-		close(c.eventChan)
+		c.closeChannel()
 		return nil, fmt.Errorf("failed to set logging level: %w", err)
 	}
 
@@ -173,7 +181,7 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan *FaultEvent, error) {
 	})
 	if err != nil {
 		c.session.Close()
-		close(c.eventChan)
+		c.closeChannel()
 		return nil, fmt.Errorf("failed to subscribe to events: %w", err)
 	}
 
@@ -189,7 +197,7 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan *FaultEvent, error) {
 	// Extract subscription ID from result
 	if result.IsError {
 		c.session.Close()
-		close(c.eventChan)
+		c.closeChannel()
 		return nil, fmt.Errorf("events_subscribe returned error: %s", responseText)
 	}
 
@@ -225,13 +233,6 @@ func (c *Client) Close() {
 		c.session = nil
 	}
 
-	// Close channel if not already closed
-	select {
-	case _, ok := <-c.eventChan:
-		if ok {
-			close(c.eventChan)
-		}
-	default:
-		close(c.eventChan)
-	}
+	// Close channel if not already closed (sync.Once ensures this is safe)
+	c.closeChannel()
 }

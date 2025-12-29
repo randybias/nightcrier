@@ -1,0 +1,488 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/rbias/nightcrier/internal/agent/k8s"
+	"github.com/rbias/nightcrier/internal/config"
+	"github.com/rbias/nightcrier/internal/incident"
+	"github.com/rbias/nightcrier/internal/storage"
+)
+
+// LogPaths contains artifact information from agent execution.
+// For K8s executor, local file paths are empty but artifact URLs are populated.
+type LogPaths struct {
+	Stdout   string // Unused for K8s executor
+	Stderr   string // Unused for K8s executor
+	Combined string // Unused for K8s executor
+
+	// Artifact information populated by K8s executor
+	ReportURL  string // URL to the investigation report (HTML)
+	RootCause  string // Root cause extracted from report
+	Confidence string // Confidence level (HIGH/MEDIUM/LOW/UNKNOWN)
+}
+
+// K8sExecutorConfig holds configuration for the Kubernetes-native executor.
+type K8sExecutorConfig struct {
+	// Kubernetes namespace where Jobs and ConfigMaps will be created
+	Namespace string
+	// Container image for the agent runner
+	Image string
+	// Job timeout in seconds
+	Timeout int
+	// Memory limit (e.g., "2Gi")
+	MemoryLimit string
+	// CPU limit (e.g., "1")
+	CPULimit string
+	// TTL for cleanup after Job completion (seconds)
+	CleanupTTL int32
+	// Agent CLI to use (claude/codex/gemini/goose)
+	AgentCLI string
+	// LLM model to use
+	Model string
+	// System prompt file path
+	SystemPromptFile string
+	// Debug mode - includes session archive and separate stderr
+	Debug bool
+}
+
+// K8sExecutor implements the executor interface using Kubernetes Jobs.
+// It orchestrates the full Phase 1-5 flow:
+//   - Phase 1: Generate presigned URLs and create ConfigMap/Job
+//   - Phase 3: Watch Job for completion and retrieve results
+//   - Phase 4: Process artifacts and update database
+//   - Phase 5: Complete incident and cleanup
+type K8sExecutor struct {
+	config          K8sExecutorConfig
+	k8sClient       *k8s.Client
+	objectStore     *storage.ObjectStore
+	stateStore      storage.StateStore
+	storage         storage.Storage
+	processor       *k8s.ArtifactProcessor
+	tuning          *config.TuningConfig
+}
+
+// NewK8sExecutor creates a new Kubernetes-native executor.
+func NewK8sExecutor(
+	cfg K8sExecutorConfig,
+	k8sClient *k8s.Client,
+	objectStore *storage.ObjectStore,
+	stateStore storage.StateStore,
+	storageBackend storage.Storage,
+	tuning *config.TuningConfig,
+) *K8sExecutor {
+	return &K8sExecutor{
+		config:      cfg,
+		k8sClient:   k8sClient,
+		objectStore: objectStore,
+		stateStore:  stateStore,
+		storage:     storageBackend,
+		processor:   k8s.NewArtifactProcessor(objectStore, stateStore, storageBackend),
+		tuning:      tuning,
+	}
+}
+
+// SetStateStore updates the stateStore reference in the executor and its processor.
+// This is called after the stateStore is initialized in main.go.
+func (e *K8sExecutor) SetStateStore(stateStore storage.StateStore) {
+	e.stateStore = stateStore
+	// Recreate processor with the new stateStore
+	e.processor = k8s.NewArtifactProcessor(e.objectStore, stateStore, e.storage)
+}
+
+// Execute runs the agent in a Kubernetes Job and processes the results.
+// This implements the full Phase 1-5 orchestration.
+func (e *K8sExecutor) Execute(ctx context.Context, workspacePath string, incidentID string) (int, LogPaths, error) {
+	return e.ExecuteWithPrompt(ctx, workspacePath, incidentID, "")
+}
+
+// ExecuteWithPrompt runs the agent with a custom prompt.
+// This is the main entry point that orchestrates all phases.
+func (e *K8sExecutor) ExecuteWithPrompt(ctx context.Context, workspacePath string, incidentID string, prompt string) (int, LogPaths, error) {
+	slog.Info("executing agent in Kubernetes Job",
+		"incident_id", incidentID,
+		"namespace", e.config.Namespace,
+		"image", e.config.Image,
+		"timeout", e.config.Timeout)
+
+	executionID := uuid.New().String()
+	startedAt := time.Now()
+
+	// Phase 1.1: Generate presigned PUT URLs for outputs
+	slog.Info("generating presigned URLs for outputs", "incident_id", incidentID)
+	jobTimeout := time.Duration(e.config.Timeout) * time.Second
+	outputURLs, err := k8s.GenerateOutputURLs(ctx, e.objectStore, incidentID, jobTimeout)
+	if err != nil {
+		return -1, LogPaths{}, fmt.Errorf("failed to generate output URLs: %w", err)
+	}
+	slog.Debug("presigned URLs generated", "incident_id", incidentID, "expiry", outputURLs.ReportExpiry)
+
+	// Phase 1.2: Load incident data and system prompt
+	incidentData, err := e.loadIncidentData(workspacePath, incidentID)
+	if err != nil {
+		return -1, LogPaths{}, fmt.Errorf("failed to load incident data: %w", err)
+	}
+
+	// Phase 1.3: Capture prompt for auditability (create prompt-sent.md)
+	if err := e.capturePrompt(workspacePath, incidentID, prompt, incidentData.ClusterName); err != nil {
+		slog.Warn("failed to capture prompt for audit", "error", err)
+		// Continue execution - prompt capture failure is not fatal
+	} else {
+		// Read prompt-sent.md we just created for artifact storage
+		promptSentPath := filepath.Join(workspacePath, "prompt-sent.md")
+		if promptBytes, err := os.ReadFile(promptSentPath); err == nil {
+			incidentData.PromptSent = promptBytes
+		}
+	}
+
+	// Phase 1.4: Create ConfigMap with incident data
+	slog.Info("creating ConfigMap with incident data", "incident_id", incidentID)
+	configMapName, err := e.createConfigMap(ctx, incidentID, incidentData)
+	if err != nil {
+		return -1, LogPaths{}, fmt.Errorf("failed to create ConfigMap: %w", err)
+	}
+	slog.Debug("ConfigMap created", "name", configMapName)
+
+	// Ensure ConfigMap cleanup on exit (unless Job cleanup handles it)
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := e.k8sClient.DeleteConfigMap(cleanupCtx, e.config.Namespace, configMapName); err != nil {
+			slog.Warn("failed to cleanup ConfigMap", "name", configMapName, "error", err)
+		} else {
+			slog.Debug("ConfigMap cleaned up", "name", configMapName)
+		}
+	}()
+
+	// Phase 1.5: Create Job
+	slog.Info("creating Kubernetes Job", "incident_id", incidentID)
+	combinedPrompt := e.buildCombinedPrompt(prompt)
+	jobName, err := e.createJob(ctx, incidentID, incidentData.ClusterName, configMapName, outputURLs, combinedPrompt)
+	if err != nil {
+		return -1, LogPaths{}, fmt.Errorf("failed to create Job: %w", err)
+	}
+	slog.Info("Job created", "name", jobName, "incident_id", incidentID)
+
+	// Phase 3.1: Watch Job for completion
+	slog.Info("watching Job for completion", "job", jobName, "timeout", e.config.Timeout)
+	watchResult, err := e.watchJob(ctx, jobName)
+	if err != nil {
+		return -1, LogPaths{}, fmt.Errorf("failed to watch Job: %w", err)
+	}
+
+	slog.Info("Job completed",
+		"job", jobName,
+		"status", watchResult.Status,
+		"message", watchResult.Message,
+		"completion_time", watchResult.CompletionTime)
+
+	// Phase 3.2: Retrieve artifacts from Object Store
+	slog.Info("retrieving Job results from Object Store", "incident_id", incidentID)
+	jobResults, err := e.retrieveResults(ctx, incidentID, e.config.Debug)
+	if err != nil {
+		return -1, LogPaths{}, fmt.Errorf("failed to retrieve Job results: %w", err)
+	}
+
+	// Check for missing artifacts
+	if len(jobResults.Missing) > 0 {
+		slog.Warn("some artifacts were not uploaded by the Job",
+			"incident_id", incidentID,
+			"missing", jobResults.Missing)
+	}
+
+	// Phase 4: Process Job results (convert markdown, save artifacts, update database)
+	slog.Info("processing Job artifacts", "incident_id", incidentID)
+	output, err := e.processResults(ctx, incidentID, executionID, startedAt, jobResults, incidentData)
+	if err != nil {
+		slog.Error("failed to process Job results", "incident_id", incidentID, "error", err)
+		// Return exit code from result.json if available, otherwise -1
+		exitCode := -1
+		if jobResults.ResultJSON != nil {
+			exitCode = jobResults.ResultJSON.ExitCode
+		}
+		return exitCode, LogPaths{}, fmt.Errorf("failed to process Job results: %w", err)
+	}
+
+	// Determine final exit code
+	exitCode := 0
+	if jobResults.ResultJSON != nil {
+		exitCode = jobResults.ResultJSON.ExitCode
+	}
+
+	slog.Info("agent execution completed successfully",
+		"incident_id", incidentID,
+		"execution_id", executionID,
+		"exit_code", exitCode,
+		"report_url", output.ReportURL,
+		"root_cause", output.RootCause,
+		"confidence", output.Confidence)
+
+	// Return LogPaths with artifact information for notifications
+	// Log paths are empty since logs are in Object Store, not local files
+	logPaths := LogPaths{
+		ReportURL:  output.ReportURL,
+		RootCause:  output.RootCause,
+		Confidence: output.Confidence,
+	}
+
+	return exitCode, logPaths, nil
+}
+
+// IncidentData holds all data needed to create the ConfigMap and Job.
+type IncidentData struct {
+	IncidentJSON     string
+	PermissionsJSON  string
+	BaseTriagePrompt string
+	PromptSent       []byte
+	ClusterName      string
+}
+
+// loadIncidentData reads incident data from the workspace.
+func (e *K8sExecutor) loadIncidentData(workspacePath string, incidentID string) (*IncidentData, error) {
+	data := &IncidentData{}
+
+	// Read incident.json
+	incidentPath := filepath.Join(workspacePath, "incident.json")
+	incidentBytes, err := os.ReadFile(incidentPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read incident.json: %w", err)
+	}
+	data.IncidentJSON = string(incidentBytes)
+
+	// Parse incident to extract cluster name
+	var inc incident.Incident
+	if err := inc.UpdateFromFile(incidentPath); err != nil {
+		return nil, fmt.Errorf("failed to parse incident.json: %w", err)
+	}
+	data.ClusterName = inc.Cluster
+
+	// Read permissions.json (optional - may not exist if triage disabled)
+	permsPath := filepath.Join(workspacePath, "incident_cluster_permissions.json")
+	permsBytes, err := os.ReadFile(permsPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to read permissions.json: %w", err)
+		}
+		// Create empty permissions JSON if file doesn't exist
+		data.PermissionsJSON = "{}"
+	} else {
+		data.PermissionsJSON = string(permsBytes)
+	}
+
+	// Read base triage prompt
+	if e.config.SystemPromptFile != "" {
+		promptBytes, err := os.ReadFile(e.config.SystemPromptFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read base triage prompt: %w", err)
+		}
+		data.BaseTriagePrompt = string(promptBytes)
+	}
+
+	// Read prompt-sent.md if it exists (for artifact storage)
+	promptSentPath := filepath.Join(workspacePath, "prompt-sent.md")
+	if promptBytes, err := os.ReadFile(promptSentPath); err == nil {
+		data.PromptSent = promptBytes
+	}
+
+	return data, nil
+}
+
+// buildCombinedPrompt combines system prompt with additional prompt.
+func (e *K8sExecutor) buildCombinedPrompt(additionalPrompt string) string {
+	// The system prompt is already in the ConfigMap, so we only need to pass
+	// the additional prompt to the Job. The agent container will combine them.
+	return additionalPrompt
+}
+
+// createConfigMap creates a ConfigMap with incident data.
+func (e *K8sExecutor) createConfigMap(ctx context.Context, incidentID string, data *IncidentData) (string, error) {
+	cfg := k8s.ConfigMapConfig{
+		Namespace:   e.config.Namespace,
+		IncidentID:  incidentID,
+		ClusterName: data.ClusterName,
+		Labels: map[string]string{
+			"app":         "nc-agent-runner",
+			"incident-id": incidentID,
+			"cluster":     data.ClusterName,
+		},
+	}
+
+	cmData := k8s.ConfigMapData{
+		IncidentJSON:     data.IncidentJSON,
+		PermissionsJSON:  data.PermissionsJSON,
+		BaseTriagePrompt: data.BaseTriagePrompt,
+	}
+
+	return e.k8sClient.CreateIncidentConfigMap(ctx, cfg, cmData)
+}
+
+// createJob creates a Kubernetes Job for agent execution.
+func (e *K8sExecutor) createJob(
+	ctx context.Context,
+	incidentID string,
+	clusterName string,
+	configMapName string,
+	outputURLs *k8s.OutputURLs,
+	prompt string,
+) (string, error) {
+	cfg := k8s.JobConfig{
+		Namespace:      e.config.Namespace,
+		IncidentID:     incidentID,
+		ClusterName:    clusterName,
+		Image:          e.config.Image,
+		AgentCLI:       e.config.AgentCLI,
+		LLMModel:       e.config.Model,
+		Prompt:         prompt,
+		ConfigMapName:  configMapName,
+		SecretName:     "kubeconfig-" + clusterName, // Convention: kubeconfig-{cluster-name}
+		PresignedURLs:  outputURLs.ToPresignedURLs(),
+		Resources: k8s.ResourceConfig{
+			MemoryLimit:   e.config.MemoryLimit,
+			CPULimit:      e.config.CPULimit,
+			MemoryRequest: "512Mi", // Fixed for now
+			CPURequest:    "250m",  // Fixed for now
+		},
+		TTLSecondsAfterFinished: e.config.CleanupTTL,
+		ActiveDeadlineSeconds:   int64(e.config.Timeout),
+		BackoffLimit:            0, // No retries for triage
+		Labels: map[string]string{
+			"app":         "nc-agent-runner",
+			"incident-id": incidentID,
+			"cluster":     clusterName,
+		},
+	}
+
+	return e.k8sClient.CreateJob(ctx, cfg)
+}
+
+// watchJob watches a Job until completion.
+func (e *K8sExecutor) watchJob(ctx context.Context, jobName string) (*k8s.JobWatchResult, error) {
+	// Add buffer to watch timeout (should be longer than Job timeout)
+	watchTimeout := time.Duration(e.config.Timeout+e.tuning.Agent.TimeoutBufferSeconds) * time.Second
+
+	cfg := k8s.WatchJobConfig{
+		Namespace: e.config.Namespace,
+		JobName:   jobName,
+		Timeout:   watchTimeout,
+		LogFunc: func(message string) {
+			slog.Info("job watch event", "job", jobName, "message", message)
+		},
+	}
+
+	return e.k8sClient.WatchJob(ctx, cfg)
+}
+
+// retrieveResults downloads artifacts from Object Store.
+func (e *K8sExecutor) retrieveResults(ctx context.Context, incidentID string, debug bool) (*k8s.JobResults, error) {
+	// Use adapter to make ObjectStore compatible with RetrieveResults
+	adapter := k8s.NewBlobObjectStoreAdapter(e.objectStore.Bucket())
+
+	cfg := k8s.RetrieveResultsConfig{
+		IncidentID:            incidentID,
+		ObjectStore:           adapter,
+		IncludeSessionArchive: debug, // Include session archive in debug mode
+	}
+
+	return k8s.RetrieveResults(ctx, cfg)
+}
+
+// processResults processes Job artifacts and updates the database.
+// Returns the artifact information (reportURL, rootCause, confidence) for notifications.
+func (e *K8sExecutor) processResults(
+	ctx context.Context,
+	incidentID string,
+	executionID string,
+	startedAt time.Time,
+	jobResults *k8s.JobResults,
+	incidentData *IncidentData,
+) (*k8s.ProcessJobResultsOutput, error) {
+	cfg := k8s.ProcessJobResultsConfig{
+		IncidentID:      incidentID,
+		ExecutionID:     executionID,
+		JobResults:      jobResults,
+		StartedAt:       startedAt,
+		IncidentJSON:    []byte(incidentData.IncidentJSON),
+		PermissionsJSON: []byte(incidentData.PermissionsJSON),
+		PromptSent:      incidentData.PromptSent,
+		Debug:           e.config.Debug,
+	}
+
+	return e.processor.ProcessJobResults(ctx, cfg)
+}
+
+// capturePrompt writes the combined system + additional prompt to prompt-sent.md
+// for auditability and debugging. This is called before Job creation.
+func (e *K8sExecutor) capturePrompt(workspacePath string, incidentID string, additionalPrompt string, clusterName string) error {
+	// Read system prompt file content
+	var systemPromptContent string
+	if e.config.SystemPromptFile != "" {
+		content, err := os.ReadFile(e.config.SystemPromptFile)
+		if err != nil {
+			return fmt.Errorf("failed to read system prompt file: %w", err)
+		}
+		systemPromptContent = string(content)
+	}
+
+	// Generate the prompt-sent.md content
+	content := e.generatePromptSentContent(incidentID, clusterName, systemPromptContent, additionalPrompt)
+
+	// Write to workspace
+	promptPath := filepath.Join(workspacePath, "prompt-sent.md")
+	if err := os.WriteFile(promptPath, []byte(content), 0600); err != nil {
+		return fmt.Errorf("failed to write prompt-sent.md: %w", err)
+	}
+
+	slog.Debug("captured prompt to prompt-sent.md", "path", promptPath)
+	return nil
+}
+
+// generatePromptSentContent creates the markdown content for prompt-sent.md
+func (e *K8sExecutor) generatePromptSentContent(incidentID string, clusterName string, systemPrompt string, additionalPrompt string) string {
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+
+	// Use provided cluster name or fallback
+	if clusterName == "" {
+		clusterName = "unknown"
+	}
+
+	// Build the prompt-sent.md content
+	var content string
+	content = "# Prompt Sent to Agent\n\n"
+	content += "## Metadata\n"
+	content += fmt.Sprintf("- Timestamp: %s\n", timestamp)
+	content += fmt.Sprintf("- Incident ID: %s\n", incidentID)
+	content += fmt.Sprintf("- Cluster: %s\n", clusterName)
+	content += fmt.Sprintf("- Agent CLI: %s\n", e.config.AgentCLI)
+	content += fmt.Sprintf("- Model: %s\n", e.config.Model)
+	content += fmt.Sprintf("- Execution Mode: Kubernetes Job\n")
+	content += "\n"
+
+	content += "## System Prompt\n\n"
+	if systemPrompt != "" {
+		content += systemPrompt
+		if systemPrompt[len(systemPrompt)-1] != '\n' {
+			content += "\n"
+		}
+	} else {
+		content += "*No system prompt configured*\n"
+	}
+	content += "\n"
+
+	content += "## Additional Prompt\n\n"
+	if additionalPrompt != "" {
+		content += additionalPrompt
+		if additionalPrompt[len(additionalPrompt)-1] != '\n' {
+			content += "\n"
+		}
+	} else {
+		content += "*None provided*\n"
+	}
+
+	return content
+}

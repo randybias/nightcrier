@@ -70,7 +70,7 @@ agent_script_path: "./agent-container/run-agent.sh"
 
 # Optional: Path to the system prompt file for the agent
 # Environment variable: AGENT_SYSTEM_PROMPT_FILE
-agent_system_prompt_file: "./configs/triage-system-prompt.md"
+agent_system_prompt_file: "./configs/base-triage-prompt.md"
 
 # Optional: Comma-separated list of tools the agent is allowed to use
 # Default: Read,Write,Grep,Glob,Bash,Skill
@@ -142,6 +142,39 @@ skills:
 # Kubernetes context to use (default: current context)
 # Environment variable: KUBERNETES_CONTEXT
 # kubernetes_context: "my-cluster"
+
+# =============================================================================
+# K8s Executor Configuration (Kubernetes-native agent execution)
+# =============================================================================
+# Kubernetes namespace for Jobs and ConfigMaps
+# Default: nightcrier
+# Environment variable: K8S_NAMESPACE
+k8s_namespace: "nightcrier"
+
+# Container image for the agent runner
+# Default: nc-agent-runner:latest
+# Environment variable: K8S_IMAGE
+k8s_image: "nc-agent-runner:latest"
+
+# Job timeout in seconds
+# Default: 600
+# Environment variable: K8S_TIMEOUT
+k8s_timeout: 600
+
+# Memory limit for Job containers (e.g., "2Gi", "512Mi")
+# Default: 2Gi
+# Environment variable: K8S_MEMORY_LIMIT
+k8s_memory_limit: "2Gi"
+
+# CPU limit for Job containers (e.g., "1", "500m")
+# Default: 1
+# Environment variable: K8S_CPU_LIMIT
+k8s_cpu_limit: "1"
+
+# TTL for Job cleanup after completion (seconds)
+# Default: 3600 (1 hour)
+# Environment variable: K8S_CLEANUP_TTL
+k8s_cleanup_ttl: 3600
 
 # =============================================================================
 # Event Processing (Required)

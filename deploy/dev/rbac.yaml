@@ -1,0 +1,65 @@
+---
+# ServiceAccount for Nightcrier executor
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nightcrier-executor
+  namespace: nightcrier
+  labels:
+    app: nightcrier
+    component: executor
+
+---
+# Role with permissions to manage Jobs and ConfigMaps
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nightcrier-executor
+  namespace: nightcrier
+  labels:
+    app: nightcrier
+    component: executor
+rules:
+  # ConfigMap permissions (for incident data)
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "get", "list", "delete"]
+
+  # Job permissions (for agent execution)
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+
+  # Pod permissions (for log retrieval and status)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+
+  # Pod logs (for streaming agent output)
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+
+  # Secret permissions (read-only for API keys and kubeconfigs)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+
+---
+# RoleBinding to link ServiceAccount to Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nightcrier-executor
+  namespace: nightcrier
+  labels:
+    app: nightcrier
+    component: executor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nightcrier-executor
+subjects:
+  - kind: ServiceAccount
+    name: nightcrier-executor
+    namespace: nightcrier

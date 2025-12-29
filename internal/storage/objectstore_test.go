@@ -242,12 +242,92 @@ func TestObjectStoreSignedURL(t *testing.T) {
 	}
 }
 
+// TestObjectStoreSignedPutURL verifies SignedPutURL generation behavior.
+// Note: mem:// storage doesn't support SignedURL (returns Unimplemented),
+// so we test the error handling and parameter validation.
+func TestObjectStoreSignedPutURL(t *testing.T) {
+	ctx := context.Background()
+	defaultExpiry := 24 * time.Hour
+	store, err := NewObjectStore(ctx, "mem://", defaultExpiry)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	tests := []struct {
+		name         string
+		key          string
+		expiry       time.Duration
+		wantErr      bool
+		wantErrType  string // "empty_key", "unimplemented", etc.
+		expectExpiry time.Duration
+	}{
+		{
+			name:        "empty key",
+			key:         "",
+			expiry:      1 * time.Hour,
+			wantErr:     true,
+			wantErrType: "empty_key",
+		},
+		{
+			name:         "valid key with custom expiry - mem unimplemented",
+			key:          "test/output.txt",
+			expiry:       2 * time.Hour,
+			wantErr:      true,
+			wantErrType:  "unimplemented",
+			expectExpiry: 2 * time.Hour,
+		},
+		{
+			name:         "valid key with zero expiry (uses default) - mem unimplemented",
+			key:          "test/output2.txt",
+			expiry:       0,
+			wantErr:      true,
+			wantErrType:  "unimplemented",
+			expectExpiry: defaultExpiry,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			signedURL, expiryTime, err := store.SignedPutURL(ctx, tt.key, tt.expiry)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+				}
+				// For empty key, verify it's the right error
+				if tt.wantErrType == "empty_key" && !strings.Contains(err.Error(), "cannot be empty") {
+					t.Errorf("expected empty key error, got: %v", err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if signedURL == "" {
+				t.Errorf("expected non-empty signed URL")
+			}
+
+			// Verify expiry time is roughly correct (within 1 second)
+			expectedExpiry := time.Now().Add(tt.expectExpiry)
+			timeDiff := expiryTime.Sub(expectedExpiry)
+			if timeDiff < -time.Second || timeDiff > time.Second {
+				t.Errorf("expiry time mismatch: expected ~%v, got %v (diff: %v)",
+					expectedExpiry, expiryTime, timeDiff)
+			}
+		})
+	}
+}
+
 // TestObjectStoreCanonicalURL verifies CanonicalURL generation with mem:// storage.
 func TestObjectStoreCanonicalURL(t *testing.T) {
 	tests := []struct {
-		name      string
-		key       string
-		wantURL   string
+		name    string
+		key     string
+		wantURL string
 	}{
 		{
 			name:    "mem storage with path",
@@ -292,16 +372,16 @@ func TestObjectStoreCanonicalURL(t *testing.T) {
 // TestObjectStoreCanonicalURLFormats verifies URL format for each provider without connection.
 func TestObjectStoreCanonicalURLFormats(t *testing.T) {
 	tests := []struct {
-		name       string
-		provider   string
-		bucketName string
-		region     string
-		endpoint   string
-		account    string
+		name         string
+		provider     string
+		bucketName   string
+		region       string
+		endpoint     string
+		account      string
 		usePathStyle bool
 		disableHTTPS bool
-		key        string
-		wantFormat string // regex or exact match pattern
+		key          string
+		wantFormat   string // regex or exact match pattern
 	}{
 		{
 			name:       "s3 aws standard",

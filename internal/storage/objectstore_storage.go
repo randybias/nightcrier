@@ -299,20 +299,20 @@ func (o *ObjectStoreStorage) SaveIncident(ctx context.Context, incidentID string
 		expiresAt = expiry
 	}
 
-	// Upload Claude Code session archive if present (DEBUG mode only)
-	if len(artifacts.ClaudeSessionArchive) > 0 {
-		filename := "claude-session.tar.gz"
+	// Upload agent session archive if present (DEBUG mode only)
+	if len(artifacts.AgentSessionArchive) > 0 {
+		filename := "agent-session.tar.gz"
 		key := fmt.Sprintf("%s/logs/%s", incidentID, filename)
 		contentType := getContentTypeFromFilename(filename)
 
-		if err := o.store.Upload(ctx, key, artifacts.ClaudeSessionArchive, contentType); err != nil {
-			log.Printf("Error uploading claude session archive for incident %s: %v", incidentID, err)
+		if err := o.store.Upload(ctx, key, artifacts.AgentSessionArchive, contentType); err != nil {
+			log.Printf("Error uploading agent session archive for incident %s: %v", incidentID, err)
 			lastError = err
 		} else {
 			// Generate signed URL for session archive
 			signedURL, expiry, err := o.store.SignedURL(ctx, key)
 			if err != nil {
-				log.Printf("Error generating signed URL for claude session archive: %v", err)
+				log.Printf("Error generating signed URL for agent session archive: %v", err)
 				lastError = err
 			} else {
 				// Generate canonical URL

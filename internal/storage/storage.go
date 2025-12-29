@@ -41,8 +41,9 @@ type IncidentArtifacts struct {
 	ClusterPermissionsJSON []byte
 	// AgentLogs contains the captured log output from the agent's execution (DEBUG mode only)
 	AgentLogs AgentLogs
-	// ClaudeSessionArchive contains the tar.gz archive of ~/.claude from the agent container (DEBUG mode only)
-	ClaudeSessionArchive []byte
+	// AgentSessionArchive contains the tar.gz archive of the agent's session directory (DEBUG mode only)
+	// For Claude: ~/.claude, for Codex/Gemini/Goose: their respective session directories
+	AgentSessionArchive []byte
 	// PromptSent is the captured prompt sent to the agent (system + additional)
 	PromptSent []byte
 }

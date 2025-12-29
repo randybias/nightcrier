@@ -47,6 +47,15 @@ type Config struct {
 	KubeconfigPath    string `mapstructure:"kubeconfig_path"`
 	KubernetesContext string `mapstructure:"kubernetes_context"`
 
+	// K8s Executor Configuration (Phase 5: K8s-native agent execution)
+	// When enabled, agents run in Kubernetes Jobs instead of Docker containers
+	K8sNamespace    string `mapstructure:"k8s_namespace"`      // Namespace for Jobs/ConfigMaps (default: nightcrier)
+	K8sImage        string `mapstructure:"k8s_image"`          // Container image for agent (default: nc-agent-runner:latest)
+	K8sTimeout      int    `mapstructure:"k8s_timeout"`        // Job timeout in seconds (default: 600)
+	K8sMemoryLimit string `mapstructure:"k8s_memory_limit"` // Memory limit (default: 2Gi)
+	K8sCPULimit    string `mapstructure:"k8s_cpu_limit"`    // CPU limit (default: 1)
+	K8sCleanupTTL  int    `mapstructure:"k8s_cleanup_ttl"`  // TTL for Job cleanup in seconds (default: 3600)
+
 	// Event Processing (Phase 1 additions)
 	SeverityThreshold   string `mapstructure:"severity_threshold"`
 	MaxConcurrentAgents int    `mapstructure:"max_concurrent_agents"`
@@ -216,6 +225,12 @@ func bindEnvVars() {
 		"gemini_api_key":                  "GEMINI_API_KEY",
 		"kubeconfig_path":                 "KUBECONFIG_PATH",
 		"kubernetes_context":              "KUBERNETES_CONTEXT",
+		"k8s_namespace":                   "K8S_NAMESPACE",
+		"k8s_image":                       "K8S_IMAGE",
+		"k8s_timeout":                     "K8S_TIMEOUT",
+		"k8s_memory_limit":                "K8S_MEMORY_LIMIT",
+		"k8s_cpu_limit":                   "K8S_CPU_LIMIT",
+		"k8s_cleanup_ttl":                 "K8S_CLEANUP_TTL",
 		"severity_threshold":              "SEVERITY_THRESHOLD",
 		"max_concurrent_agents":           "MAX_CONCURRENT_AGENTS",
 		"global_queue_size":               "GLOBAL_QUEUE_SIZE",
@@ -366,10 +381,6 @@ func (c *Config) Validate() error {
 	}
 
 	// Required: Agent Configuration
-	if c.AgentScriptPath == "" {
-		return missingFieldError("agent_script_path", "AGENT_SCRIPT_PATH")
-	}
-
 	if c.AgentTimeout == 0 {
 		return missingFieldError("agent_timeout", "AGENT_TIMEOUT")
 	}
@@ -380,10 +391,6 @@ func (c *Config) Validate() error {
 
 	if c.AgentCLI == "" {
 		return missingFieldError("agent_cli", "AGENT_CLI")
-	}
-
-	if c.AgentImage == "" {
-		return missingFieldError("agent_image", "AGENT_IMAGE")
 	}
 
 	// Note: AdditionalAgentPrompt is optional - system prompt drives investigation
@@ -499,6 +506,26 @@ func (c *Config) Validate() error {
 	// Validate state storage configuration
 	if err := c.ValidateStateStorage(); err != nil {
 		return err
+	}
+
+	// Apply K8s executor defaults
+	if c.K8sNamespace == "" {
+		c.K8sNamespace = "nightcrier"
+	}
+	if c.K8sImage == "" {
+		c.K8sImage = "nc-agent-runner:latest"
+	}
+	if c.K8sTimeout == 0 {
+		c.K8sTimeout = 600
+	}
+	if c.K8sMemoryLimit == "" {
+		c.K8sMemoryLimit = "2Gi"
+	}
+	if c.K8sCPULimit == "" {
+		c.K8sCPULimit = "1"
+	}
+	if c.K8sCleanupTTL == 0 {
+		c.K8sCleanupTTL = 3600
 	}
 
 	return nil

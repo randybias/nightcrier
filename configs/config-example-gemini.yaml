@@ -26,11 +26,12 @@ log_level: "info"
 
 # Agent configuration - Gemini with GEMINI.md context files
 agent_script_path: "./agent-container/run-agent.sh"
-agent_system_prompt_file: "./configs/triage-system-prompt.md"
+agent_system_prompt_file: "./configs/base-triage-prompt.md"
 agent_allowed_tools: "Read,Write,Grep,Glob,Bash,Skill"
 
 # Gemini model selection
-agent_model: "gemini-2.0-flash-exp"  # Use Gemini model names directly
+agent_model: "gemini-3-flash-preview"  # Default: fast, cost-effective
+# agent_model: "gemini-3-pro-preview"  # Alternative: higher capability
 agent_cli: "gemini"
 agent_timeout: 300
 agent_image: "nightcrier-agent:latest"

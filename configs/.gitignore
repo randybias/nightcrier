@@ -9,4 +9,4 @@
 !config-example-codex.yaml
 !config-example-gemini.yaml
 !config-example-goose.yaml
-!triage-system-prompt.md
+!base-triage-prompt.md

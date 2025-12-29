@@ -3,8 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/rbias/nightcrier/internal/config"
@@ -37,205 +35,69 @@ func defaultTestTuning() *config.TuningConfig {
 }
 
 func TestDetectAgentFailure(t *testing.T) {
-	// Create a temporary directory for test workspaces
-	tempDir := t.TempDir()
-
 	tests := []struct {
 		name            string
-		setupFunc       func(string) error
-		workspacePath   string
 		exitCode        int
 		err             error
 		expectFailed    bool
 		expectReasonMsg string
 	}{
 		{
-			name: "success - exit code 0, file exists with sufficient size",
-			setupFunc: func(workspacePath string) error {
-				outputDir := filepath.Join(workspacePath, "output")
-				if err := os.MkdirAll(outputDir, 0755); err != nil {
-					return err
-				}
-				// Create file with > 100 bytes
-				content := make([]byte, 150)
-				for i := range content {
-					content[i] = 'a'
-				}
-				return os.WriteFile(filepath.Join(outputDir, "investigation.md"), content, 0644)
-			},
+			name:            "success - exit code 0, no error",
 			exitCode:        0,
 			err:             nil,
 			expectFailed:    false,
 			expectReasonMsg: "",
 		},
 		{
-			name: "failure - execution error",
-			setupFunc: func(workspacePath string) error {
-				return nil
-			},
+			name:            "failure - execution error",
 			exitCode:        0,
 			err:             errors.New("mock execution error"),
 			expectFailed:    true,
-			expectReasonMsg: "agent execution error",
+			expectReasonMsg: "agent execution error: mock execution error",
 		},
 		{
-			name: "failure - non-zero exit code",
-			setupFunc: func(workspacePath string) error {
-				outputDir := filepath.Join(workspacePath, "output")
-				if err := os.MkdirAll(outputDir, 0755); err != nil {
-					return err
-				}
-				content := make([]byte, 150)
-				return os.WriteFile(filepath.Join(outputDir, "investigation.md"), content, 0644)
-			},
+			name:            "failure - non-zero exit code",
 			exitCode:        1,
 			err:             nil,
 			expectFailed:    true,
 			expectReasonMsg: "agent exited with non-zero code: 1",
 		},
 		{
-			name: "failure - investigation.md file not found",
-			setupFunc: func(workspacePath string) error {
-				// Create output directory but no file
-				outputDir := filepath.Join(workspacePath, "output")
-				return os.MkdirAll(outputDir, 0755)
-			},
-			exitCode:        0,
-			err:             nil,
-			expectFailed:    true,
-			expectReasonMsg: "investigation.md file not found",
-		},
-		{
-			name: "failure - investigation.md too small (0 bytes)",
-			setupFunc: func(workspacePath string) error {
-				outputDir := filepath.Join(workspacePath, "output")
-				if err := os.MkdirAll(outputDir, 0755); err != nil {
-					return err
-				}
-				// Create empty file
-				return os.WriteFile(filepath.Join(outputDir, "investigation.md"), []byte{}, 0644)
-			},
-			exitCode:        0,
-			err:             nil,
-			expectFailed:    true,
-			expectReasonMsg: "investigation.md too small: 0 bytes (expected >= 100)",
-		},
-		{
-			name: "failure - investigation.md too small (exactly 99 bytes)",
-			setupFunc: func(workspacePath string) error {
-				outputDir := filepath.Join(workspacePath, "output")
-				if err := os.MkdirAll(outputDir, 0755); err != nil {
-					return err
-				}
-				// Create file with exactly 99 bytes (should fail as we need >= 100)
-				content := make([]byte, 99)
-				return os.WriteFile(filepath.Join(outputDir, "investigation.md"), content, 0644)
-			},
-			exitCode:        0,
-			err:             nil,
-			expectFailed:    true,
-			expectReasonMsg: "investigation.md too small: 99 bytes (expected >= 100)",
-		},
-		{
-			name: "success - investigation.md exactly 100 bytes (boundary test)",
-			setupFunc: func(workspacePath string) error {
-				outputDir := filepath.Join(workspacePath, "output")
-				if err := os.MkdirAll(outputDir, 0755); err != nil {
-					return err
-				}
-				// Create file with exactly 100 bytes (should pass with >= check)
-				content := make([]byte, 100)
-				return os.WriteFile(filepath.Join(outputDir, "investigation.md"), content, 0644)
-			},
-			exitCode:        0,
-			err:             nil,
-			expectFailed:    false,
-			expectReasonMsg: "",
-		},
-		{
-			name: "failure - multiple issues (exit code takes precedence over missing file)",
-			setupFunc: func(workspacePath string) error {
-				// Don't create the file at all
-				return nil
-			},
+			name:            "failure - exit code 42",
 			exitCode:        42,
 			err:             nil,
 			expectFailed:    true,
 			expectReasonMsg: "agent exited with non-zero code: 42",
 		},
+		{
+			name:            "failure - execution error takes precedence over exit code",
+			exitCode:        1,
+			err:             errors.New("timeout"),
+			expectFailed:    true,
+			expectReasonMsg: "agent execution error: timeout",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a unique workspace for this test
-			workspacePath := filepath.Join(tempDir, tt.name)
-			if err := os.MkdirAll(workspacePath, 0755); err != nil {
-				t.Fatalf("failed to create workspace: %v", err)
-			}
+			failed, reason := detectAgentFailure(tt.exitCode, tt.err)
 
-			// Setup test environment
-			if err := tt.setupFunc(workspacePath); err != nil {
-				t.Fatalf("setup failed: %v", err)
-			}
-
-			// Call the function under test
-			tuning := defaultTestTuning()
-			failed, reason := detectAgentFailure(workspacePath, tt.exitCode, tt.err, tuning)
-
-			// Validate results
 			if failed != tt.expectFailed {
 				t.Errorf("detectAgentFailure() failed = %v, want %v", failed, tt.expectFailed)
 			}
 
-			if tt.expectReasonMsg != "" {
-				if reason != tt.expectReasonMsg {
-					// For error messages, check if the expected message is contained
-					if len(reason) < len(tt.expectReasonMsg) || reason[:len(tt.expectReasonMsg)] != tt.expectReasonMsg {
-						t.Errorf("detectAgentFailure() reason = %q, want to start with %q", reason, tt.expectReasonMsg)
-					}
-				}
-			} else if reason != "" {
-				t.Errorf("detectAgentFailure() reason = %q, want empty string", reason)
+			if reason != tt.expectReasonMsg {
+				t.Errorf("detectAgentFailure() reason = %q, want %q", reason, tt.expectReasonMsg)
 			}
 		})
 	}
 }
 
-func TestDetectAgentFailure_ExitCodeCheckedBeforeFileChecks(t *testing.T) {
-	// This test verifies that exit code is checked before file system operations
-	// This is important because if the agent fails early, we don't want to waste time
-	// checking files that may not have been created
-	tempDir := t.TempDir()
-	workspacePath := filepath.Join(tempDir, "test")
-	if err := os.MkdirAll(workspacePath, 0755); err != nil {
-		t.Fatalf("failed to create workspace: %v", err)
-	}
-
-	// Don't create any files
-	tuning := defaultTestTuning()
-	failed, reason := detectAgentFailure(workspacePath, 1, nil, tuning)
-
-	if !failed {
-		t.Error("expected failure when exit code is non-zero")
-	}
-
-	// The reason should mention the exit code, not the missing file
-	if reason != "agent exited with non-zero code: 1" {
-		t.Errorf("expected exit code error message, got: %s", reason)
-	}
-}
-
 func TestDetectAgentFailure_ExecutionErrorCheckedFirst(t *testing.T) {
-	// This test verifies that execution errors are checked before everything else
-	tempDir := t.TempDir()
-	workspacePath := filepath.Join(tempDir, "test")
-	if err := os.MkdirAll(workspacePath, 0755); err != nil {
-		t.Fatalf("failed to create workspace: %v", err)
-	}
-
+	// This test verifies that execution errors are checked before exit code
 	testErr := errors.New("test error")
-	tuning := defaultTestTuning()
-	failed, reason := detectAgentFailure(workspacePath, 0, testErr, tuning)
+	failed, reason := detectAgentFailure(0, testErr)
 
 	if !failed {
 		t.Error("expected failure when execution error is present")
@@ -253,26 +115,20 @@ func TestProcessEvent_Integration(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
+	// Note: With K8s executor, artifact validation happens in the executor during
+	// retrieval from blob storage, not via local file checks. detectAgentFailure
+	// only checks exit code and execution error.
 	tests := []struct {
-		name                  string
-		setupWorkspace        func(string) error
-		mockAgentExitCode     int
-		mockAgentError        error
-		expectStatus          string
-		expectStorageSkipped  bool
-		expectSlackSkipped    bool
+		name                    string
+		mockAgentExitCode       int
+		mockAgentError          error
+		expectStatus            string
+		expectStorageSkipped    bool
+		expectSlackSkipped      bool
 		expectResultFileWritten bool
 	}{
 		{
-			name: "agent success - full flow",
-			setupWorkspace: func(workspacePath string) error {
-				outputDir := filepath.Join(workspacePath, "output")
-				if err := os.MkdirAll(outputDir, 0755); err != nil {
-					return err
-				}
-				content := []byte("# Investigation Report\n\nThis is a successful investigation with sufficient content to pass validation checks.")
-				return os.WriteFile(filepath.Join(outputDir, "investigation.md"), content, 0644)
-			},
+			name:                    "agent success - exit code 0, no error",
 			mockAgentExitCode:       0,
 			mockAgentError:          nil,
 			expectStatus:            "completed",
@@ -281,11 +137,7 @@ func TestProcessEvent_Integration(t *testing.T) {
 			expectResultFileWritten: true,
 		},
 		{
-			name: "agent failure - exit code 1",
-			setupWorkspace: func(workspacePath string) error {
-				// Agent failed, might not have created output
-				return nil
-			},
+			name:                    "agent failure - exit code 1",
 			mockAgentExitCode:       1,
 			mockAgentError:          nil,
 			expectStatus:            "agent_failed",
@@ -294,44 +146,9 @@ func TestProcessEvent_Integration(t *testing.T) {
 			expectResultFileWritten: true,
 		},
 		{
-			name: "agent failure - execution error",
-			setupWorkspace: func(workspacePath string) error {
-				return nil
-			},
+			name:                    "agent failure - execution error",
 			mockAgentExitCode:       0,
 			mockAgentError:          errors.New("simulated LLM API failure"),
-			expectStatus:            "agent_failed",
-			expectStorageSkipped:    true,
-			expectSlackSkipped:      true,
-			expectResultFileWritten: true,
-		},
-		{
-			name: "agent failure - missing output file",
-			setupWorkspace: func(workspacePath string) error {
-				// Create output dir but no file
-				outputDir := filepath.Join(workspacePath, "output")
-				return os.MkdirAll(outputDir, 0755)
-			},
-			mockAgentExitCode:       0,
-			mockAgentError:          nil,
-			expectStatus:            "agent_failed",
-			expectStorageSkipped:    true,
-			expectSlackSkipped:      true,
-			expectResultFileWritten: true,
-		},
-		{
-			name: "agent failure - output file too small",
-			setupWorkspace: func(workspacePath string) error {
-				outputDir := filepath.Join(workspacePath, "output")
-				if err := os.MkdirAll(outputDir, 0755); err != nil {
-					return err
-				}
-				// Create file with only 50 bytes
-				content := make([]byte, 50)
-				return os.WriteFile(filepath.Join(outputDir, "investigation.md"), content, 0644)
-			},
-			mockAgentExitCode:       0,
-			mockAgentError:          nil,
 			expectStatus:            "agent_failed",
 			expectStorageSkipped:    true,
 			expectSlackSkipped:      true,
@@ -341,25 +158,12 @@ func TestProcessEvent_Integration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create temporary workspace
-			tempDir := t.TempDir()
-			workspacePath := filepath.Join(tempDir, "workspace")
-			if err := os.MkdirAll(workspacePath, 0755); err != nil {
-				t.Fatalf("failed to create workspace: %v", err)
-			}
-
-			// Setup workspace according to test case
-			if err := tt.setupWorkspace(workspacePath); err != nil {
-				t.Fatalf("failed to setup workspace: %v", err)
-			}
-
 			// Simulate agent execution result
 			exitCode := tt.mockAgentExitCode
 			execErr := tt.mockAgentError
 
 			// Call detectAgentFailure (this is the core validation logic)
-			tuning := defaultTestTuning()
-			agentFailed, failureReason := detectAgentFailure(workspacePath, exitCode, execErr, tuning)
+			agentFailed, failureReason := detectAgentFailure(exitCode, execErr)
 
 			// Verify agent failure detection
 			if tt.expectStatus == "agent_failed" {
@@ -376,22 +180,15 @@ func TestProcessEvent_Integration(t *testing.T) {
 				}
 			}
 
-			// Simulate writing incident.json (this would happen in processEvent)
-			incidentPath := filepath.Join(workspacePath, "incident.json")
+			// Determine expected status based on agent failure detection
 			status := "completed"
 			if agentFailed {
 				status = "agent_failed"
 			}
-			incidentData := map[string]interface{}{
-				"status":         status,
-				"failure_reason": failureReason,
-				"exit_code":      exitCode,
-			}
 
-			// In real processEvent, incident.WriteToFile is called
-			// Here we verify the status is correct
-			if incidentData["status"] != tt.expectStatus {
-				t.Errorf("expected status %q, got %q", tt.expectStatus, incidentData["status"])
+			// Verify status matches expectation
+			if status != tt.expectStatus {
+				t.Errorf("expected status %q, got %q", tt.expectStatus, status)
 			}
 
 			// Verify storage/slack skipping logic matches expectations
@@ -406,14 +203,7 @@ func TestProcessEvent_Integration(t *testing.T) {
 				t.Errorf("slack skip logic: expected %v, got %v", tt.expectSlackSkipped, shouldSkipSlack)
 			}
 
-			// Verify that incident.json would be written (in real flow)
-			if tt.expectResultFileWritten {
-				// In the actual implementation, incident.json is always written
-				// We verify the path exists (we would write to it)
-				if _, err := os.Stat(filepath.Dir(incidentPath)); os.IsNotExist(err) {
-					t.Errorf("workspace directory should exist for writing incident.json")
-				}
-			}
+			t.Logf("Test passed: status=%s, failureReason=%q", status, failureReason)
 		})
 	}
 }
@@ -422,39 +212,31 @@ func TestProcessEvent_Integration(t *testing.T) {
 func TestProcessEvent_IntegrationFlow(t *testing.T) {
 	t.Log("Integration Flow Test - Documents expected behavior for manual testing")
 	t.Log("")
+	t.Log("Note: With K8s executor, artifact validation happens in the executor during")
+	t.Log("retrieval from blob storage. detectAgentFailure only checks exit code and errors.")
+	t.Log("")
 	t.Log("AGENT SUCCESS SCENARIO:")
 	t.Log("  1. Agent exits with code 0")
-	t.Log("  2. investigation.md exists and is > 100 bytes")
+	t.Log("  2. K8s executor retrieves artifacts from blob storage")
 	t.Log("  3. incident.json written with status='completed'")
-	t.Log("  4. Azure storage upload executed")
-	t.Log("  5. Slack notification sent with report URL")
+	t.Log("  4. Slack notification sent with report URL")
 	t.Log("")
 	t.Log("AGENT FAILURE SCENARIO (Exit Code 1):")
 	t.Log("  1. Agent exits with code 1")
 	t.Log("  2. detectAgentFailure() returns (true, 'agent exited with non-zero code: 1')")
 	t.Log("  3. incident.json written with status='agent_failed', failure_reason set")
-	t.Log("  4. Azure storage upload SKIPPED (log: 'skipping storage upload due to agent failure')")
-	t.Log("  5. Slack notification SKIPPED (log: 'skipping slack notification due to agent failure')")
+	t.Log("  4. Slack notification SKIPPED (log: 'skipping slack notification due to agent failure')")
 	t.Log("")
 	t.Log("AGENT FAILURE SCENARIO (LLM API Error):")
 	t.Log("  1. Agent execution returns error (e.g., API timeout)")
 	t.Log("  2. detectAgentFailure() returns (true, 'agent execution error: ...')")
 	t.Log("  3. incident.json written with status='agent_failed', failure_reason set")
-	t.Log("  4. Azure storage upload SKIPPED")
-	t.Log("  5. Slack notification SKIPPED")
-	t.Log("")
-	t.Log("AGENT FAILURE SCENARIO (Missing/Invalid Output):")
-	t.Log("  1. Agent exits with code 0 but investigation.md missing or too small")
-	t.Log("  2. detectAgentFailure() returns (true, 'investigation.md file not found' or 'too small')")
-	t.Log("  3. incident.json written with status='agent_failed', failure_reason set")
-	t.Log("  4. Azure storage upload SKIPPED")
-	t.Log("  5. Slack notification SKIPPED")
+	t.Log("  4. Slack notification SKIPPED")
 	t.Log("")
 	t.Log("MANUAL TESTING:")
-	t.Log("  Run: go build -o runner ./cmd/runner")
-	t.Log("  Test success: ./runner -c configs/config-test.yaml")
-	t.Log("  Test failure: Modify agent script to exit 1 or simulate API failure")
-	t.Log("  Verify: Check logs for skip messages and incident.json status")
+	t.Log("  Run: go build -o bin/nightcrier ./cmd/nightcrier")
+	t.Log("  Test: ./bin/nightcrier --config configs/test-config.yaml")
+	t.Log("  Verify: Check logs for agent execution status")
 }
 
 // TestCircuitBreakerIntegration tests the complete circuit breaker alert flow
@@ -1115,5 +897,22 @@ func TestCircuitBreakerConfigInteraction(t *testing.T) {
 				t.Errorf("shouldUpload = %v, want %v", shouldUpload, tt.expectStorageUpload)
 			}
 		})
+	}
+}
+
+// TestSingleRunFlag verifies the --single-run flag is properly defined
+func TestSingleRunFlag(t *testing.T) {
+	// Verify the flag exists and has correct default
+	flag := rootCmd.Flags().Lookup("single-run")
+	if flag == nil {
+		t.Fatal("--single-run flag not found")
+	}
+
+	if flag.DefValue != "false" {
+		t.Errorf("--single-run default value = %q, want %q", flag.DefValue, "false")
+	}
+
+	if flag.Usage != "Process one fault event then exit (for test harnesses)" {
+		t.Errorf("--single-run usage = %q, want %q", flag.Usage, "Process one fault event then exit (for test harnesses)")
 	}
 }

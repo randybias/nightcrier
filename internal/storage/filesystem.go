@@ -78,7 +78,7 @@ func (fs *FilesystemStorage) SaveIncident(ctx context.Context, incidentID string
 
 	// Create logs subdirectory and write agent logs and session archive
 	logURLs := make(map[string]string)
-	if artifacts.AgentLogs.Stdout != nil || artifacts.AgentLogs.Stderr != nil || artifacts.AgentLogs.Combined != nil || len(artifacts.ClaudeSessionArchive) > 0 {
+	if artifacts.AgentLogs.Stdout != nil || artifacts.AgentLogs.Stderr != nil || artifacts.AgentLogs.Combined != nil || len(artifacts.AgentSessionArchive) > 0 {
 		logsDir := filepath.Join(incidentDir, "logs")
 		if err := os.MkdirAll(logsDir, 0700); err != nil {
 			return nil, fmt.Errorf("failed to create logs directory: %w", err)
@@ -120,13 +120,13 @@ func (fs *FilesystemStorage) SaveIncident(ctx context.Context, incidentID string
 			logURLs["agent-commands-executed.log"] = commandsPath
 		}
 
-		// Write Claude session archive if not empty
-		if len(artifacts.ClaudeSessionArchive) > 0 {
-			sessionPath := filepath.Join(logsDir, "claude-session.tar.gz")
-			if err := os.WriteFile(sessionPath, artifacts.ClaudeSessionArchive, 0600); err != nil {
-				return nil, fmt.Errorf("failed to write claude-session.tar.gz: %w", err)
+		// Write agent session archive if not empty
+		if len(artifacts.AgentSessionArchive) > 0 {
+			sessionPath := filepath.Join(logsDir, "agent-session.tar.gz")
+			if err := os.WriteFile(sessionPath, artifacts.AgentSessionArchive, 0600); err != nil {
+				return nil, fmt.Errorf("failed to write agent-session.tar.gz: %w", err)
 			}
-			logURLs["claude-session.tar.gz"] = sessionPath
+			logURLs["agent-session.tar.gz"] = sessionPath
 		}
 	}
 

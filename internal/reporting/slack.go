@@ -350,6 +350,11 @@ func ExtractSummaryFromReport(workspacePath string) (rootCause, confidence strin
 		return "", "", fmt.Errorf("failed to read investigation report: %w", err)
 	}
 
+	return ExtractSummaryFromContent(content)
+}
+
+// ExtractSummaryFromContent extracts root cause and confidence from report markdown content
+func ExtractSummaryFromContent(content []byte) (rootCause, confidence string, err error) {
 	lines := strings.Split(string(content), "\n")
 
 	// Extract root cause and confidence from the report
