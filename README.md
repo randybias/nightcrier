@@ -1,3 +1,5 @@
+![Nightcrier Project Banner](./assets/nightcrier-banner-github.jpeg)
+
 # Nightcrier
 
 An AI-powered Kubernetes incident triage system that reacts to investigates well understood faults using AI agents.  It is
