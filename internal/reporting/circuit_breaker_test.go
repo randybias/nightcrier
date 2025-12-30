@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rbias/nightcrier/internal/config"
+	"github.com/randybias/nightcrier/internal/config"
 )
 
 func defaultTestTuning() *config.TuningConfig {

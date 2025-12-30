@@ -33,6 +33,11 @@ clusters:
     # Triage agent configuration
     triage:
       enabled: true
+      # Path to read-only kubeconfig file for this cluster
+      # During bootstrap, Nightcrier reads this file and creates a Secret
+      # named "kubeconfig-{cluster-name}" containing the file contents.
+      # Agents running in Jobs use this Secret to access the cluster.
+      # This should be a LIMITED, READ-ONLY kubeconfig (not admin access).
       kubeconfig: "./kubeconfigs/prod-us-east-1-readonly.yaml"
       # Allow agent to read secrets/configmaps for Helm debugging
       # Default: false (disabled for security - secrets may contain credentials)
@@ -116,9 +121,17 @@ skills:
 # LLM API Keys (At least one required)
 # =============================================================================
 # REQUIRED: At least one LLM API key must be provided.
-# These can also be set via environment variables.
+# These can be set via environment variables OR this configuration file.
 # Only set the key(s) for the LLM provider(s) you're using.
 # WARNING: Be careful not to commit API keys to version control!
+#
+# BOOTSTRAP INTEGRATION:
+# During startup, Nightcrier creates an "ai-api-keys" Secret in Kubernetes
+# containing these API keys. This Secret is then mounted into agent Job containers.
+# The Secret is only created if it doesn't already exist (idempotent).
+#
+# If you manually create the ai-api-keys Secret, Nightcrier will skip creation
+# and use your existing Secret. At least one non-empty API key is required.
 #
 # Anthropic API key (for Claude)
 # Environment variable: ANTHROPIC_API_KEY
@@ -135,7 +148,30 @@ skills:
 # =============================================================================
 # Kubernetes Configuration
 # =============================================================================
-# Path to kubeconfig file
+# BOOTSTRAP BEHAVIOR:
+# On startup, Nightcrier automatically provisions required Kubernetes resources
+# if they don't already exist:
+#   - Namespace (k8s_namespace)
+#   - ServiceAccount, Role, RoleBinding (for agent execution)
+#   - ai-api-keys Secret (from API keys below)
+#   - kubeconfig-{cluster} Secrets (from triage.kubeconfig paths)
+#
+# Bootstrap operations are IDEMPOTENT - existing resources are never modified.
+# If resources already exist (manually created or from previous runs), they are skipped.
+#
+# KUBECONFIG DISTINCTION:
+# - kubeconfig_path: Admin kubeconfig for Nightcrier to connect and bootstrap resources
+#   Requires elevated permissions (create namespaces, RBAC, Secrets)
+#   Sourced from: KUBECONFIG env var > kubeconfig_path config > ~/.kube/config
+#
+# - triage.kubeconfig (per cluster): Read-only kubeconfig for AI agents
+#   Used by agents running in Jobs to investigate incidents
+#   Stored in kubeconfig-{cluster-name} Secrets for agent access
+#   Should have limited, read-only permissions
+#
+# These are typically DIFFERENT files with different permission levels.
+#
+# Path to kubeconfig file for bootstrap connection
 # Environment variable: KUBECONFIG_PATH
 # kubeconfig_path: "~/.kube/config"
 
@@ -155,6 +191,15 @@ k8s_namespace: "nightcrier"
 # Default: nc-agent-runner:latest
 # Environment variable: K8S_IMAGE
 k8s_image: "nc-agent-runner:latest"
+
+# Image pull policy for the agent container
+# Options: Always, Never, IfNotPresent
+# - Always: Always pull the image from the registry
+# - Never: Never pull, only use local images (for development with kind)
+# - IfNotPresent: Pull if the image isn't already present locally (default)
+# Default: IfNotPresent
+# Environment variable: K8S_IMAGE_PULL_POLICY
+k8s_image_pull_policy: "IfNotPresent"
 
 # Job timeout in seconds
 # Default: 600

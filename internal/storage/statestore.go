@@ -5,8 +5,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/rbias/nightcrier/internal/events"
-	"github.com/rbias/nightcrier/internal/incident"
+	"github.com/randybias/nightcrier/internal/events"
+	"github.com/randybias/nightcrier/internal/incident"
 )
 
 // StateStore defines the interface for persisting incident state to a SQL database.

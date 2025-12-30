@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/rbias/nightcrier/internal/events"
+	"github.com/randybias/nightcrier/internal/events"
 )
 
 // Status constants for incident lifecycle

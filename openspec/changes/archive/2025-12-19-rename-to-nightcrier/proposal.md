@@ -19,7 +19,7 @@ The name "nightcrier" captures the essence of the system: a herald that announce
 
 1. **Go Module** (`go.mod`)
    - From: `github.com/rbias/kubernetes-mcp-alerts-event-runner`
-   - To: `github.com/rbias/nightcrier`
+   - To: `github.com/randybias/nightcrier`
 
 2. **Import Paths** (all Go files)
    - Update all internal package imports

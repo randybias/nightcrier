@@ -10,7 +10,7 @@ The project SHALL use the name "nightcrier" as its canonical identity across all
 #### Scenario: Go Module Path
 - **Given** a developer imports the module
 - **When** they add it to their go.mod
-- **Then** the import path SHALL be `github.com/rbias/nightcrier`
+- **Then** the import path SHALL be `github.com/randybias/nightcrier`
 
 #### Scenario: MCP Client Identification
 - **Given** the event runner connects to an MCP server

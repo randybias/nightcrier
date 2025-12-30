@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rbias/nightcrier/internal/agent/k8s"
-	"github.com/rbias/nightcrier/internal/config"
-	"github.com/rbias/nightcrier/internal/incident"
-	"github.com/rbias/nightcrier/internal/storage"
+	"github.com/randybias/nightcrier/internal/agent/k8s"
+	"github.com/randybias/nightcrier/internal/config"
+	"github.com/randybias/nightcrier/internal/incident"
+	"github.com/randybias/nightcrier/internal/storage"
 )
 
 // ================================================================================

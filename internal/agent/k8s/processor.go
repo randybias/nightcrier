@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rbias/nightcrier/internal/incident"
-	"github.com/rbias/nightcrier/internal/reporting"
-	"github.com/rbias/nightcrier/internal/storage"
+	"github.com/randybias/nightcrier/internal/incident"
+	"github.com/randybias/nightcrier/internal/reporting"
+	"github.com/randybias/nightcrier/internal/storage"
 )
 
 // ArtifactProcessor handles processing and storage of Job artifacts after completion.
@@ -78,7 +78,7 @@ func (p *ArtifactProcessor) ProcessJobResults(ctx context.Context, cfg ProcessJo
 		// Add other artifacts if provided in config
 		IncidentJSON:           cfg.IncidentJSON,
 		ClusterPermissionsJSON: cfg.PermissionsJSON,
-		PromptSent:             cfg.PromptSent,
+		PromptSent:             cfg.JobResults.PromptSent,
 	}
 
 	// Add agent logs if available (these come from K8s Job results)
@@ -196,7 +196,6 @@ type ProcessJobResultsConfig struct {
 	// Additional artifacts to upload (these were created by the orchestrator)
 	IncidentJSON    []byte
 	PermissionsJSON []byte
-	PromptSent      []byte
 
 	// Debug mode - includes session archive and separate stderr
 	Debug bool

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rbias/nightcrier/internal/cluster"
-	"github.com/rbias/nightcrier/internal/incident"
+	"github.com/randybias/nightcrier/internal/cluster"
+	"github.com/randybias/nightcrier/internal/incident"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"

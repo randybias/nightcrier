@@ -42,6 +42,15 @@ agent_image: "nightcrier-agent:latest"
 # Set via environment variable: export ANTHROPIC_API_KEY="sk-ant-..."
 # anthropic_api_key: "sk-ant-..."
 
+# K8s Executor Configuration (Kubernetes-native agent execution)
+k8s_namespace: "nightcrier"
+k8s_image: "nc-agent-runner:latest"
+k8s_image_pull_policy: "IfNotPresent"  # Options: Always, Never, IfNotPresent
+k8s_timeout: 600
+k8s_memory_limit: "2Gi"
+k8s_cpu_limit: "1"
+k8s_cleanup_ttl: 3600
+
 # Event processing
 severity_threshold: "ERROR"
 max_concurrent_agents: 5

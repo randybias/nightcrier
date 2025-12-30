@@ -13,7 +13,7 @@ This guide covers setting up a local development environment for Nightcrier.
 
 ```bash
 # Clone and build
-git clone https://github.com/rbias/nightcrier.git
+git clone https://github.com/randybias/nightcrier.git
 cd nightcrier
 make build
 

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rbias/nightcrier/internal/incident"
-	"github.com/rbias/nightcrier/internal/storage"
+	"github.com/randybias/nightcrier/internal/incident"
+	"github.com/randybias/nightcrier/internal/storage"
 )
 
 // TestPhase1Through4Integration demonstrates the complete flow from Job creation

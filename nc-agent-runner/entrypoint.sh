@@ -175,6 +175,42 @@ build_triage_prompt() {
 }
 
 #######################################
+# Capture the exact prompt sent to the agent
+# This is the source of truth for what was actually sent
+# Globals:
+#   AGENT_CLI
+#   LLM_MODEL
+#   INCIDENT_ID
+# Arguments:
+#   $1 - The complete prompt text
+# Outputs:
+#   Creates /tmp/prompt-sent.md with metadata and full prompt
+#######################################
+capture_prompt_sent() {
+    local prompt_text="$1"
+    local output_file="/tmp/prompt-sent.md"
+    local timestamp
+    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    cat > "$output_file" <<EOF
+# Prompt Sent to Agent
+
+## Metadata
+- Timestamp: ${timestamp}
+- Incident ID: ${INCIDENT_ID}
+- Agent CLI: ${AGENT_CLI}
+- Model: ${LLM_MODEL}
+- Execution Mode: Kubernetes Job
+
+## Complete Prompt
+
+${prompt_text}
+EOF
+
+    echo "Captured actual prompt to ${output_file}"
+}
+
+#######################################
 # Run the AI agent with real-time logging
 # Captures stdout/stderr to both console and log file using tee
 # Globals:
@@ -198,6 +234,10 @@ run_agent() {
     # Build the complete triage prompt (same for all agents)
     local triage_prompt
     triage_prompt=$(build_triage_prompt)
+
+    # Capture the actual prompt being sent for audit/debugging
+    # This MUST match exactly what gets sent to the agent
+    capture_prompt_sent "$triage_prompt"
 
     # Determine if verbose mode is enabled (Claude only)
     local verbose_flag=""
@@ -468,6 +508,16 @@ EOF
     curl -X PUT -H "x-ms-blob-type: BlockBlob" -T /tmp/result.json "$OUTPUT_URL_RESULT" || {
         echo "Warning: Failed to upload result.json"
     }
+
+    # Upload prompt-sent.md (source of truth for what was sent to agent)
+    if [[ -f /tmp/prompt-sent.md ]]; then
+        echo "Uploading prompt-sent.md..."
+        curl -X PUT -H "x-ms-blob-type: BlockBlob" -T /tmp/prompt-sent.md "$OUTPUT_URL_PROMPT_SENT" || {
+            echo "Warning: Failed to upload prompt-sent.md"
+        }
+    else
+        echo "Warning: prompt-sent.md not found, skipping upload"
+    fi
 
     echo ""
     echo "=========================================="

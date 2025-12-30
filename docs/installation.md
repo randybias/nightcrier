@@ -13,7 +13,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/rbias/nightcrier.git
+git clone https://github.com/randybias/nightcrier.git
 cd nightcrier
 
 # Build the Nightcrier binary

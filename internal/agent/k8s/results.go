@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/rbias/nightcrier/internal/storage"
+	"github.com/randybias/nightcrier/internal/storage"
 	"gocloud.dev/blob"
 )
 
@@ -31,6 +31,8 @@ type JobResults struct {
 	CommandsExecuted []byte
 	// SessionArchive is the session.tar.gz archive (optional, for debugging)
 	SessionArchive []byte
+	// PromptSent is the prompt-sent.md file (what was actually sent to the agent)
+	PromptSent []byte
 
 	// Missing tracks which artifacts were missing (Job failed before upload)
 	Missing []string
@@ -61,6 +63,7 @@ type RetrieveResultsConfig struct {
 //   - report.md (investigation markdown)
 //   - agent.log (agent execution log)
 //   - commands-executed.log (commands executed by the agent)
+//   - prompt-sent.md (the exact prompt sent to the agent)
 //   - session.tar.gz (optional, only if IncludeSessionArchive=true)
 //
 // Missing files are tracked in the Missing slice. This is expected if the Job
@@ -121,6 +124,15 @@ func RetrieveResults(ctx context.Context, cfg RetrieveResultsConfig) (*JobResult
 		results.Missing = append(results.Missing, "commands-executed.log")
 	} else {
 		results.CommandsExecuted = commandsData
+	}
+
+	// Download prompt-sent.md (what was actually sent to the agent)
+	promptKey := fmt.Sprintf("%s/prompt-sent.md", pathPrefix)
+	promptData, err := cfg.ObjectStore.Download(ctx, promptKey)
+	if err != nil {
+		results.Missing = append(results.Missing, "prompt-sent.md")
+	} else {
+		results.PromptSent = promptData
 	}
 
 	// Optionally download session.tar.gz (large file, only for debugging)

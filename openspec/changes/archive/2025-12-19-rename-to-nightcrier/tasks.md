@@ -6,7 +6,7 @@
 ---
 
 ## 1. Go Module and Imports
-- [x] 1.1 Update `go.mod` module path to `github.com/rbias/nightcrier`
+- [x] 1.1 Update `go.mod` module path to `github.com/randybias/nightcrier`
 - [x] 1.2 Update imports in `cmd/runner/main.go`
 - [x] 1.3 Update imports in `internal/agent/context.go`
 - [x] 1.4 Run `go mod tidy` to update `go.sum`

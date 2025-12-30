@@ -3,7 +3,7 @@ package events
 import (
 	"testing"
 
-	"github.com/rbias/nightcrier/internal/config"
+	"github.com/randybias/nightcrier/internal/config"
 )
 
 // TestNewClient_UsesConfigurableBufferSize verifies that the event channel

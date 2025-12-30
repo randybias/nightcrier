@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rbias/nightcrier/internal/events"
-	"github.com/rbias/nightcrier/internal/incident"
-	"github.com/rbias/nightcrier/internal/storage"
+	"github.com/randybias/nightcrier/internal/events"
+	"github.com/randybias/nightcrier/internal/incident"
+	"github.com/randybias/nightcrier/internal/storage"
 )
 
 // getTestConnectionString returns the PostgreSQL connection string for testing.

@@ -32,7 +32,7 @@ This guide covers setting up a local development environment for Nightcrier.
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/rbias/nightcrier.git
+   git clone https://github.com/randybias/nightcrier.git
    cd nightcrier
    ```
 
@@ -423,6 +423,6 @@ Recommended extensions:
 
 ## Getting Help
 
-- **Issues:** [GitHub Issues](https://github.com/rbias/nightcrier/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/rbias/nightcrier/discussions)
+- **Issues:** [GitHub Issues](https://github.com/randybias/nightcrier/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/randybias/nightcrier/discussions)
 - **Slack:** Join #nightcrier channel (if available)

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/rbias/nightcrier/internal/config"
+	"github.com/randybias/nightcrier/internal/config"
 )
 
 const (

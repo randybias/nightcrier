@@ -119,6 +119,7 @@ See [Architecture](docs/architecture.md) for detailed execution flow diagrams an
 - **Automated fault detection** via MCP server integration
 - **AI-powered root cause analysis** using multiple agents (Claude, Codex, Gemini, Goose)
 - **Kubernetes-native execution** via Jobs (stateless, no persistent volumes)
+- **Automatic Kubernetes bootstrap** for self-provisioning deployments
 - **Multi-backend storage** support (Azure Blob Storage, AWS S3, S3-compatible, filesystem)
 - **Slack notifications** with investigation reports and signed URLs
 - **Secure artifact storage** with presigned URL generation
@@ -142,7 +143,7 @@ See [Architecture](docs/architecture.md) for detailed execution flow diagrams an
 
 ```bash
 # Clone the repository
-git clone https://github.com/rbias/nightcrier.git
+git clone https://github.com/randybias/nightcrier.git
 cd nightcrier
 
 # Build the Nightcrier binary
@@ -171,6 +172,108 @@ See [Configuration Guide](docs/configuration.md) for detailed options.
 ```bash
 ./bin/nightcrier --config configs/config.yaml
 ```
+
+## Kubernetes Bootstrap
+
+Nightcrier automatically provisions required Kubernetes resources on startup, eliminating the need for manual setup steps. This enables self-contained deployments to both local and remote clusters.
+
+### What Gets Created
+
+On first run, Nightcrier connects to your Kubernetes cluster and automatically creates:
+
+1. **Namespace** - The configured namespace (default: `nightcrier`)
+2. **RBAC Resources** - ServiceAccount, Role, and RoleBinding for agent execution
+3. **API Keys Secret** - `ai-api-keys` Secret containing your LLM API keys (Anthropic, OpenAI, Gemini)
+4. **Kubeconfig Secrets** - Per-cluster `kubeconfig-{cluster-name}` Secrets for agent access to monitored clusters
+
+All operations are **idempotent** - if resources already exist, they are skipped. Nightcrier never modifies manually created resources.
+
+### Required Permissions
+
+The user or ServiceAccount running Nightcrier needs permissions to:
+- Create and get namespaces
+- Create and get ServiceAccounts, Roles, RoleBindings
+- Create and get Secrets
+
+For local development with kind, these permissions are typically available by default. For remote clusters, ensure your kubeconfig user has appropriate permissions (often cluster-admin or equivalent).
+
+### Kubeconfig Configuration
+
+Nightcrier uses two types of kubeconfig files:
+
+1. **Bootstrap kubeconfig** (`kubeconfig_path` in config) - Admin access for resource provisioning
+   - Used by Nightcrier to connect to the cluster and create resources
+   - Requires elevated permissions (namespace, RBAC, Secret creation)
+   - Sourced from: `KUBECONFIG` env var, `kubeconfig_path` config, or `~/.kube/config`
+
+2. **Triage kubeconfig** (`triage.kubeconfig` per cluster) - Read-only access for agents
+   - Used by AI agents running in Jobs to investigate incidents
+   - Should have limited, read-only permissions
+   - Stored in `kubeconfig-{cluster-name}` Secrets
+
+### Troubleshooting
+
+**Permission Denied Errors**
+
+If bootstrap fails with permission errors:
+
+```
+ERROR: Failed to bootstrap Kubernetes resources: forbidden: User cannot create resource "namespaces"
+```
+
+For local development (kind):
+```bash
+# RBAC is typically available by default in kind
+kubectl config use-context kind-nightcrier
+```
+
+For remote clusters:
+```bash
+# Ensure your kubeconfig user has appropriate permissions
+kubectl auth can-i create namespaces
+kubectl auth can-i create serviceaccounts -n nightcrier
+kubectl auth can-i create secrets -n nightcrier
+```
+
+**Missing Kubeconfig Files**
+
+If triage kubeconfig files are not found:
+
+```
+ERROR: Cluster 'prod-cluster' requires triage kubeconfig but file not found: /path/to/config
+```
+
+Ensure:
+1. The file exists at the specified path in your configuration
+2. The file is readable by the Nightcrier process
+3. The path is correct (absolute or relative to working directory)
+
+**Bootstrap Connection Issues**
+
+If Nightcrier cannot connect to Kubernetes:
+
+```
+ERROR: Failed to connect to Kubernetes API
+```
+
+Verify:
+1. `kubeconfig_path` points to a valid kubeconfig file
+2. The cluster specified in the kubeconfig is accessible
+3. Network connectivity to the cluster API server
+
+### Migration Notes for Existing Deployments
+
+If you have an existing Nightcrier deployment with manually created resources:
+
+- **No migration required** - Bootstrap is idempotent and skips existing resources
+- **Manual resources take precedence** - Nightcrier never modifies existing namespaces, RBAC, or Secrets
+- **Gradual adoption** - You can let Nightcrier manage resources going forward without disrupting current setup
+- **Permission errors are safe** - If running with limited permissions, bootstrap will skip creation (resources must already exist)
+
+To transition from manual to automatic management:
+1. Ensure your current resources match what Nightcrier would create
+2. Run Nightcrier - it will detect existing resources and skip creation
+3. Future deployments will self-provision without manual steps
 
 ## Documentation
 
@@ -221,7 +324,7 @@ When configured, notifications include:
 
 ## Related Projects
 
-- [kubernetes-mcp-server](https://github.com/rbias/kubernetes-mcp-server) - MCP server for Kubernetes fault events
+- [kubernetes-mcp-server](https://github.com/randybias/kubernetes-mcp-server) - MCP server for Kubernetes fault events
 - [Model Context Protocol](https://github.com/anthropics/mcp) - Protocol specification
 
 ## Contributing

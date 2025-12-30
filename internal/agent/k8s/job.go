@@ -25,6 +25,10 @@ type JobConfig struct {
 	// Image is the container image to use (default: nc-agent-runner:latest)
 	Image string
 
+	// ImagePullPolicy is the image pull policy (default: IfNotPresent)
+	// Valid values: Always, Never, IfNotPresent
+	ImagePullPolicy string
+
 	// AgentCLI is the agent CLI to use (claude/codex/gemini/goose)
 	AgentCLI string
 
@@ -75,6 +79,9 @@ type PresignedURLs struct {
 
 	// Commands is the URL for uploading commands-executed.log
 	Commands string
+
+	// PromptSent is the URL for uploading prompt-sent.md
+	PromptSent string
 }
 
 // ResourceConfig contains resource limits and requests for the Job container.
@@ -113,6 +120,9 @@ func (c *Client) CreateJob(ctx context.Context, cfg JobConfig) (string, error) {
 	if cfg.Image == "" {
 		cfg.Image = "nc-agent-runner:latest"
 	}
+	if cfg.ImagePullPolicy == "" {
+		cfg.ImagePullPolicy = "IfNotPresent"
+	}
 	if cfg.TTLSecondsAfterFinished == 0 {
 		cfg.TTLSecondsAfterFinished = 3600
 	}
@@ -133,6 +143,19 @@ func (c *Client) CreateJob(ctx context.Context, cfg JobConfig) (string, error) {
 	}
 	if cfg.Resources.CPURequest == "" {
 		cfg.Resources.CPURequest = "250m"
+	}
+
+	// Parse image pull policy
+	var imagePullPolicy corev1.PullPolicy
+	switch cfg.ImagePullPolicy {
+	case "Always":
+		imagePullPolicy = corev1.PullAlways
+	case "Never":
+		imagePullPolicy = corev1.PullNever
+	case "IfNotPresent":
+		imagePullPolicy = corev1.PullIfNotPresent
+	default:
+		return "", fmt.Errorf("invalid image pull policy: %s (must be Always, Never, or IfNotPresent)", cfg.ImagePullPolicy)
 	}
 
 	// Generate Job name based on incident ID
@@ -225,6 +248,10 @@ func (c *Client) CreateJob(ctx context.Context, cfg JobConfig) (string, error) {
 			Name:  "OUTPUT_URL_COMMANDS",
 			Value: cfg.PresignedURLs.Commands,
 		},
+		{
+			Name:  "OUTPUT_URL_PROMPT_SENT",
+			Value: cfg.PresignedURLs.PromptSent,
+		},
 	}
 
 	// Build volume mounts
@@ -301,7 +328,7 @@ func (c *Client) CreateJob(ctx context.Context, cfg JobConfig) (string, error) {
 	container := corev1.Container{
 		Name:            "agent",
 		Image:           cfg.Image,
-		ImagePullPolicy: corev1.PullNever, // Use local image for development
+		ImagePullPolicy: imagePullPolicy,
 		Env:             env,
 		VolumeMounts:    volumeMounts,
 		Resources: corev1.ResourceRequirements{

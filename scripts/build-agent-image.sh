@@ -71,11 +71,12 @@ verify_prerequisites() {
         exit 1
     fi
 
-    # Check k8s-troubleshooter skill exists
-    if [[ ! -d "${PROJECT_ROOT}/internal/skills/agent-home/skills/k8s4agents/skills/k8s-troubleshooter" ]]; then
-        echo "Error: k8s-troubleshooter skill not found"
-        exit 1
-    fi
+# TODO: remove as this is no longer a requirement.  Skills are cloned into the image via git
+#    # Check k8s-troubleshooter skill exists
+#    if [[ ! -d "${PROJECT_ROOT}/internal/skills/agent-home/skills/k8s4agents/skills/k8s-troubleshooter" ]]; then
+#        echo "Error: k8s-troubleshooter skill not found"
+#        exit 1
+#    fi
 
     echo "Prerequisites verified"
     echo ""

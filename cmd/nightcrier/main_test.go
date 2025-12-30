@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/rbias/nightcrier/internal/config"
-	"github.com/rbias/nightcrier/internal/reporting"
+	"github.com/randybias/nightcrier/internal/config"
+	"github.com/randybias/nightcrier/internal/reporting"
 )
 
 // defaultTestTuning returns a TuningConfig with default values for testing

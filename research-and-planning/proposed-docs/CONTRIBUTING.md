@@ -43,7 +43,7 @@ We are committed to providing a welcoming and inspiring community for all. Pleas
 
 3. **Add upstream remote**:
    ```bash
-   git remote add upstream https://github.com/rbias/nightcrier.git
+   git remote add upstream https://github.com/randybias/nightcrier.git
    ```
 
 4. **Create a feature branch**:

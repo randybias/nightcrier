@@ -111,14 +111,14 @@ pull:
 .PHONY: load-kind
 load-kind:
 	@echo "Loading image into kind cluster"
-	@if ! kind get clusters | grep -q nightcrier-dev; then \
-		echo "Error: kind cluster 'nightcrier-dev' not found"; \
+	@if ! kind get clusters | grep -q $(KIND_CLUSTER); then \
+		echo "Error: kind cluster '$(KIND_CLUSTER)' not found"; \
 		echo "Run 'make -C ../scripts dev-cluster' first"; \
 		exit 1; \
 	fi
-	kind load docker-image $(FULL_IMAGE) --name nightcrier-dev
+	kind load docker-image $(FULL_IMAGE) --name $(KIND_CLUSTER)
 	@echo ""
-	@echo "Image loaded into kind cluster: nightcrier-dev"
+	@echo "Image loaded into kind cluster $(KIND_CLUSTER)"
 
 # =============================================================================
 # Testing and Validation
@@ -274,7 +274,7 @@ help:
 	@echo "  pull            - Pull image from registry"
 	@echo ""
 	@echo "Kind Operations:"
-	@echo "  load-kind       - Load image into kind cluster 'nightcrier-dev'"
+	@echo "  load-kind       - Load image into kind cluster 'KIND_CLUSTER=<cluster-name>'"
 	@echo ""
 	@echo "Testing:"
 	@echo "  test-tools      - Verify all tools installed correctly"

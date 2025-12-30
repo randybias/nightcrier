@@ -52,7 +52,7 @@ The `Config` struct supports the following connection pool settings:
 ```go
 import (
     "context"
-    "github.com/rbias/nightcrier/internal/storage/postgres"
+    "github.com/randybias/nightcrier/internal/storage/postgres"
 )
 
 func main() {
@@ -351,7 +351,7 @@ Ensure the referenced incident exists before creating related records.
 Run migrations to create the schema:
 
 ```go
-import "github.com/rbias/nightcrier/internal/storage"
+import "github.com/randybias/nightcrier/internal/storage"
 
 cfg := &storage.MigrationConfig{
     MigrationsPath: "./migrations",

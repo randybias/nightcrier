@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rbias/nightcrier/internal/config"
+	"github.com/randybias/nightcrier/internal/config"
 )
 
 // SlackNotifier sends incident notifications to Slack

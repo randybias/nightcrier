@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/rbias/nightcrier/internal/cluster"
+	"github.com/randybias/nightcrier/internal/cluster"
 )
 
 // ClusterHealth represents the health status of a single cluster connection.

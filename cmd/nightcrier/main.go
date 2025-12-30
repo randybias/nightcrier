@@ -14,17 +14,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rbias/nightcrier/internal/agent"
-	"github.com/rbias/nightcrier/internal/agent/k8s"
-	"github.com/rbias/nightcrier/internal/cluster"
-	"github.com/rbias/nightcrier/internal/config"
-	"github.com/rbias/nightcrier/internal/events"
-	"github.com/rbias/nightcrier/internal/health"
-	"github.com/rbias/nightcrier/internal/incident"
-	"github.com/rbias/nightcrier/internal/reporting"
-	"github.com/rbias/nightcrier/internal/storage"
-	"github.com/rbias/nightcrier/internal/storage/postgres"
-	"github.com/rbias/nightcrier/internal/storage/sqlite"
+	"github.com/randybias/nightcrier/internal/agent"
+	"github.com/randybias/nightcrier/internal/agent/k8s"
+	"github.com/randybias/nightcrier/internal/bootstrap"
+	"github.com/randybias/nightcrier/internal/cluster"
+	"github.com/randybias/nightcrier/internal/config"
+	"github.com/randybias/nightcrier/internal/events"
+	"github.com/randybias/nightcrier/internal/health"
+	"github.com/randybias/nightcrier/internal/incident"
+	"github.com/randybias/nightcrier/internal/reporting"
+	"github.com/randybias/nightcrier/internal/storage"
+	"github.com/randybias/nightcrier/internal/storage/postgres"
+	"github.com/randybias/nightcrier/internal/storage/sqlite"
 	"github.com/spf13/cobra"
 )
 
@@ -120,10 +121,13 @@ func run(cmd *cobra.Command, args []string) error {
 	// Print startup banner
 	printStartupBanner(cfg, config.GetConfigFile())
 
-	// Verify system prompt file exists
-	if _, err := os.Stat(cfg.AgentSystemPromptFile); os.IsNotExist(err) {
-		slog.Warn("system prompt file not found, will run without it", "path", cfg.AgentSystemPromptFile)
-		cfg.AgentSystemPromptFile = ""
+	// Verify system prompt file exists (required for agent operation)
+	if cfg.AgentSystemPromptFile != "" {
+		if _, err := os.Stat(cfg.AgentSystemPromptFile); os.IsNotExist(err) {
+			return fmt.Errorf("agent system prompt file not found: %s\n\nThe system prompt file is required for agent operation. Please ensure:\n  1. The file exists at the specified path\n  2. The path in config (agent_system_prompt_file) is correct\n  3. The path is readable by the nightcrier process", cfg.AgentSystemPromptFile)
+		}
+	} else {
+		return fmt.Errorf("agent system prompt file not configured (agent_system_prompt_file is required)")
 	}
 
 	// Create ConnectionManager for multi-cluster support
@@ -208,6 +212,51 @@ func run(cmd *cobra.Command, args []string) error {
 		"context", cfg.KubernetesContext,
 		"namespace", cfg.K8sNamespace)
 
+	// Bootstrap Kubernetes resources (namespace, RBAC, secrets)
+	slog.Info("bootstrapping kubernetes resources...")
+	bootstrapCtx, bootstrapCancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer bootstrapCancel()
+
+	bootstrapClusters := make([]bootstrap.ClusterConfig, 0, len(cfg.Clusters))
+	for _, c := range cfg.Clusters {
+		if c.Triage.Enabled && c.Triage.Kubeconfig != "" {
+			bootstrapClusters = append(bootstrapClusters, bootstrap.ClusterConfig{
+				Name:              c.Name,
+				TriageKubeconfig:  c.Triage.Kubeconfig,
+			})
+		}
+	}
+
+	bootstrapConfig := bootstrap.Config{
+		Namespace:       cfg.K8sNamespace,
+		AnthropicAPIKey: cfg.AnthropicAPIKey,
+		OpenAIAPIKey:    cfg.OpenAIAPIKey,
+		GeminiAPIKey:    cfg.GeminiAPIKey,
+		Clusters:        bootstrapClusters,
+	}
+
+	bootstrapMgr := bootstrap.NewManager(k8sClient.Clientset(), bootstrapConfig)
+	bootstrapResult, err := bootstrapMgr.Bootstrap(bootstrapCtx)
+	if err != nil {
+		slog.Error("kubernetes bootstrap failed",
+			"error", err,
+			"remediation", "check permissions: ensure kubeconfig user can create namespaces, RBAC, and secrets")
+		return fmt.Errorf("kubernetes bootstrap failed: %w", err)
+	}
+
+	// Log bootstrap results
+	createdCount := bootstrapResult.CreatedCount()
+	existingCount := bootstrapResult.ExistingCount()
+	if createdCount > 0 {
+		slog.Info("kubernetes bootstrap complete",
+			"created", createdCount,
+			"existing", existingCount,
+			"namespace_created", bootstrapResult.NamespaceCreated)
+	} else {
+		slog.Debug("kubernetes resources already exist, skipping creation",
+			"resources", existingCount)
+	}
+
 	// Create K8s executors per cluster
 	executors := make(map[string]AgentExecutor)
 	k8sExecutorRefs := make(map[string]*agent.K8sExecutor) // Keep refs to inject stateStore later
@@ -216,6 +265,7 @@ func run(cmd *cobra.Command, args []string) error {
 		k8sExecCfg := agent.K8sExecutorConfig{
 			Namespace:        cfg.K8sNamespace,
 			Image:            cfg.K8sImage,
+			ImagePullPolicy:  cfg.K8sImagePullPolicy,
 			Timeout:          cfg.K8sTimeout,
 			MemoryLimit:      cfg.K8sMemoryLimit,
 			CPULimit:         cfg.K8sCPULimit,

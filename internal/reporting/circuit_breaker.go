@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rbias/nightcrier/internal/config"
+	"github.com/randybias/nightcrier/internal/config"
 )
 
 // Notification Circuit Breaker

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rbias/nightcrier/internal/storage"
+	"github.com/randybias/nightcrier/internal/storage"
 )
 
 // OutputURLs contains presigned PUT URLs for agent outputs with expiration times.
@@ -36,17 +36,23 @@ type OutputURLs struct {
 	Commands string
 	// CommandsExpiry is when the Commands URL expires
 	CommandsExpiry time.Time
+
+	// PromptSent is the presigned PUT URL for prompt-sent.md
+	PromptSent string
+	// PromptSentExpiry is when the PromptSent URL expires
+	PromptSentExpiry time.Time
 }
 
 // ToPresignedURLs converts OutputURLs to PresignedURLs for use in JobConfig.
 // The expiration times are discarded as they're not needed by the Job container.
 func (o *OutputURLs) ToPresignedURLs() PresignedURLs {
 	return PresignedURLs{
-		Report:   o.Report,
-		Log:      o.Log,
-		Session:  o.Session,
-		Result:   o.Result,
-		Commands: o.Commands,
+		Report:     o.Report,
+		Log:        o.Log,
+		Session:    o.Session,
+		Result:     o.Result,
+		Commands:   o.Commands,
+		PromptSent: o.PromptSent,
 	}
 }
 
@@ -114,6 +120,15 @@ func GenerateOutputURLs(ctx context.Context, store *storage.ObjectStore, inciden
 	}
 	urls.Commands = commandsURL
 	urls.CommandsExpiry = commandsExpiry
+
+	// Generate presigned PUT URL for prompt-sent.md
+	promptSentKey := fmt.Sprintf("incidents/%s/results/prompt-sent.md", incidentID)
+	promptSentURL, promptSentExpiry, err := store.SignedPutURL(ctx, promptSentKey, urlExpiry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate prompt-sent URL: %w", err)
+	}
+	urls.PromptSent = promptSentURL
+	urls.PromptSentExpiry = promptSentExpiry
 
 	return urls, nil
 }

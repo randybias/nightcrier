@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rbias/nightcrier/internal/storage"
+	"github.com/randybias/nightcrier/internal/storage"
 )
 
 func TestGenerateOutputURLs(t *testing.T) {

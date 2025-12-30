@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rbias/nightcrier/internal/agent/k8s"
-	"github.com/rbias/nightcrier/internal/config"
-	"github.com/rbias/nightcrier/internal/incident"
-	"github.com/rbias/nightcrier/internal/storage"
+	"github.com/randybias/nightcrier/internal/agent/k8s"
+	"github.com/randybias/nightcrier/internal/config"
+	"github.com/randybias/nightcrier/internal/incident"
+	"github.com/randybias/nightcrier/internal/storage"
 )
 
 // LogPaths contains artifact information from agent execution.
@@ -34,6 +34,8 @@ type K8sExecutorConfig struct {
 	Namespace string
 	// Container image for the agent runner
 	Image string
+	// Image pull policy (Always, Never, IfNotPresent)
+	ImagePullPolicy string
 	// Job timeout in seconds
 	Timeout int
 	// Memory limit (e.g., "2Gi")
@@ -129,19 +131,7 @@ func (e *K8sExecutor) ExecuteWithPrompt(ctx context.Context, workspacePath strin
 		return -1, LogPaths{}, fmt.Errorf("failed to load incident data: %w", err)
 	}
 
-	// Phase 1.3: Capture prompt for auditability (create prompt-sent.md)
-	if err := e.capturePrompt(workspacePath, incidentID, prompt, incidentData.ClusterName); err != nil {
-		slog.Warn("failed to capture prompt for audit", "error", err)
-		// Continue execution - prompt capture failure is not fatal
-	} else {
-		// Read prompt-sent.md we just created for artifact storage
-		promptSentPath := filepath.Join(workspacePath, "prompt-sent.md")
-		if promptBytes, err := os.ReadFile(promptSentPath); err == nil {
-			incidentData.PromptSent = promptBytes
-		}
-	}
-
-	// Phase 1.4: Create ConfigMap with incident data
+	// Phase 1.3: Create ConfigMap with incident data
 	slog.Info("creating ConfigMap with incident data", "incident_id", incidentID)
 	configMapName, err := e.createConfigMap(ctx, incidentID, incidentData)
 	if err != nil {
@@ -239,7 +229,6 @@ type IncidentData struct {
 	IncidentJSON     string
 	PermissionsJSON  string
 	BaseTriagePrompt string
-	PromptSent       []byte
 	ClusterName      string
 }
 
@@ -284,11 +273,13 @@ func (e *K8sExecutor) loadIncidentData(workspacePath string, incidentID string) 
 		data.BaseTriagePrompt = string(promptBytes)
 	}
 
-	// Read prompt-sent.md if it exists (for artifact storage)
-	promptSentPath := filepath.Join(workspacePath, "prompt-sent.md")
-	if promptBytes, err := os.ReadFile(promptSentPath); err == nil {
-		data.PromptSent = promptBytes
-	}
+	// Debug: Log what data was loaded
+	slog.Debug("incident data loaded",
+		"incident_id", incidentID,
+		"incident_json_size", len(data.IncidentJSON),
+		"permissions_json_size", len(data.PermissionsJSON),
+		"base_triage_prompt_size", len(data.BaseTriagePrompt),
+		"cluster_name", data.ClusterName)
 
 	return data, nil
 }
@@ -319,6 +310,13 @@ func (e *K8sExecutor) createConfigMap(ctx context.Context, incidentID string, da
 		BaseTriagePrompt: data.BaseTriagePrompt,
 	}
 
+	// Debug: Log ConfigMap data sizes
+	slog.Debug("ConfigMap data prepared",
+		"incident_id", incidentID,
+		"incident_json_size", len(cmData.IncidentJSON),
+		"permissions_json_size", len(cmData.PermissionsJSON),
+		"base_triage_prompt_size", len(cmData.BaseTriagePrompt))
+
 	return e.k8sClient.CreateIncidentConfigMap(ctx, cfg, cmData)
 }
 
@@ -332,16 +330,17 @@ func (e *K8sExecutor) createJob(
 	prompt string,
 ) (string, error) {
 	cfg := k8s.JobConfig{
-		Namespace:      e.config.Namespace,
-		IncidentID:     incidentID,
-		ClusterName:    clusterName,
-		Image:          e.config.Image,
-		AgentCLI:       e.config.AgentCLI,
-		LLMModel:       e.config.Model,
-		Prompt:         prompt,
-		ConfigMapName:  configMapName,
-		SecretName:     "kubeconfig-" + clusterName, // Convention: kubeconfig-{cluster-name}
-		PresignedURLs:  outputURLs.ToPresignedURLs(),
+		Namespace:       e.config.Namespace,
+		IncidentID:      incidentID,
+		ClusterName:     clusterName,
+		Image:           e.config.Image,
+		ImagePullPolicy: e.config.ImagePullPolicy,
+		AgentCLI:        e.config.AgentCLI,
+		LLMModel:        e.config.Model,
+		Prompt:          prompt,
+		ConfigMapName:   configMapName,
+		SecretName:      "kubeconfig-" + clusterName, // Convention: kubeconfig-{cluster-name}
+		PresignedURLs:   outputURLs.ToPresignedURLs(),
 		Resources: k8s.ResourceConfig{
 			MemoryLimit:   e.config.MemoryLimit,
 			CPULimit:      e.config.CPULimit,
@@ -409,80 +408,9 @@ func (e *K8sExecutor) processResults(
 		StartedAt:       startedAt,
 		IncidentJSON:    []byte(incidentData.IncidentJSON),
 		PermissionsJSON: []byte(incidentData.PermissionsJSON),
-		PromptSent:      incidentData.PromptSent,
 		Debug:           e.config.Debug,
 	}
 
 	return e.processor.ProcessJobResults(ctx, cfg)
 }
 
-// capturePrompt writes the combined system + additional prompt to prompt-sent.md
-// for auditability and debugging. This is called before Job creation.
-func (e *K8sExecutor) capturePrompt(workspacePath string, incidentID string, additionalPrompt string, clusterName string) error {
-	// Read system prompt file content
-	var systemPromptContent string
-	if e.config.SystemPromptFile != "" {
-		content, err := os.ReadFile(e.config.SystemPromptFile)
-		if err != nil {
-			return fmt.Errorf("failed to read system prompt file: %w", err)
-		}
-		systemPromptContent = string(content)
-	}
-
-	// Generate the prompt-sent.md content
-	content := e.generatePromptSentContent(incidentID, clusterName, systemPromptContent, additionalPrompt)
-
-	// Write to workspace
-	promptPath := filepath.Join(workspacePath, "prompt-sent.md")
-	if err := os.WriteFile(promptPath, []byte(content), 0600); err != nil {
-		return fmt.Errorf("failed to write prompt-sent.md: %w", err)
-	}
-
-	slog.Debug("captured prompt to prompt-sent.md", "path", promptPath)
-	return nil
-}
-
-// generatePromptSentContent creates the markdown content for prompt-sent.md
-func (e *K8sExecutor) generatePromptSentContent(incidentID string, clusterName string, systemPrompt string, additionalPrompt string) string {
-	timestamp := time.Now().UTC().Format(time.RFC3339)
-
-	// Use provided cluster name or fallback
-	if clusterName == "" {
-		clusterName = "unknown"
-	}
-
-	// Build the prompt-sent.md content
-	var content string
-	content = "# Prompt Sent to Agent\n\n"
-	content += "## Metadata\n"
-	content += fmt.Sprintf("- Timestamp: %s\n", timestamp)
-	content += fmt.Sprintf("- Incident ID: %s\n", incidentID)
-	content += fmt.Sprintf("- Cluster: %s\n", clusterName)
-	content += fmt.Sprintf("- Agent CLI: %s\n", e.config.AgentCLI)
-	content += fmt.Sprintf("- Model: %s\n", e.config.Model)
-	content += fmt.Sprintf("- Execution Mode: Kubernetes Job\n")
-	content += "\n"
-
-	content += "## System Prompt\n\n"
-	if systemPrompt != "" {
-		content += systemPrompt
-		if systemPrompt[len(systemPrompt)-1] != '\n' {
-			content += "\n"
-		}
-	} else {
-		content += "*No system prompt configured*\n"
-	}
-	content += "\n"
-
-	content += "## Additional Prompt\n\n"
-	if additionalPrompt != "" {
-		content += additionalPrompt
-		if additionalPrompt[len(additionalPrompt)-1] != '\n' {
-			content += "\n"
-		}
-	} else {
-		content += "*None provided*\n"
-	}
-
-	return content
-}

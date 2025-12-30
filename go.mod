@@ -1,4 +1,4 @@
-module github.com/rbias/nightcrier
+module github.com/randybias/nightcrier
 
 go 1.25.5
 

@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
-	"github.com/rbias/nightcrier/internal/cluster"
+	"github.com/randybias/nightcrier/internal/cluster"
 )
 
 // Config holds the application configuration.
@@ -49,12 +49,13 @@ type Config struct {
 
 	// K8s Executor Configuration (Phase 5: K8s-native agent execution)
 	// When enabled, agents run in Kubernetes Jobs instead of Docker containers
-	K8sNamespace    string `mapstructure:"k8s_namespace"`      // Namespace for Jobs/ConfigMaps (default: nightcrier)
-	K8sImage        string `mapstructure:"k8s_image"`          // Container image for agent (default: nc-agent-runner:latest)
-	K8sTimeout      int    `mapstructure:"k8s_timeout"`        // Job timeout in seconds (default: 600)
-	K8sMemoryLimit string `mapstructure:"k8s_memory_limit"` // Memory limit (default: 2Gi)
-	K8sCPULimit    string `mapstructure:"k8s_cpu_limit"`    // CPU limit (default: 1)
-	K8sCleanupTTL  int    `mapstructure:"k8s_cleanup_ttl"`  // TTL for Job cleanup in seconds (default: 3600)
+	K8sNamespace        string `mapstructure:"k8s_namespace"`          // Namespace for Jobs/ConfigMaps (default: nightcrier)
+	K8sImage            string `mapstructure:"k8s_image"`              // Container image for agent (default: nc-agent-runner:latest)
+	K8sImagePullPolicy  string `mapstructure:"k8s_image_pull_policy"`  // Image pull policy: Always, Never, IfNotPresent (default: IfNotPresent)
+	K8sTimeout          int    `mapstructure:"k8s_timeout"`            // Job timeout in seconds (default: 600)
+	K8sMemoryLimit      string `mapstructure:"k8s_memory_limit"`       // Memory limit (default: 2Gi)
+	K8sCPULimit         string `mapstructure:"k8s_cpu_limit"`          // CPU limit (default: 1)
+	K8sCleanupTTL       int    `mapstructure:"k8s_cleanup_ttl"`        // TTL for Job cleanup in seconds (default: 3600)
 
 	// Event Processing (Phase 1 additions)
 	SeverityThreshold   string `mapstructure:"severity_threshold"`
@@ -227,6 +228,7 @@ func bindEnvVars() {
 		"kubernetes_context":              "KUBERNETES_CONTEXT",
 		"k8s_namespace":                   "K8S_NAMESPACE",
 		"k8s_image":                       "K8S_IMAGE",
+		"k8s_image_pull_policy":           "K8S_IMAGE_PULL_POLICY",
 		"k8s_timeout":                     "K8S_TIMEOUT",
 		"k8s_memory_limit":                "K8S_MEMORY_LIMIT",
 		"k8s_cpu_limit":                   "K8S_CPU_LIMIT",
@@ -514,6 +516,14 @@ func (c *Config) Validate() error {
 	}
 	if c.K8sImage == "" {
 		c.K8sImage = "nc-agent-runner:latest"
+	}
+	if c.K8sImagePullPolicy == "" {
+		c.K8sImagePullPolicy = "IfNotPresent"
+	}
+	// Validate image pull policy
+	validPullPolicies := map[string]bool{"Always": true, "Never": true, "IfNotPresent": true}
+	if !validPullPolicies[c.K8sImagePullPolicy] {
+		return fmt.Errorf("invalid k8s_image_pull_policy '%s': must be 'Always', 'Never', or 'IfNotPresent'. Set via K8S_IMAGE_PULL_POLICY environment variable or config file", c.K8sImagePullPolicy)
 	}
 	if c.K8sTimeout == 0 {
 		c.K8sTimeout = 600
