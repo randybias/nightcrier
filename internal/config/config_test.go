@@ -1167,22 +1167,6 @@ anthropic_api_key: "test-key"`,
 			expectedEnvVar:    "GLOBAL_QUEUE_SIZE",
 		},
 		{
-			name: "missing cluster_queue_size",
-			config: clusterPrefix + `subscribe_mode: "faults"
-workspace_root: "./incidents"
-agent_script_path: "./run-agent.sh"
-agent_timeout: 300
-agent_model: "sonnet"
-agent_cli: "claude"
-agent_image: "nightcrier-agent:latest"
-severity_threshold: "ERROR"
-max_concurrent_agents: 5
-global_queue_size: 100
-anthropic_api_key: "test-key"`,
-			expectedFieldName: "cluster_queue_size",
-			expectedEnvVar:    "CLUSTER_QUEUE_SIZE",
-		},
-		{
 			name: "missing queue_overflow_policy",
 			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
@@ -1807,5 +1791,208 @@ state_storage:
 				t.Errorf("StateStorage.Type = %q, want %q (normalized)", cfg.StateStorage.Type, "sqlite")
 			}
 		})
+	}
+}
+
+// completeTestConfigWithoutClusterQueueSize returns a complete config without cluster_queue_size
+// to test default value behavior
+func completeTestConfigWithoutClusterQueueSize() string {
+	return `
+clusters:
+  - name: test-cluster
+    mcp:
+      endpoint: "http://localhost:8080/mcp"
+subscribe_mode: "faults"
+workspace_root: "./incidents"
+agent_script_path: "./agent-container/run-agent.sh"
+agent_timeout: 300
+agent_model: "sonnet"
+agent_cli: "claude"
+agent_image: "nightcrier-agent:latest"
+severity_threshold: "ERROR"
+max_concurrent_agents: 5
+global_queue_size: 100
+dedup_window_seconds: 300
+queue_overflow_policy: "drop"
+shutdown_timeout: 30
+sse_reconnect_initial_backoff: 1
+sse_reconnect_max_backoff: 60
+sse_read_timeout: 120
+failure_threshold_for_alert: 3
+anthropic_api_key: "test-key"
+`
+}
+
+// TestClusterQueueSize_DefaultValue tests that cluster_queue_size defaults to 10 when not specified
+func TestClusterQueueSize_DefaultValue(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWithoutClusterQueueSize()
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if cfg.ClusterQueueSize != 10 {
+		t.Errorf("ClusterQueueSize = %d, want %d (default)", cfg.ClusterQueueSize, 10)
+	}
+}
+
+// TestClusterQueueSize_CustomValue tests that cluster_queue_size can be overridden
+func TestClusterQueueSize_CustomValue(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWithoutClusterQueueSize() + "cluster_queue_size: 25\n"
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if cfg.ClusterQueueSize != 25 {
+		t.Errorf("ClusterQueueSize = %d, want %d", cfg.ClusterQueueSize, 25)
+	}
+}
+
+// TestClusterQueueSize_EnvVarOverride tests that CLUSTER_QUEUE_SIZE env var overrides config
+func TestClusterQueueSize_EnvVarOverride(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWithoutClusterQueueSize() + "cluster_queue_size: 5\n"
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	os.Setenv("CLUSTER_QUEUE_SIZE", "50")
+	defer os.Unsetenv("CLUSTER_QUEUE_SIZE")
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if cfg.ClusterQueueSize != 50 {
+		t.Errorf("ClusterQueueSize = %d, want %d (from env var)", cfg.ClusterQueueSize, 50)
+	}
+}
+
+// TestEventTTLSeconds_DefaultValue tests that event_ttl_seconds defaults to 300 when not specified
+func TestEventTTLSeconds_DefaultValue(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfig() // Does not include event_ttl_seconds
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if cfg.EventTTLSeconds != 300 {
+		t.Errorf("EventTTLSeconds = %d, want %d (default)", cfg.EventTTLSeconds, 300)
+	}
+}
+
+// TestEventTTLSeconds_CustomValue tests that event_ttl_seconds can be overridden
+func TestEventTTLSeconds_CustomValue(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWith("event_ttl_seconds: 600\n")
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if cfg.EventTTLSeconds != 600 {
+		t.Errorf("EventTTLSeconds = %d, want %d", cfg.EventTTLSeconds, 600)
+	}
+}
+
+// TestEventTTLSeconds_EnvVarOverride tests that EVENT_TTL_SECONDS env var overrides config
+func TestEventTTLSeconds_EnvVarOverride(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWith("event_ttl_seconds: 100\n")
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	os.Setenv("EVENT_TTL_SECONDS", "900")
+	defer os.Unsetenv("EVENT_TTL_SECONDS")
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if cfg.EventTTLSeconds != 900 {
+		t.Errorf("EventTTLSeconds = %d, want %d (from env var)", cfg.EventTTLSeconds, 900)
+	}
+}
+
+// TestEventTTLSeconds_InvalidValue tests that event_ttl_seconds < 1 fails validation
+func TestEventTTLSeconds_InvalidValue(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWith("event_ttl_seconds: -1\n")
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	_, err := LoadWithConfigFile(configPath)
+	if err == nil {
+		t.Error("LoadWithConfigFile() should fail with event_ttl_seconds < 1")
+	}
+
+	if !contains(err.Error(), "event_ttl_seconds must be >= 1") {
+		t.Errorf("error message should mention validation, got: %v", err)
+	}
+}
+
+// TestClusterQueueSize_InvalidValue tests that cluster_queue_size < 1 fails validation
+func TestClusterQueueSize_InvalidValue(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWithoutClusterQueueSize() + "cluster_queue_size: -5\n"
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	_, err := LoadWithConfigFile(configPath)
+	if err == nil {
+		t.Error("LoadWithConfigFile() should fail with cluster_queue_size < 1")
+	}
+
+	if !contains(err.Error(), "cluster_queue_size must be >= 1") {
+		t.Errorf("error message should mention validation, got: %v", err)
 	}
 }

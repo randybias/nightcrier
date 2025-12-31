@@ -238,10 +238,17 @@ max_concurrent_agents: 5
 # Environment variable: GLOBAL_QUEUE_SIZE
 global_queue_size: 100
 
-# REQUIRED: Maximum size of per-cluster event queues
+# Optional: Maximum size of per-cluster event queues
 # Each cluster gets its own queue to ensure fair processing
+# Default: 10
 # Environment variable: CLUSTER_QUEUE_SIZE
 cluster_queue_size: 10
+
+# Optional: Time-to-live for queued events in seconds
+# Events older than this are dropped from the queue
+# Default: 300 (5 minutes)
+# Environment variable: EVENT_TTL_SECONDS
+event_ttl_seconds: 300
 
 # REQUIRED: Deduplication window in seconds (set to 0 to disable)
 # Events for the same resource within this window are deduplicated

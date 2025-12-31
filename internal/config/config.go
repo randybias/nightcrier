@@ -61,7 +61,8 @@ type Config struct {
 	SeverityThreshold   string `mapstructure:"severity_threshold"`
 	MaxConcurrentAgents int    `mapstructure:"max_concurrent_agents"`
 	GlobalQueueSize     int    `mapstructure:"global_queue_size"`
-	ClusterQueueSize    int    `mapstructure:"cluster_queue_size"`
+	ClusterQueueSize    int    `mapstructure:"cluster_queue_size"` // default: 10
+	EventTTLSeconds     int    `mapstructure:"event_ttl_seconds"`  // default: 300
 	DedupWindowSeconds  int    `mapstructure:"dedup_window_seconds"`
 	QueueOverflowPolicy string `mapstructure:"queue_overflow_policy"`
 	ShutdownTimeout     int    `mapstructure:"shutdown_timeout"` // seconds
@@ -237,6 +238,7 @@ func bindEnvVars() {
 		"max_concurrent_agents":           "MAX_CONCURRENT_AGENTS",
 		"global_queue_size":               "GLOBAL_QUEUE_SIZE",
 		"cluster_queue_size":              "CLUSTER_QUEUE_SIZE",
+		"event_ttl_seconds":               "EVENT_TTL_SECONDS",
 		"dedup_window_seconds":            "DEDUP_WINDOW_SECONDS",
 		"queue_overflow_policy":           "QUEUE_OVERFLOW_POLICY",
 		"shutdown_timeout":                "SHUTDOWN_TIMEOUT_SECONDS",
@@ -410,8 +412,14 @@ func (c *Config) Validate() error {
 		return missingFieldError("global_queue_size", "GLOBAL_QUEUE_SIZE")
 	}
 
+	// Apply default for ClusterQueueSize (optional with default: 10)
 	if c.ClusterQueueSize == 0 {
-		return missingFieldError("cluster_queue_size", "CLUSTER_QUEUE_SIZE")
+		c.ClusterQueueSize = 10
+	}
+
+	// Apply default for EventTTLSeconds (optional with default: 300)
+	if c.EventTTLSeconds == 0 {
+		c.EventTTLSeconds = 300
 	}
 
 	if c.DedupWindowSeconds < 0 {
@@ -461,6 +469,9 @@ func (c *Config) Validate() error {
 	}
 	if c.ClusterQueueSize < 1 {
 		return fmt.Errorf("cluster_queue_size must be >= 1, got %d. Set via CLUSTER_QUEUE_SIZE environment variable or config file", c.ClusterQueueSize)
+	}
+	if c.EventTTLSeconds < 1 {
+		return fmt.Errorf("event_ttl_seconds must be >= 1, got %d. Set via EVENT_TTL_SECONDS environment variable or config file", c.EventTTLSeconds)
 	}
 	if c.DedupWindowSeconds < 0 {
 		return fmt.Errorf("dedup_window_seconds must be >= 0, got %d. Set via DEDUP_WINDOW_SECONDS environment variable or config file", c.DedupWindowSeconds)

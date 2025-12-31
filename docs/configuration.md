@@ -39,12 +39,11 @@ The following parameters **must** be provided. The application will fail fast on
 - `KUBECONFIG_PATH` - Path to kubeconfig for executor cluster access
 - `KUBERNETES_CONTEXT` - Kubernetes context to use for executor
 
-### Event Processing
-- `MAX_CONCURRENT_AGENTS` - Maximum concurrent agent sessions
-- `GLOBAL_QUEUE_SIZE` - Global event queue size
-- `CLUSTER_QUEUE_SIZE` - Per-cluster queue size
+### Event Processing and Concurrency
+- `MAX_CONCURRENT_AGENTS` - Maximum number of concurrent agent executions globally (default: `10`)
+- `CLUSTER_QUEUE_SIZE` - Maximum queued events per cluster before dropping oldest (default: `10`)
+- `EVENT_TTL_SECONDS` - Events older than this are dropped as stale (default: `300`)
 - `DEDUP_WINDOW_SECONDS` - Event deduplication window (0 to disable)
-- `QUEUE_OVERFLOW_POLICY` - Queue overflow policy: `drop` or `reject`
 - `SHUTDOWN_TIMEOUT` - Graceful shutdown timeout in seconds
 
 ### SSE Connection Settings
@@ -187,6 +186,52 @@ nightcrier/
 ```
 kubeconfigs/*.yaml
 ```
+
+## Agent Concurrency Configuration
+
+Nightcrier uses a sophisticated concurrency model to balance parallelism with cluster-level ordering guarantees.
+
+### Concurrency Settings
+
+| Setting | Environment Variable | Default | Description |
+|---------|---------------------|---------|-------------|
+| `max_concurrent_agents` | `MAX_CONCURRENT_AGENTS` | `10` | Maximum number of concurrent agent executions globally |
+| `cluster_queue_size` | `CLUSTER_QUEUE_SIZE` | `10` | Maximum queued events per cluster before dropping oldest |
+| `event_ttl_seconds` | `EVENT_TTL_SECONDS` | `300` | Events older than this (in seconds) are dropped as stale |
+
+### Example Configuration
+
+```yaml
+# In configs/config.yaml
+max_concurrent_agents: 10
+cluster_queue_size: 10
+event_ttl_seconds: 300
+```
+
+Or via environment variables:
+
+```bash
+export MAX_CONCURRENT_AGENTS=10
+export CLUSTER_QUEUE_SIZE=10
+export EVENT_TTL_SECONDS=300
+```
+
+### Concurrency Behavior
+
+The concurrency model provides these guarantees:
+
+1. **Cross-cluster parallelism**: Events from different clusters run in parallel (up to `max_concurrent_agents`)
+2. **Per-cluster serialization**: Events for the same cluster are strictly serialized (one at a time)
+3. **Non-blocking ingestion**: Event ingestion never blocks the SSE event loop
+4. **Stale event dropping**: Events older than `event_ttl_seconds` are dropped before execution
+5. **Queue overflow handling**: When a cluster queue is full, the oldest event is dropped to make room for newer (more relevant) events
+
+### Tuning Guidelines
+
+- **High-volume environments**: Increase `max_concurrent_agents` for more parallelism across clusters
+- **Resource-constrained environments**: Decrease `max_concurrent_agents` to limit resource usage
+- **Bursty event patterns**: Increase `cluster_queue_size` to buffer more events per cluster
+- **Slow investigations**: Increase `event_ttl_seconds` if agent investigations take longer than 5 minutes
 
 ## Tuning Configuration
 
