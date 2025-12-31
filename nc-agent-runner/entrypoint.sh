@@ -15,6 +15,7 @@ set -euo pipefail
 # Environment variables (set by K8s Job spec)
 # - AGENT_CLI: claude|codex|gemini|goose
 # - LLM_MODEL: AI model to use
+# - LLM_PROVIDER: LLM provider for goose (e.g., openai, anthropic)
 # - INCIDENT_ID: Unique incident identifier
 # - PROMPT: Triage prompt for the agent
 # - OUTPUT_URL_REPORT: Presigned PUT URL for report.md
@@ -22,6 +23,7 @@ set -euo pipefail
 # - OUTPUT_URL_SESSION: Presigned PUT URL for session.tar.gz
 # - OUTPUT_URL_RESULT: Presigned PUT URL for result.json
 # - OUTPUT_URL_COMMANDS: Presigned PUT URL for commands-executed.log
+# - OUTPUT_URL_PROMPT_SENT: Presigned PUT URL for prompt-sent.md
 # - ANTHROPIC_API_KEY: API key for Claude (optional)
 # - OPENAI_API_KEY: API key for Codex (optional)
 # - GEMINI_API_KEY: API key for Gemini (optional)
@@ -276,11 +278,10 @@ run_agent() {
             ;;
         goose)
             # Goose: use 'goose run' with --text for headless mode
-            #
-            # TODO: make sure we can pass in an llm provider using the nightcrier config; until that is done this won't work. however, have verified that this is the correct arguments and structure to do it.
+            # LLM_PROVIDER is validated in validate_env() for goose agent
             goose run \
                 --model "$LLM_MODEL" \
-                --provider "$LLM_PROVIDER" \
+                --provider "${LLM_PROVIDER}" \
                 --text "$triage_prompt" \
                 2>&1 | tee "$log_file" || EXIT_CODE=$?
             ;;
@@ -527,15 +528,44 @@ EOF
 }
 
 #######################################
+# Validate required environment variables
+# Globals:
+#   All required environment variables
+# Arguments:
+#   None
+#######################################
+validate_env() {
+    # Required variables for all agents
+    : "${AGENT_CLI:?AGENT_CLI environment variable is required}"
+    : "${LLM_MODEL:?LLM_MODEL environment variable is required}"
+    : "${INCIDENT_ID:?INCIDENT_ID environment variable is required}"
+    : "${OUTPUT_URL_REPORT:?OUTPUT_URL_REPORT environment variable is required}"
+    : "${OUTPUT_URL_LOG:?OUTPUT_URL_LOG environment variable is required}"
+    : "${OUTPUT_URL_SESSION:?OUTPUT_URL_SESSION environment variable is required}"
+    : "${OUTPUT_URL_RESULT:?OUTPUT_URL_RESULT environment variable is required}"
+    : "${OUTPUT_URL_COMMANDS:?OUTPUT_URL_COMMANDS environment variable is required}"
+    : "${OUTPUT_URL_PROMPT_SENT:?OUTPUT_URL_PROMPT_SENT environment variable is required}"
+
+    # Goose requires LLM_PROVIDER
+    if [[ "${AGENT_CLI}" == "goose" ]]; then
+        : "${LLM_PROVIDER:?LLM_PROVIDER environment variable is required for goose agent}"
+    fi
+}
+
+#######################################
 # Main execution flow
 #######################################
 main() {
     echo "=========================================="
     echo "nc-agent-runner starting"
     echo "=========================================="
-    echo "Incident ID: $INCIDENT_ID"
-    echo "Agent: $AGENT_CLI"
-    echo "Model: $LLM_MODEL"
+
+    # Validate all required environment variables first
+    validate_env
+
+    echo "Incident ID: ${INCIDENT_ID}"
+    echo "Agent: ${AGENT_CLI}"
+    echo "Model: ${LLM_MODEL}"
     echo ""
 
     # Register teardown to run on exit (handles normal exit, SIGTERM, etc.)
