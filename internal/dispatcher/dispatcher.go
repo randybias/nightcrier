@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rbias/nightcrier/internal/config"
-	"github.com/rbias/nightcrier/internal/events"
+	"github.com/randybias/nightcrier/internal/config"
+	"github.com/randybias/nightcrier/internal/events"
 )
 
 // EventHandler is the callback type for processing events.

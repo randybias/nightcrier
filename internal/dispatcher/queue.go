@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rbias/nightcrier/internal/events"
+	"github.com/randybias/nightcrier/internal/events"
 )
 
 // QueuedEvent wraps a FaultEvent with metadata for queue management.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rbias/nightcrier/internal/events"
+	"github.com/randybias/nightcrier/internal/events"
 )
 
 // Helper to create a test FaultEvent

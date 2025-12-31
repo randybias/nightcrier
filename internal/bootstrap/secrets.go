@@ -82,7 +82,7 @@ func ensureAPIKeysSecret(ctx context.Context, client kubernetes.Interface, names
 	return nil
 }
 
-// ensureKubeconfigSecret creates a Secret containing kubeconfig file contents if it doesn't exist.
+// ensureKubeconfigSecret creates or updates a Secret containing kubeconfig file contents.
 // The Secret is named "kubeconfig-{clusterName}" and contains a single key "config" with file contents.
 //
 // Parameters:
@@ -100,8 +100,11 @@ func ensureAPIKeysSecret(ctx context.Context, client kubernetes.Interface, names
 // Behavior:
 //   - Validates file exists and reads contents into memory
 //   - Checks if Secret "kubeconfig-{clusterName}" exists
-//   - If exists, returns nil (idempotent, never updates)
+//   - If exists and content differs, updates Secret with new file contents
+//   - If exists and content is same, skips update (idempotent)
 //   - If not exists, creates Secret with file contents
+//
+// Note: This ensures transient credentials (like time-bounded tokens) are always kept fresh
 //
 // Labels applied:
 //   - app=nightcrier: Identifies resource ownership
@@ -137,9 +140,21 @@ func ensureKubeconfigSecret(ctx context.Context, client kubernetes.Interface, na
 	secretName := fmt.Sprintf("kubeconfig-%s", clusterName)
 
 	// Check if Secret already exists
-	_, err = client.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+	existingSecret, err := client.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
 	if err == nil {
-		// Secret exists, skip creation (idempotent)
+		// Secret exists - check if content has changed
+		existingContent, ok := existingSecret.Data["config"]
+		if ok && string(existingContent) == string(fileContents) {
+			// Content unchanged, skip update
+			return nil
+		}
+
+		// Content has changed - update the secret
+		existingSecret.Data["config"] = fileContents
+		_, err = client.CoreV1().Secrets(namespace).Update(ctx, existingSecret, metav1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to update Secret %s with new kubeconfig: %w", secretName, err)
+		}
 		return nil
 	}
 
