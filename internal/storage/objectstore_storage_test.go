@@ -189,7 +189,7 @@ func TestObjectStoreStorageIndexHTMLWithLogs(t *testing.T) {
 		"agent-stderr.log":            "http://storage.example.com/logs/agent-stderr.log",
 		"agent-full.log":              "http://storage.example.com/logs/agent-full.log",
 		"agent-commands-executed.log": "http://storage.example.com/logs/agent-commands-executed.log",
-		"claude-session.tar.gz":       "http://storage.example.com/logs/claude-session.tar.gz",
+		"agent-session.tar.gz":        "http://storage.example.com/logs/agent-session.tar.gz",
 	}
 
 	indexHTML := generateIndexHTMLWithSignedURLs(incidentID, artifactURLs, expiresAt)
@@ -200,7 +200,7 @@ func TestObjectStoreStorageIndexHTMLWithLogs(t *testing.T) {
 		"agent-stderr.log",
 		"agent-full.log",
 		"agent-commands-executed.log",
-		"claude-session.tar.gz",
+		"agent-session.tar.gz",
 	}
 
 	for _, logFile := range logFiles {
@@ -366,7 +366,7 @@ func TestObjectStoreStoragePathStructure(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// For artifacts (not logs)
-			if !strings.Contains(tt.filename, ".log") && tt.filename != "claude-session.tar.gz" {
+			if !strings.Contains(tt.filename, ".log") && tt.filename != "agent-session.tar.gz" {
 				expectedKey := tt.incidentID + "/" + tt.filename
 				if expectedKey != tt.expectedPath {
 					t.Errorf("path mismatch: expected %s, got %s", tt.expectedPath, expectedKey)
@@ -390,7 +390,7 @@ func TestObjectStoreStorageAllArtifactTypes(t *testing.T) {
 		"agent-stderr.log":                  "text/plain; charset=utf-8",
 		"agent-full.log":                    "text/plain; charset=utf-8",
 		"agent-commands-executed.log":       "text/plain; charset=utf-8",
-		"claude-session.tar.gz":             "application/gzip",
+		"agent-session.tar.gz":              "application/gzip",
 	}
 
 	for filename, expectedContentType := range artifactTypes {

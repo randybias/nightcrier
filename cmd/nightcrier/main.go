@@ -1048,7 +1048,7 @@ func readIncidentArtifacts(workspacePath, incidentID string, logPaths agent.LogP
 	}
 
 	// Read agent session archive if present (DEBUG mode only)
-	// Archive name depends on agent: claude-session.tar.gz for Claude, etc.
+	// Archive name is agent-session.tar.gz for all agent types
 	var agentSessionArchive []byte
 	sessionArchivePath := filepath.Join(workspacePath, "logs", "agent-session.tar.gz")
 	if sessionData, err := os.ReadFile(sessionArchivePath); err != nil {
