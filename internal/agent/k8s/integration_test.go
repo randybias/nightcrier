@@ -472,7 +472,7 @@ func TestPartialWorkflowMissingArtifacts(t *testing.T) {
 		t.Fatal("Expected ResultJSON to be present")
 	}
 
-	expectedMissing := []string{"report.md", "agent.log", "commands-executed.log", "session.tar.gz"}
+	expectedMissing := []string{"report.md", "agent.log", "commands-executed.log", "prompt-sent.md", "session.tar.gz"}
 	if len(retrievedResults.Missing) != len(expectedMissing) {
 		t.Errorf("Expected %d missing artifacts, got %d", len(expectedMissing), len(retrievedResults.Missing))
 	}
@@ -607,7 +607,7 @@ func TestJobFailureScenario(t *testing.T) {
 		t.Error("Expected ResultJSON to be nil when no artifacts available")
 	}
 
-	expectedMissing := []string{"result.json", "report.md", "agent.log", "commands-executed.log"}
+	expectedMissing := []string{"result.json", "report.md", "agent.log", "commands-executed.log", "prompt-sent.md"}
 	if len(retrievedResults.Missing) != len(expectedMissing) {
 		t.Errorf("Expected %d missing artifacts, got %d", len(expectedMissing), len(retrievedResults.Missing))
 	}
@@ -685,12 +685,17 @@ $ kubectl top pod test-pod -n default
 
 	sessionArchive := []byte("fake tar.gz archive containing session data and transcripts")
 
+	promptSent := []byte(`# System Prompt
+
+You are a Kubernetes troubleshooting expert. Investigate the incident using kubectl commands.`)
+
 	return &MockObjectStoreReader{
 		Data: map[string][]byte{
 			"incidents/" + incidentID + "/results/result.json":             resultData,
 			"incidents/" + incidentID + "/results/report.md":               reportMD,
 			"incidents/" + incidentID + "/results/agent.log":               agentLog,
 			"incidents/" + incidentID + "/results/commands-executed.log":   commandsLog,
+			"incidents/" + incidentID + "/results/prompt-sent.md":          promptSent,
 			"incidents/" + incidentID + "/results/session.tar.gz":          sessionArchive,
 		},
 		Errors: map[string]error{},

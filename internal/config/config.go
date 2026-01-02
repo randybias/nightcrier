@@ -12,6 +12,105 @@ import (
 	"github.com/randybias/nightcrier/internal/cluster"
 )
 
+// AgentConfig holds AI agent runtime configuration.
+type AgentConfig struct {
+	// CLI is the AI CLI to use: claude, codex, goose, gemini
+	CLI string `mapstructure:"cli"`
+
+	// Model is the LLM model to use (model names depend on CLI)
+	Model string `mapstructure:"model"`
+
+	// Timeout is the maximum execution time in seconds
+	Timeout int `mapstructure:"timeout"`
+
+	// SystemPromptFile is the path to the system prompt file
+	SystemPromptFile string `mapstructure:"system_prompt_file"`
+
+	// AllowedTools is a comma-separated list of allowed tools
+	AllowedTools string `mapstructure:"allowed_tools"`
+
+	// AdditionalPrompt is optional cluster-specific context
+	AdditionalPrompt string `mapstructure:"additional_prompt"`
+}
+
+// Validate validates the AgentConfig fields
+func (a *AgentConfig) Validate() error {
+	if a.CLI == "" {
+		return fmt.Errorf("agent.cli is required")
+	}
+	validCLIs := map[string]bool{"claude": true, "codex": true, "goose": true, "gemini": true}
+	if !validCLIs[a.CLI] {
+		return fmt.Errorf("invalid agent.cli '%s', must be one of: claude, codex, goose, gemini", a.CLI)
+	}
+	if a.Model == "" {
+		return fmt.Errorf("agent.model is required")
+	}
+	if a.Timeout < 1 {
+		return fmt.Errorf("agent.timeout must be >= 1")
+	}
+	return nil
+}
+
+// K8sConfig holds Kubernetes executor configuration.
+type K8sConfig struct {
+	// Namespace where Jobs and ConfigMaps are created
+	Namespace string `mapstructure:"namespace"`
+
+	// Image is the container image for the agent runner
+	Image string `mapstructure:"image"`
+
+	// ImagePullPolicy: Always, Never, IfNotPresent
+	ImagePullPolicy string `mapstructure:"image_pull_policy"`
+
+	// Timeout is the Job timeout in seconds
+	Timeout int `mapstructure:"timeout"`
+
+	// MemoryLimit for Job containers (e.g., "2Gi")
+	MemoryLimit string `mapstructure:"memory_limit"`
+
+	// CPULimit for Job containers (e.g., "1")
+	CPULimit string `mapstructure:"cpu_limit"`
+
+	// CleanupTTL is the TTL for Job cleanup after completion (seconds)
+	CleanupTTL int `mapstructure:"cleanup_ttl"`
+}
+
+// Validate validates the K8sConfig fields
+func (k *K8sConfig) Validate() error {
+	if k.ImagePullPolicy != "" {
+		validPolicies := map[string]bool{"Always": true, "Never": true, "IfNotPresent": true}
+		if !validPolicies[k.ImagePullPolicy] {
+			return fmt.Errorf("invalid k8s.image_pull_policy '%s', must be one of: Always, Never, IfNotPresent", k.ImagePullPolicy)
+		}
+	}
+	return nil
+}
+
+// ApplyDefaults sets default values for K8sConfig
+func (k *K8sConfig) ApplyDefaults() {
+	if k.Namespace == "" {
+		k.Namespace = "nightcrier"
+	}
+	if k.Image == "" {
+		k.Image = "nc-agent-runner:latest"
+	}
+	if k.ImagePullPolicy == "" {
+		k.ImagePullPolicy = "IfNotPresent"
+	}
+	if k.Timeout == 0 {
+		k.Timeout = 600
+	}
+	if k.MemoryLimit == "" {
+		k.MemoryLimit = "2Gi"
+	}
+	if k.CPULimit == "" {
+		k.CPULimit = "1"
+	}
+	if k.CleanupTTL == 0 {
+		k.CleanupTTL = 3600
+	}
+}
+
 // Config holds the application configuration.
 type Config struct {
 	// Cluster Configuration
@@ -27,16 +126,8 @@ type Config struct {
 	// Slack Integration
 	SlackWebhookURL string `mapstructure:"slack_webhook_url"`
 
-	// Agent Configuration
-	AgentScriptPath       string `mapstructure:"agent_script_path"`
-	AgentSystemPromptFile string `mapstructure:"agent_system_prompt_file"`
-	AgentAllowedTools     string `mapstructure:"agent_allowed_tools"`
-	AgentModel            string `mapstructure:"agent_model"`
-	AgentTimeout          int    `mapstructure:"agent_timeout"` // seconds
-	AgentCLI              string `mapstructure:"agent_cli"`     // claude, codex, goose, gemini
-	AgentImage            string `mapstructure:"agent_image"`              // Docker image for agent container
-	AgentVerbose          bool   `mapstructure:"agent_verbose"`           // Enable verbose agent output
-	AdditionalAgentPrompt string `mapstructure:"additional_agent_prompt"` // Optional additional context for agent (cluster-specific SLOs, escalation info)
+	// Agent Configuration (nested)
+	Agent AgentConfig `mapstructure:"agent"`
 
 	// LLM API Keys (optional - can also be set via environment)
 	AnthropicAPIKey string `mapstructure:"anthropic_api_key"`
@@ -47,15 +138,8 @@ type Config struct {
 	KubeconfigPath    string `mapstructure:"kubeconfig_path"`
 	KubernetesContext string `mapstructure:"kubernetes_context"`
 
-	// K8s Executor Configuration (Phase 5: K8s-native agent execution)
-	// When enabled, agents run in Kubernetes Jobs instead of Docker containers
-	K8sNamespace        string `mapstructure:"k8s_namespace"`          // Namespace for Jobs/ConfigMaps (default: nightcrier)
-	K8sImage            string `mapstructure:"k8s_image"`              // Container image for agent (default: nc-agent-runner:latest)
-	K8sImagePullPolicy  string `mapstructure:"k8s_image_pull_policy"`  // Image pull policy: Always, Never, IfNotPresent (default: IfNotPresent)
-	K8sTimeout          int    `mapstructure:"k8s_timeout"`            // Job timeout in seconds (default: 600)
-	K8sMemoryLimit      string `mapstructure:"k8s_memory_limit"`       // Memory limit (default: 2Gi)
-	K8sCPULimit         string `mapstructure:"k8s_cpu_limit"`          // CPU limit (default: 1)
-	K8sCleanupTTL       int    `mapstructure:"k8s_cleanup_ttl"`        // TTL for Job cleanup in seconds (default: 3600)
+	// K8s Executor Configuration (nested)
+	K8s K8sConfig `mapstructure:"k8s"`
 
 	// Event Processing (Phase 1 additions)
 	SeverityThreshold   string `mapstructure:"severity_threshold"`
@@ -83,11 +167,6 @@ type Config struct {
 	// Configures where incident state is persisted. Supports filesystem (backward compatible),
 	// SQLite (embedded), and PostgreSQL (centralized). Default: filesystem
 	StateStorage StateStorage `mapstructure:"state_storage"`
-
-	// Skills Configuration
-	// Configures where downloaded skills (like k8s4agents) are cached and
-	// whether to preload triage scripts
-	Skills SkillsConfig `mapstructure:"skills"`
 }
 
 // StateStorage configures persistent state storage for incidents, agent executions, and triage reports.
@@ -146,23 +225,6 @@ type StateStorage struct {
 	MigrationsPath string `mapstructure:"migrations_path"`
 }
 
-// SkillsConfig configures the skills subsystem for the agent.
-// Skills are external tools and utilities that extend agent capabilities,
-// such as downloaded triage scripts (k8s4agents).
-type SkillsConfig struct {
-	// CacheDir is the directory where downloaded skills are cached
-	// Default: "{workspace_root}/agent-home/skills"
-	// Environment variable: SKILLS_CACHE_DIR
-	CacheDir string `mapstructure:"cache_dir"`
-
-	// DisableTriagePreload controls whether triage scripts should be preloaded
-	// When false (default), the system preloads triage scripts from the cache
-	// When true, the agent runs triage scripts itself
-	// Default: false
-	// Environment variable: SKILLS_DISABLE_TRIAGE_PRELOAD
-	DisableTriagePreload bool `mapstructure:"disable_triage_preload"`
-}
-
 // ObjectStorage configures the Go CDK-based object storage for incident artifacts.
 // Supports Azure Blob Storage, S3-compatible storage (AWS S3, MinIO, RustFS), and in-memory storage.
 // Storage is optional - if not configured, artifacts are stored locally in the filesystem.
@@ -212,27 +274,26 @@ func bindEnvVars() {
 		"workspace_root":                  "WORKSPACE_ROOT",
 		"log_level":                       "LOG_LEVEL",
 		"slack_webhook_url":               "SLACK_WEBHOOK_URL",
-		"agent_script_path":               "AGENT_SCRIPT_PATH",
-		"agent_system_prompt_file":        "AGENT_SYSTEM_PROMPT_FILE",
-		"agent_allowed_tools":             "AGENT_ALLOWED_TOOLS",
-		"agent_model":                     "AGENT_MODEL",
-		"agent_timeout":                   "AGENT_TIMEOUT",
-		"agent_cli":                       "AGENT_CLI",
-		"agent_image":                     "AGENT_IMAGE",
-		"agent_verbose":                   "AGENT_VERBOSE",
-		"additional_agent_prompt":         "ADDITIONAL_AGENT_PROMPT",
+		// Agent configuration (nested)
+		"agent.cli":                "AGENT_CLI",
+		"agent.model":              "AGENT_MODEL",
+		"agent.timeout":            "AGENT_TIMEOUT",
+		"agent.system_prompt_file": "AGENT_SYSTEM_PROMPT_FILE",
+		"agent.allowed_tools":      "AGENT_ALLOWED_TOOLS",
+		"agent.additional_prompt":  "ADDITIONAL_AGENT_PROMPT",
 		"anthropic_api_key":               "ANTHROPIC_API_KEY",
 		"openai_api_key":                  "OPENAI_API_KEY",
 		"gemini_api_key":                  "GEMINI_API_KEY",
 		"kubeconfig_path":                 "KUBECONFIG_PATH",
 		"kubernetes_context":              "KUBERNETES_CONTEXT",
-		"k8s_namespace":                   "K8S_NAMESPACE",
-		"k8s_image":                       "K8S_IMAGE",
-		"k8s_image_pull_policy":           "K8S_IMAGE_PULL_POLICY",
-		"k8s_timeout":                     "K8S_TIMEOUT",
-		"k8s_memory_limit":                "K8S_MEMORY_LIMIT",
-		"k8s_cpu_limit":                   "K8S_CPU_LIMIT",
-		"k8s_cleanup_ttl":                 "K8S_CLEANUP_TTL",
+		// K8s configuration (nested)
+		"k8s.namespace":         "K8S_NAMESPACE",
+		"k8s.image":             "K8S_IMAGE",
+		"k8s.image_pull_policy": "K8S_IMAGE_PULL_POLICY",
+		"k8s.timeout":           "K8S_TIMEOUT",
+		"k8s.memory_limit":      "K8S_MEMORY_LIMIT",
+		"k8s.cpu_limit":         "K8S_CPU_LIMIT",
+		"k8s.cleanup_ttl":       "K8S_CLEANUP_TTL",
 		"severity_threshold":              "SEVERITY_THRESHOLD",
 		"max_concurrent_agents":           "MAX_CONCURRENT_AGENTS",
 		"global_queue_size":               "GLOBAL_QUEUE_SIZE",
@@ -261,8 +322,6 @@ func bindEnvVars() {
 		"state_storage.postgres_user":                       "STATE_STORAGE_POSTGRES_USER",
 		"state_storage.postgres_password":                   "STATE_STORAGE_POSTGRES_PASSWORD",
 		"state_storage.migrations_path":                     "STATE_STORAGE_MIGRATIONS_PATH",
-		"skills.cache_dir":                                  "SKILLS_CACHE_DIR",
-		"skills.disable_triage_preload":                     "SKILLS_DISABLE_TRIAGE_PRELOAD",
 	}
 
 	for key, envVar := range envBindings {
@@ -382,17 +441,9 @@ func (c *Config) Validate() error {
 		return missingFieldError("workspace_root", "WORKSPACE_ROOT")
 	}
 
-	// Required: Agent Configuration
-	if c.AgentTimeout == 0 {
-		return missingFieldError("agent_timeout", "AGENT_TIMEOUT")
-	}
-
-	if c.AgentModel == "" {
-		return missingFieldError("agent_model", "AGENT_MODEL")
-	}
-
-	if c.AgentCLI == "" {
-		return missingFieldError("agent_cli", "AGENT_CLI")
+	// Validate nested agent configuration
+	if err := c.Agent.Validate(); err != nil {
+		return fmt.Errorf("agent configuration invalid: %w", err)
 	}
 
 	// Note: AdditionalAgentPrompt is optional - system prompt drives investigation
@@ -465,9 +516,6 @@ func (c *Config) Validate() error {
 	if c.DedupWindowSeconds < 0 {
 		return fmt.Errorf("dedup_window_seconds must be >= 0, got %d. Set via DEDUP_WINDOW_SECONDS environment variable or config file", c.DedupWindowSeconds)
 	}
-	if c.AgentTimeout < 1 {
-		return fmt.Errorf("agent_timeout must be >= 1, got %d. Set via AGENT_TIMEOUT environment variable or config file", c.AgentTimeout)
-	}
 	if c.ShutdownTimeout < 1 {
 		return fmt.Errorf("shutdown_timeout must be >= 1, got %d. Set via SHUTDOWN_TIMEOUT_SECONDS environment variable or config file", c.ShutdownTimeout)
 	}
@@ -510,32 +558,10 @@ func (c *Config) Validate() error {
 		return err
 	}
 
-	// Apply K8s executor defaults
-	if c.K8sNamespace == "" {
-		c.K8sNamespace = "nightcrier"
-	}
-	if c.K8sImage == "" {
-		c.K8sImage = "nc-agent-runner:latest"
-	}
-	if c.K8sImagePullPolicy == "" {
-		c.K8sImagePullPolicy = "IfNotPresent"
-	}
-	// Validate image pull policy
-	validPullPolicies := map[string]bool{"Always": true, "Never": true, "IfNotPresent": true}
-	if !validPullPolicies[c.K8sImagePullPolicy] {
-		return fmt.Errorf("invalid k8s_image_pull_policy '%s': must be 'Always', 'Never', or 'IfNotPresent'. Set via K8S_IMAGE_PULL_POLICY environment variable or config file", c.K8sImagePullPolicy)
-	}
-	if c.K8sTimeout == 0 {
-		c.K8sTimeout = 600
-	}
-	if c.K8sMemoryLimit == "" {
-		c.K8sMemoryLimit = "2Gi"
-	}
-	if c.K8sCPULimit == "" {
-		c.K8sCPULimit = "1"
-	}
-	if c.K8sCleanupTTL == 0 {
-		c.K8sCleanupTTL = 3600
+	// Apply K8s executor defaults and validate
+	c.K8s.ApplyDefaults()
+	if err := c.K8s.Validate(); err != nil {
+		return fmt.Errorf("k8s configuration invalid: %w", err)
 	}
 
 	return nil

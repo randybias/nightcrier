@@ -44,9 +44,6 @@ incident-*/
 # Scratch/temp
 scratch/
 
-# Agent runtime directory (skills cache, etc.)
-/agent-home/
-
 # Runtime logs
 *.log
 logs/

@@ -26,30 +26,33 @@ workspace_root: "./incidents"
 log_level: "info"
 
 # Agent configuration - Goose with .goosehints context files
-agent_script_path: "./agent-container/run-agent.sh"
-agent_system_prompt_file: "./configs/base-triage-prompt.md"
-agent_allowed_tools: "Read,Write,Grep,Glob,Bash,Skill"
+agent:
+  # Goose CLI configuration
+  cli: "goose"
 
-# Goose model selection
-agent_model: "haiku"         # Default: haiku (fast, cost-effective)
-# agent_model: "sonnet"      # Alternative: balanced performance
-# agent_model: "opus"        # Alternative: highest capability
-agent_cli: "goose"
-agent_timeout: 300
-agent_image: "nightcrier-agent:latest"
+  # Goose model selection
+  model: "haiku"         # Default: haiku (fast, cost-effective)
+  # model: "sonnet"      # Alternative: balanced performance
+  # model: "opus"        # Alternative: highest capability
+
+  # Agent execution settings
+  timeout: 300
+  system_prompt_file: "./configs/base-triage-prompt.md"
+  allowed_tools: "Read,Write,Grep,Glob,Bash,Skill"
 
 # LLM API Keys
 # Set via environment variable: export ANTHROPIC_API_KEY="sk-ant-..."
 # anthropic_api_key: "sk-ant-..."
 
 # K8s Executor Configuration (Kubernetes-native agent execution)
-k8s_namespace: "nightcrier"
-k8s_image: "nc-agent-runner:latest"
-k8s_image_pull_policy: "IfNotPresent"  # Options: Always, Never, IfNotPresent
-k8s_timeout: 600
-k8s_memory_limit: "2Gi"
-k8s_cpu_limit: "1"
-k8s_cleanup_ttl: 3600
+k8s:
+  namespace: "nightcrier"
+  image: "nc-agent-runner:latest"
+  image_pull_policy: "IfNotPresent"  # Options: Always, Never, IfNotPresent
+  timeout: 600
+  memory_limit: "2Gi"
+  cpu_limit: "1"
+  cleanup_ttl: 3600
 
 # Event processing
 severity_threshold: "ERROR"

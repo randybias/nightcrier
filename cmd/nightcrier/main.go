@@ -122,9 +122,9 @@ func run(cmd *cobra.Command, args []string) error {
 	printStartupBanner(cfg, config.GetConfigFile())
 
 	// Verify system prompt file exists (required for agent operation)
-	if cfg.AgentSystemPromptFile != "" {
-		if _, err := os.Stat(cfg.AgentSystemPromptFile); os.IsNotExist(err) {
-			return fmt.Errorf("agent system prompt file not found: %s\n\nThe system prompt file is required for agent operation. Please ensure:\n  1. The file exists at the specified path\n  2. The path in config (agent_system_prompt_file) is correct\n  3. The path is readable by the nightcrier process", cfg.AgentSystemPromptFile)
+	if cfg.Agent.SystemPromptFile != "" {
+		if _, err := os.Stat(cfg.Agent.SystemPromptFile); os.IsNotExist(err) {
+			return fmt.Errorf("agent system prompt file not found: %s\n\nThe system prompt file is required for agent operation. Please ensure:\n  1. The file exists at the specified path\n  2. The path in config (agent_system_prompt_file) is correct\n  3. The path is readable by the nightcrier process", cfg.Agent.SystemPromptFile)
 		}
 	} else {
 		return fmt.Errorf("agent system prompt file not configured (agent_system_prompt_file is required)")
@@ -210,7 +210,7 @@ func run(cmd *cobra.Command, args []string) error {
 	slog.Info("K8s client initialized",
 		"kubeconfig", cfg.KubeconfigPath,
 		"context", cfg.KubernetesContext,
-		"namespace", cfg.K8sNamespace)
+		"namespace", cfg.K8s.Namespace)
 
 	// Bootstrap Kubernetes resources (namespace, RBAC, secrets)
 	slog.Info("bootstrapping kubernetes resources...")
@@ -228,7 +228,7 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	bootstrapConfig := bootstrap.Config{
-		Namespace:       cfg.K8sNamespace,
+		Namespace:       cfg.K8s.Namespace,
 		AnthropicAPIKey: cfg.AnthropicAPIKey,
 		OpenAIAPIKey:    cfg.OpenAIAPIKey,
 		GeminiAPIKey:    cfg.GeminiAPIKey,
@@ -263,16 +263,16 @@ func run(cmd *cobra.Command, args []string) error {
 
 	for _, clusterCfg := range cfg.Clusters {
 		k8sExecCfg := agent.K8sExecutorConfig{
-			Namespace:        cfg.K8sNamespace,
-			Image:            cfg.K8sImage,
-			ImagePullPolicy:  cfg.K8sImagePullPolicy,
-			Timeout:          cfg.K8sTimeout,
-			MemoryLimit:      cfg.K8sMemoryLimit,
-			CPULimit:         cfg.K8sCPULimit,
-			CleanupTTL:       int32(cfg.K8sCleanupTTL),
-			AgentCLI:         cfg.AgentCLI,
-			Model:            cfg.AgentModel,
-			SystemPromptFile: cfg.AgentSystemPromptFile,
+			Namespace:        cfg.K8s.Namespace,
+			Image:            cfg.K8s.Image,
+			ImagePullPolicy:  cfg.K8s.ImagePullPolicy,
+			Timeout:          cfg.K8s.Timeout,
+			MemoryLimit:      cfg.K8s.MemoryLimit,
+			CPULimit:         cfg.K8s.CPULimit,
+			CleanupTTL:       int32(cfg.K8s.CleanupTTL),
+			AgentCLI:         cfg.Agent.CLI,
+			Model:            cfg.Agent.Model,
+			SystemPromptFile: cfg.Agent.SystemPromptFile,
 			Debug:            cfg.LogLevel == "debug",
 		}
 		k8sExec := agent.NewK8sExecutor(
@@ -287,8 +287,8 @@ func run(cmd *cobra.Command, args []string) error {
 		k8sExecutorRefs[clusterCfg.Name] = k8sExec
 		slog.Info("K8s executor created for cluster",
 			"cluster", clusterCfg.Name,
-			"namespace", cfg.K8sNamespace,
-			"image", cfg.K8sImage)
+			"namespace", cfg.K8s.Namespace,
+			"image", cfg.K8s.Image)
 	}
 
 	// Handle shutdown signals
@@ -1081,10 +1081,10 @@ func printStartupBanner(cfg *config.Config, configFile string) {
 	fmt.Printf("║  Clusters:       %-45s ║\n", fmt.Sprintf("%d configured", len(cfg.Clusters)))
 	fmt.Printf("║  Subscribe Mode: %-45s ║\n", cfg.SubscribeMode)
 	fmt.Println("╠═══════════════════════════════════════════════════════════════╣")
-	fmt.Printf("║  Agent CLI:      %-45s ║\n", cfg.AgentCLI)
-	fmt.Printf("║  Agent Model:    %-45s ║\n", cfg.AgentModel)
-	fmt.Printf("║  Agent Timeout:  %-45s ║\n", fmt.Sprintf("%ds", cfg.AgentTimeout))
-	fmt.Printf("║  Allowed Tools:  %-45s ║\n", truncateString(cfg.AgentAllowedTools, 45))
+	fmt.Printf("║  Agent CLI:      %-45s ║\n", cfg.Agent.CLI)
+	fmt.Printf("║  Agent Model:    %-45s ║\n", cfg.Agent.Model)
+	fmt.Printf("║  Agent Timeout:  %-45s ║\n", fmt.Sprintf("%ds", cfg.Agent.Timeout))
+	fmt.Printf("║  Allowed Tools:  %-45s ║\n", truncateString(cfg.Agent.AllowedTools, 45))
 	fmt.Println("╠═══════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║  Workspace Root:     %-41s ║\n", truncateString(cfg.WorkspaceRoot, 41))
 	fmt.Printf("║  Artifact Storage:   %-41s ║\n", artifactStorage)

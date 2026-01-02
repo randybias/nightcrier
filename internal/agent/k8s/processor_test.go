@@ -196,10 +196,9 @@ func TestProcessJobResults_Success(t *testing.T) {
 		},
 		IncidentJSON:    []byte(`{"incident_id":"test"}`),
 		PermissionsJSON: []byte(`{"permissions":["get","list"]}`),
-		PromptSent:      []byte("System prompt content"),
 	}
 
-	err := processor.ProcessJobResults(ctx, cfg)
+	_, err := processor.ProcessJobResults(ctx, cfg)
 	if err != nil {
 		t.Fatalf("ProcessJobResults failed: %v", err)
 	}
@@ -307,7 +306,7 @@ func TestProcessJobResults_NonZeroExitCode(t *testing.T) {
 		},
 	}
 
-	err := processor.ProcessJobResults(ctx, cfg)
+	_, err := processor.ProcessJobResults(ctx, cfg)
 	if err != nil {
 		t.Fatalf("ProcessJobResults failed: %v", err)
 	}
@@ -357,7 +356,7 @@ func TestProcessJobResults_MissingResultJSON(t *testing.T) {
 		},
 	}
 
-	err := processor.ProcessJobResults(ctx, cfg)
+	_, err := processor.ProcessJobResults(ctx, cfg)
 	if err == nil {
 		t.Fatal("Expected error for missing result.json")
 	}
@@ -411,7 +410,7 @@ func TestProcessJobResults_MissingReport(t *testing.T) {
 		},
 	}
 
-	err := processor.ProcessJobResults(ctx, cfg)
+	_, err := processor.ProcessJobResults(ctx, cfg)
 	if err == nil {
 		t.Fatal("Expected error for missing report")
 	}
@@ -453,7 +452,7 @@ func TestProcessJobResults_StorageFailure(t *testing.T) {
 		},
 	}
 
-	err := processor.ProcessJobResults(ctx, cfg)
+	_, err := processor.ProcessJobResults(ctx, cfg)
 	if err == nil {
 		t.Fatal("Expected error for storage failure")
 	}
@@ -557,7 +556,7 @@ func TestProcessJobResults_RequiredFields(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := processor.ProcessJobResults(ctx, tt.cfg)
+			_, err := processor.ProcessJobResults(ctx, tt.cfg)
 			if err == nil {
 				t.Fatal("Expected error, got nil")
 			}

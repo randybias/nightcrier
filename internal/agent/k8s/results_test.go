@@ -38,6 +38,7 @@ func TestRetrieveResults_AllArtifactsPresent(t *testing.T) {
 	agentLog := []byte("Starting agent...\nCompleted investigation.\n")
 	commandsLog := []byte("$ kubectl get pods\n$ kubectl describe pod nginx\n")
 	sessionArchive := []byte("fake tar.gz data")
+	promptSent := []byte("# System Prompt\n\nYou are a Kubernetes expert...")
 
 	// Create mock object store
 	mockStore := &MockObjectStoreReader{
@@ -46,6 +47,7 @@ func TestRetrieveResults_AllArtifactsPresent(t *testing.T) {
 			"incidents/test-123/results/report.md":               reportMD,
 			"incidents/test-123/results/agent.log":               agentLog,
 			"incidents/test-123/results/commands-executed.log":   commandsLog,
+			"incidents/test-123/results/prompt-sent.md":          promptSent,
 			"incidents/test-123/results/session.tar.gz":          sessionArchive,
 		},
 		Errors: map[string]error{},
@@ -135,7 +137,7 @@ func TestRetrieveResults_MissingArtifacts(t *testing.T) {
 	}
 
 	// Verify missing artifacts are tracked
-	expectedMissing := []string{"report.md", "agent.log", "commands-executed.log"}
+	expectedMissing := []string{"report.md", "agent.log", "commands-executed.log", "prompt-sent.md"}
 	if len(results.Missing) != len(expectedMissing) {
 		t.Errorf("Expected %d missing artifacts, got %d", len(expectedMissing), len(results.Missing))
 	}
@@ -173,7 +175,7 @@ func TestRetrieveResults_AllMissing(t *testing.T) {
 	}
 
 	// Verify all artifacts are marked as missing
-	expectedMissing := []string{"result.json", "report.md", "agent.log", "commands-executed.log"}
+	expectedMissing := []string{"result.json", "report.md", "agent.log", "commands-executed.log", "prompt-sent.md"}
 	if len(results.Missing) != len(expectedMissing) {
 		t.Errorf("Expected %d missing artifacts, got %d", len(expectedMissing), len(results.Missing))
 	}
@@ -492,9 +494,9 @@ func TestRetrieveResults_PartialSuccess(t *testing.T) {
 		t.Error("Expected CommandsExecuted to be empty (missing)")
 	}
 
-	// Verify missing list
-	expectedMissing := 2
+	// Verify missing list (agent.log, commands-executed.log, prompt-sent.md)
+	expectedMissing := 3
 	if len(results.Missing) != expectedMissing {
-		t.Errorf("Expected %d missing artifacts, got %d", expectedMissing, len(results.Missing))
+		t.Errorf("Expected %d missing artifacts, got %d: %v", expectedMissing, len(results.Missing), results.Missing)
 	}
 }

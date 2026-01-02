@@ -117,7 +117,7 @@ users:
 		t.Fatalf("failed to create test kubeconfig: %v", err)
 	}
 
-	config, inCluster, err := buildConfig(kubeconfigPath)
+	config, inCluster, err := buildConfig(kubeconfigPath, "")
 	if err != nil {
 		t.Fatalf("buildConfig() failed: %v", err)
 	}
@@ -166,7 +166,7 @@ users:
 	defer os.Setenv("KUBECONFIG", oldEnv)
 	os.Setenv("KUBECONFIG", kubeconfigPath)
 
-	config, inCluster, err := buildConfig("")
+	config, inCluster, err := buildConfig("", "")
 	if err != nil {
 		t.Fatalf("buildConfig() failed: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestBuildConfig_NoConfigFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	os.Setenv("HOME", tmpDir)
 
-	_, _, err := buildConfig("")
+	_, _, err := buildConfig("", "")
 	if err == nil {
 		t.Error("buildConfig() should fail when no config is found")
 	}
@@ -243,7 +243,7 @@ users:
 	os.Unsetenv("KUBECONFIG")
 	os.Setenv("HOME", tmpHome)
 
-	config, inCluster, err := buildConfig("")
+	config, inCluster, err := buildConfig("", "")
 	if err != nil {
 		t.Fatalf("buildConfig() failed: %v", err)
 	}

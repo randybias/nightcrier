@@ -104,8 +104,6 @@ $ kubectl get configmaps -n default
 		"resources": ["pods", "configmaps", "events"]
 	}`)
 
-	promptSent := []byte("You are a Kubernetes troubleshooting expert. Investigate the pod crash loop issue.")
-
 	// Process Job results
 	cfg := ProcessJobResultsConfig{
 		IncidentID:      incidentID,
@@ -114,10 +112,9 @@ $ kubectl get configmaps -n default
 		StartedAt:       time.Now().Add(-5 * time.Minute),
 		IncidentJSON:    incidentJSON,
 		PermissionsJSON: permissionsJSON,
-		PromptSent:      promptSent,
 	}
 
-	err = processor.ProcessJobResults(ctx, cfg)
+	_, err = processor.ProcessJobResults(ctx, cfg)
 	if err != nil {
 		t.Fatalf("ProcessJobResults failed: %v", err)
 	}
@@ -271,7 +268,7 @@ func TestPhase4WithFailures(t *testing.T) {
 				StartedAt:   time.Now().Add(-5 * time.Minute),
 			}
 
-			err := processor.ProcessJobResults(ctx, cfg)
+			_, err := processor.ProcessJobResults(ctx, cfg)
 
 			if tt.expectedError && err == nil {
 				t.Error("Expected error but got none")

@@ -25,30 +25,33 @@ workspace_root: "./incidents"
 log_level: "info"
 
 # Agent configuration - Codex with AGENTS.md
-agent_script_path: "./agent-container/run-agent.sh"
-agent_system_prompt_file: "./configs/base-triage-prompt.md"
-agent_allowed_tools: "Read,Write,Grep,Glob,Bash,Skill"
+agent:
+  # Codex CLI configuration
+  cli: "codex"
 
-# Codex model selection (OpenAI models)
-agent_model: "gpt-5.2"       # Default: gpt-5.2
-# agent_model: "gpt-5.1"     # Alternative: previous generation
-# agent_model: "gpt-4.1"     # Alternative: cost-effective
-agent_cli: "codex"
-agent_timeout: 300
-agent_image: "nightcrier-agent:latest"
+  # Codex model selection (OpenAI models)
+  model: "gpt-5.2"       # Default: gpt-5.2
+  # model: "gpt-5.1"     # Alternative: previous generation
+  # model: "gpt-4.1"     # Alternative: cost-effective
+
+  # Agent execution settings
+  timeout: 300
+  system_prompt_file: "./configs/base-triage-prompt.md"
+  allowed_tools: "Read,Write,Grep,Glob,Bash,Skill"
 
 # LLM API Keys
 # Set via environment variable: export OPENAI_API_KEY="sk-..."
 # openai_api_key: "sk-..."
 
 # K8s Executor Configuration (Kubernetes-native agent execution)
-k8s_namespace: "nightcrier"
-k8s_image: "nc-agent-runner:latest"
-k8s_image_pull_policy: "IfNotPresent"  # Options: Always, Never, IfNotPresent
-k8s_timeout: 600
-k8s_memory_limit: "2Gi"
-k8s_cpu_limit: "1"
-k8s_cleanup_ttl: 3600
+k8s:
+  namespace: "nightcrier"
+  image: "nc-agent-runner:latest"
+  image_pull_policy: "IfNotPresent"  # Options: Always, Never, IfNotPresent
+  timeout: 600
+  memory_limit: "2Gi"
+  cpu_limit: "1"
+  cleanup_ttl: 3600
 
 # Event processing
 severity_threshold: "ERROR"

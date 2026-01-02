@@ -69,53 +69,34 @@ log_level: "info"
 # =============================================================================
 # Agent Configuration (Required)
 # =============================================================================
-# REQUIRED: Path to the agent execution script
-# Environment variable: AGENT_SCRIPT_PATH
-agent_script_path: "./agent-container/run-agent.sh"
+# Agent execution and behavior configuration
+agent:
+  # REQUIRED: AI CLI to use: claude, codex, goose, gemini
+  # Environment variable: AGENT_CLI
+  cli: "claude"
 
-# Optional: Path to the system prompt file for the agent
-# Environment variable: AGENT_SYSTEM_PROMPT_FILE
-agent_system_prompt_file: "./configs/base-triage-prompt.md"
+  # REQUIRED: AI model to use: sonnet, opus, haiku (Claude models)
+  # Environment variable: AGENT_MODEL
+  model: "sonnet"
 
-# Optional: Comma-separated list of tools the agent is allowed to use
-# Default: Read,Write,Grep,Glob,Bash,Skill
-# Environment variable: AGENT_ALLOWED_TOOLS
-agent_allowed_tools: "Read,Write,Grep,Glob,Bash,Skill"
+  # REQUIRED: Maximum execution time for agent in seconds
+  # Environment variable: AGENT_TIMEOUT
+  timeout: 300
 
-# REQUIRED: AI model to use: sonnet, opus, haiku (Claude models)
-# Environment variable: AGENT_MODEL
-agent_model: "sonnet"
+  # Optional: Path to the system prompt file for the agent
+  # Environment variable: AGENT_SYSTEM_PROMPT_FILE
+  system_prompt_file: "./configs/base-triage-prompt.md"
 
-# REQUIRED: Maximum execution time for agent in seconds
-# Environment variable: AGENT_TIMEOUT
-agent_timeout: 300
+  # Optional: Comma-separated list of tools the agent is allowed to use
+  # Default: Read,Write,Grep,Glob,Bash,Skill
+  # Environment variable: AGENT_ALLOWED_TOOLS
+  allowed_tools: "Read,Write,Grep,Glob,Bash,Skill"
 
-# REQUIRED: AI CLI to use: claude, codex, goose, gemini
-# Environment variable: AGENT_CLI
-agent_cli: "claude"
-
-# REQUIRED: Docker image for the agent container
-# Environment variable: AGENT_IMAGE
-agent_image: "nightcrier-agent:latest"
-
-# Optional: Additional context for the agent (beyond the system prompt)
-# Use this for cluster-specific information like SLOs, escalation contacts, or special constraints.
-# The system prompt handles investigation methodology via the k8s-troubleshooter skill.
-# Environment variable: ADDITIONAL_AGENT_PROMPT
-# additional_agent_prompt: "SLO: 99.9% uptime. Escalation: page oncall@example.com for P1 issues."
-
-# =============================================================================
-# Skills Configuration (Optional)
-# =============================================================================
-# Directory where skills are cached (downloaded triage skills like k8s4agents)
-# Default: ./agent-home/skills (relative to nightcrier working directory)
-# Environment variable: SKILLS_CACHE_DIR
-skills:
-  cache_dir: "./agent-home/skills"
-  # Optional: Disable triage script preloading (default: false)
-  # When disabled, agent will run triage scripts itself
-  # Environment variable: SKILLS_DISABLE_TRIAGE_PRELOAD
-  disable_triage_preload: false
+  # Optional: Additional context for the agent (beyond the system prompt)
+  # Use this for cluster-specific information like SLOs, escalation contacts, or special constraints.
+  # The system prompt handles investigation methodology via the k8s-troubleshooter skill.
+  # Environment variable: ADDITIONAL_AGENT_PROMPT
+  # additional_prompt: "SLO: 99.9% uptime. Escalation: page oncall@example.com for P1 issues."
 
 # =============================================================================
 # LLM API Keys (At least one required)
@@ -182,44 +163,46 @@ skills:
 # =============================================================================
 # K8s Executor Configuration (Kubernetes-native agent execution)
 # =============================================================================
-# Kubernetes namespace for Jobs and ConfigMaps
-# Default: nightcrier
-# Environment variable: K8S_NAMESPACE
-k8s_namespace: "nightcrier"
+# Kubernetes Job execution configuration for running agents
+k8s:
+  # Kubernetes namespace for Jobs and ConfigMaps
+  # Default: nightcrier
+  # Environment variable: K8S_NAMESPACE
+  namespace: "nightcrier"
 
-# Container image for the agent runner
-# Default: nc-agent-runner:latest
-# Environment variable: K8S_IMAGE
-k8s_image: "nc-agent-runner:latest"
+  # Container image for the agent runner
+  # Default: nc-agent-runner:latest
+  # Environment variable: K8S_IMAGE
+  image: "nc-agent-runner:latest"
 
-# Image pull policy for the agent container
-# Options: Always, Never, IfNotPresent
-# - Always: Always pull the image from the registry
-# - Never: Never pull, only use local images (for development with kind)
-# - IfNotPresent: Pull if the image isn't already present locally (default)
-# Default: IfNotPresent
-# Environment variable: K8S_IMAGE_PULL_POLICY
-k8s_image_pull_policy: "IfNotPresent"
+  # Image pull policy for the agent container
+  # Options: Always, Never, IfNotPresent
+  # - Always: Always pull the image from the registry
+  # - Never: Never pull, only use local images (for development with kind)
+  # - IfNotPresent: Pull if the image isn't already present locally (default)
+  # Default: IfNotPresent
+  # Environment variable: K8S_IMAGE_PULL_POLICY
+  image_pull_policy: "IfNotPresent"
 
-# Job timeout in seconds
-# Default: 600
-# Environment variable: K8S_TIMEOUT
-k8s_timeout: 600
+  # Job timeout in seconds
+  # Default: 600
+  # Environment variable: K8S_TIMEOUT
+  timeout: 600
 
-# Memory limit for Job containers (e.g., "2Gi", "512Mi")
-# Default: 2Gi
-# Environment variable: K8S_MEMORY_LIMIT
-k8s_memory_limit: "2Gi"
+  # Memory limit for Job containers (e.g., "2Gi", "512Mi")
+  # Default: 2Gi
+  # Environment variable: K8S_MEMORY_LIMIT
+  memory_limit: "2Gi"
 
-# CPU limit for Job containers (e.g., "1", "500m")
-# Default: 1
-# Environment variable: K8S_CPU_LIMIT
-k8s_cpu_limit: "1"
+  # CPU limit for Job containers (e.g., "1", "500m")
+  # Default: 1
+  # Environment variable: K8S_CPU_LIMIT
+  cpu_limit: "1"
 
-# TTL for Job cleanup after completion (seconds)
-# Default: 3600 (1 hour)
-# Environment variable: K8S_CLEANUP_TTL
-k8s_cleanup_ttl: 3600
+  # TTL for Job cleanup after completion (seconds)
+  # Default: 3600 (1 hour)
+  # Environment variable: K8S_CLEANUP_TTL
+  cleanup_ttl: 3600
 
 # =============================================================================
 # Event Processing (Required)
