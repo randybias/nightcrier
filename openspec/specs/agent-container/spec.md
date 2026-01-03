@@ -4,121 +4,106 @@
 TBD - created by archiving change implement-agent-container. Update Purpose after archive.
 ## Requirements
 ### Requirement: Multi-Agent Container
-The system SHALL provide a Docker container capable of running multiple AI CLI agents for Kubernetes incident triage.
+The container SHALL support multiple AI CLI agents but execution is now K8s-native.
 
-#### Scenario: Container build
-- **WHEN** building the k8s-triage-agent container
-- **THEN** the image includes kubectl 1.31, helm 3.x, and search tools (ripgrep, fd, fzf)
-- **AND** the image includes Claude Code, OpenAI Codex, and Google Gemini CLIs
-- **AND** the image includes the k8s-troubleshooter skill from k8s4agents
-- **AND** the image includes the `runners/` directory with all sub-runner scripts
+#### Scenario: Container image naming
+- **WHEN** building the agent container
+- **THEN** the image SHALL be named `nc-agent-runner`
+- **AND** the image includes kubectl 1.31, helm 3.x, and search tools (ripgrep, fd, fzf)
+- **AND** the image includes Claude Code, OpenAI Codex, Google Gemini, and Goose CLIs
+- **AND** the image includes jq and sqlite3 for session data extraction
+- **AND** the image includes the k8s-troubleshooter skill baked in
+- **AND** the image uses `entrypoint.sh` as the container entrypoint
 
-#### Scenario: Agent selection
-- **WHEN** invoking run-agent.sh with `-a claude`
-- **THEN** the Claude Code CLI is used via the `runners/claude.sh` sub-runner
-- **WHEN** invoking run-agent.sh with `-a codex`
-- **THEN** the OpenAI Codex CLI is used via the `runners/codex.sh` sub-runner
-- **WHEN** invoking run-agent.sh with `-a gemini`
-- **THEN** the Google Gemini CLI is used via the `runners/gemini.sh` sub-runner
-- **WHEN** invoking run-agent.sh with `-a goose`
-- **THEN** the Goose CLI is used via the `runners/goose.sh` sub-runner
-
-#### Scenario: Default agent
-- **WHEN** invoking run-agent.sh without the `-a` flag
-- **THEN** Claude Code is used as the default agent via `runners/claude.sh`
-
-### Requirement: Workspace Isolation
-The container SHALL enforce workspace isolation to prevent access to unauthorized host directories.
-
-#### Scenario: Required workspace flag
-- **WHEN** invoking run-agent.sh without the `-w` flag
-- **THEN** the script exits with an error message
-- **AND** the message instructs the user to provide an incident workspace directory
-
-#### Scenario: Workspace mounting
-- **WHEN** invoking run-agent.sh with `-w /path/to/incident`
-- **THEN** the incident directory is mounted at /workspace in the container
-- **AND** an output subdirectory is created and mounted at /output
-- **AND** no other host directories are accessible (except kubeconfig read-only)
-
-#### Scenario: Kubeconfig access
-- **WHEN** the container is started
-- **THEN** the host kubeconfig is mounted read-only at /root/.kube/config
-- **AND** the agent can execute kubectl commands against the configured cluster
+#### Scenario: Agent selection via environment
+- **WHEN** a K8s Job is created with `AGENT_CLI=claude`
+- **THEN** the container entrypoint invokes the Claude Code CLI
+- **WHEN** a K8s Job is created with `AGENT_CLI=codex`
+- **THEN** the container entrypoint invokes the OpenAI Codex CLI
+- **WHEN** a K8s Job is created with `AGENT_CLI=gemini`
+- **THEN** the container entrypoint invokes the Google Gemini CLI
+- **WHEN** a K8s Job is created with `AGENT_CLI=goose`
+- **THEN** the container entrypoint invokes the Goose CLI
 
 ### Requirement: Built-in Skills
-The container SHALL include the k8s-troubleshooter skill for Kubernetes diagnostics.
+Skills SHALL be baked into the container image with agent-specific symlinks.
 
-#### Scenario: Skill availability
+#### Scenario: Skill location
 - **WHEN** the container starts
-- **THEN** the k8s-troubleshooter skill is available at /skills/k8s-troubleshooter/
-- **AND** the skill includes SKILL.md, references/, and scripts/ directories
+- **THEN** skills SHALL be available at `/home/agent/skills/`
+- **AND** the entrypoint SHALL create symlinks to agent-specific locations
 
-#### Scenario: Claude skill access
-- **WHEN** Claude Code runs in the container
-- **THEN** the /k8s-troubleshooter slash command is available
-- **AND** Claude can read /skills/k8s-troubleshooter/SKILL.md for guidance
+#### Scenario: Claude skill symlink
+- **WHEN** `AGENT_CLI=claude`
+- **THEN** the entrypoint SHALL create symlink `~/.claude/skills` pointing to `/home/agent/skills`
+
+#### Scenario: Codex skill symlink
+- **WHEN** `AGENT_CLI=codex`
+- **THEN** the entrypoint SHALL create symlink `~/.codex/skills` pointing to `/home/agent/skills`
+
+#### Scenario: Goose skill symlinks
+- **WHEN** `AGENT_CLI=goose`
+- **THEN** the entrypoint SHALL create symlink `~/.config/agents/skills` pointing to `/home/agent/skills`
+- **AND** the entrypoint SHALL create symlink `~/.config/goose/skills` pointing to `/home/agent/skills`
+- **AND** Goose searches multiple locations with priority ordering
 
 ### Requirement: Output Capture
-The container SHALL capture all agent output to timestamped log files.
+The container SHALL upload outputs to Object Store instead of local file capture.
 
-#### Scenario: Output logging
+#### Scenario: Output upload
+- **WHEN** an agent invocation completes (success or failure)
+- **THEN** the container SHALL upload `/home/agent/output/report.md` to `OUTPUT_URL_REPORT`
+- **AND** the container SHALL upload `/home/agent/logs/agent.log` to `OUTPUT_URL_LOG`
+- **AND** uploads SHALL use HTTP PUT with presigned URLs
+
+#### Scenario: Session archive upload
 - **WHEN** an agent invocation completes
-- **THEN** all stdout and stderr is captured to a log file
-- **AND** the log file is named triage_<agent>_<timestamp>.log
-- **AND** the log file is saved in the workspace output directory
+- **THEN** the container SHALL archive the session directory to `/tmp/session.tar.gz`
+- **AND** the container SHALL upload the archive to `OUTPUT_URL_SESSION`
+- **AND** the session directory location SHALL be agent-specific
 
-#### Scenario: Real-time output
-- **WHEN** an agent is running
-- **THEN** output is displayed in real-time to the terminal
-- **AND** simultaneously written to the log file via tee
+#### Scenario: Result metadata upload
+- **WHEN** an agent invocation completes
+- **THEN** the container SHALL create `/tmp/result.json` with exit code and metadata
+- **AND** the container SHALL upload the result to `OUTPUT_URL_RESULT`
 
-#### Scenario: Agent-specific session archive
-- **WHEN** an agent completes in DEBUG mode
-- **THEN** the agent-specific post-run script SHALL extract session data
-- **AND** the archive SHALL be named `agent-session.tar.gz` regardless of agent type
-- **AND** the archive contents SHALL be agent-specific (`.claude/` for Claude, `.codex/` for Codex, etc.)
+#### Scenario: Teardown via trap
+- **WHEN** the container receives SIGTERM or exits normally
+- **THEN** the teardown function SHALL run via bash trap
+- **AND** all outputs SHALL be uploaded before container termination
+- **AND** upload failures SHALL NOT prevent other uploads from attempting
 
 ### Requirement: API Key Authentication
-The container SHALL support API key authentication for each agent backend.
+API keys SHALL be injected via K8s Secrets as environment variables.
 
-#### Scenario: Claude authentication
-- **WHEN** ANTHROPIC_API_KEY is set in the environment
-- **THEN** Claude Code uses this key for API authentication
+#### Scenario: Claude authentication via Secret
+- **WHEN** a K8s Job is created for Claude
+- **THEN** `ANTHROPIC_API_KEY` SHALL be injected from Secret `ai-api-keys`
+- **AND** the key SHALL be available as an environment variable
 
-#### Scenario: Codex authentication
-- **WHEN** OPENAI_API_KEY is set in the environment
-- **THEN** the script performs `codex login --with-api-key` before execution
-- **AND** Codex uses this key for API authentication
+#### Scenario: Codex authentication via Secret
+- **WHEN** a K8s Job is created for Codex
+- **THEN** `OPENAI_API_KEY` SHALL be injected from Secret `ai-api-keys`
+- **AND** the entrypoint SHALL perform `codex login --with-api-key` before execution
 
-#### Scenario: Gemini authentication
-- **WHEN** GEMINI_API_KEY or GOOGLE_API_KEY is set in the environment
-- **THEN** Gemini CLI uses this key for API authentication
-
-#### Scenario: Missing API key
-- **WHEN** the required API key for the selected agent is not set
-- **THEN** the script exits with an error message indicating which key is required
+#### Scenario: Gemini authentication via Secret
+- **WHEN** a K8s Job is created for Gemini
+- **THEN** `GEMINI_API_KEY` SHALL be injected from Secret `ai-api-keys`
 
 ### Requirement: Configurable Execution
-The container SHALL support configurable execution parameters.
+Execution parameters SHALL be configured via K8s Job spec.
 
 #### Scenario: Timeout configuration
-- **WHEN** CONTAINER_TIMEOUT is set or --timeout flag is provided
-- **THEN** the container execution is limited to the specified duration in seconds
-- **AND** the default timeout is 600 seconds (10 minutes)
+- **WHEN** a K8s Job is created
+- **THEN** `spec.activeDeadlineSeconds` SHALL control the job timeout
+- **AND** the default timeout SHALL be 600 seconds
+- **AND** SIGTERM SHALL be sent before SIGKILL to allow trap execution
 
-#### Scenario: Memory limit
-- **WHEN** CONTAINER_MEMORY is set or --memory flag is provided
-- **THEN** the container memory is limited to the specified amount
-- **AND** the default memory limit is 2g
-
-#### Scenario: Claude tool restrictions
-- **WHEN** invoking Claude with `-t "Read,Grep,Glob,Bash"`
-- **THEN** Claude is restricted to only those tools via --allowedTools flag
-
-#### Scenario: Claude model selection
-- **WHEN** invoking run-agent.sh with `-m opus`
-- **THEN** Claude uses the opus model instead of the default sonnet
+#### Scenario: Resource limits
+- **WHEN** a K8s Job is created
+- **THEN** `resources.limits.memory` SHALL default to 2Gi
+- **AND** `resources.limits.cpu` SHALL default to 1
+- **AND** `resources.requests.memory` SHALL default to 512Mi
 
 ### Requirement: Agent Context File Integration
 The system SHALL provide agent-specific context files for skill integration where native skill systems are unavailable.
@@ -150,94 +135,116 @@ The system SHALL provide agent-specific context files for skill integration wher
 - **AND** it SHALL be pre-configured with GOOSE_MODEL: gpt-4.1
 - **AND** the Goose runner SHALL set GOOSE_DISABLE_KEYRING=1 for headless operation
 
-### Requirement: Modular Agent Runners
-The system SHALL provide modular sub-runner scripts for each supported AI CLI agent.
-
-#### Scenario: Sub-runner directory structure
-- **WHEN** inspecting the agent-container directory
-- **THEN** a `runners/` subdirectory SHALL exist
-- **AND** it SHALL contain `common.sh` with shared functions
-- **AND** it SHALL contain `{agent}.sh` for each supported agent (claude, codex, gemini, goose)
-- **AND** it SHALL contain `{agent}-post.sh` for each agent's post-run hooks
-
-#### Scenario: Sub-runner invocation
-- **WHEN** run-agent.sh is invoked with `-a claude`
-- **THEN** the script SHALL source `runners/claude.sh` to build the CLI command
-- **AND** after execution, it SHALL source `runners/claude-post.sh` for artifact extraction
-- **WHEN** run-agent.sh is invoked with `-a codex`
-- **THEN** the script SHALL source `runners/codex.sh` to build the CLI command
-- **AND** after execution, it SHALL source `runners/codex-post.sh` for artifact extraction
-
-#### Scenario: Sub-runner contract
-- **WHEN** a sub-runner script is sourced
-- **THEN** it SHALL have access to standardized environment variables (AGENT_CLI, PROMPT, LLM_MODEL, AGENT_HOME, etc.)
-- **AND** it SHALL output the complete agent CLI command string to stdout
-- **AND** it SHALL NOT execute the command itself (orchestrator handles execution)
-
-### Requirement: Agent-Agnostic Post-Run Hooks
-The system SHALL dispatch post-run artifact extraction to agent-specific scripts.
-
-#### Scenario: Post-run dispatch
-- **WHEN** an agent execution completes
-- **THEN** the orchestrator SHALL check for `runners/${AGENT_CLI}-post.sh`
-- **AND** if the script exists, it SHALL be sourced for execution
-- **AND** if the script does not exist, the orchestrator SHALL log a warning and continue
-
-#### Scenario: Standardized artifact paths
-- **WHEN** a post-run script extracts session artifacts in DEBUG mode
-- **THEN** it SHALL create `{workspace}/logs/agent-session.tar.gz` for the session archive
-- **AND** it SHALL create `{workspace}/logs/agent-commands-executed.log` for extracted commands
-- **AND** the commands log SHALL use a standardized header format with agent name, timestamp, and incident ID
-
-#### Scenario: Graceful failure handling
-- **WHEN** a post-run script cannot extract session data (e.g., session directory missing)
-- **THEN** it SHALL log a debug message indicating the failure
-- **AND** it SHALL NOT cause the overall script to exit with non-zero code
-- **AND** the incident SHALL complete successfully without the missing artifacts
-
 ### Requirement: Context Preloading
-The agent runner SHALL preload incident context before agent execution to minimize redundant operations.
+Context SHALL be delivered via ConfigMap mounts instead of shell script preloading.
 
-#### Scenario: Incident context preloading
-- **WHEN** run-agent.sh is invoked with a workspace containing incident.json
-- **THEN** the incident.json contents are read from the host
-- **AND** the contents are wrapped in `<incident>` XML tags
-- **AND** the tagged content is included in the agent's initial prompt
+#### Scenario: Incident context delivery
+- **WHEN** a K8s Job is created
+- **THEN** `incident.json` SHALL be mounted from ConfigMap at `/home/agent/incident.json`
+- **AND** the file SHALL be read-only
 
-#### Scenario: Permissions preloading
-- **WHEN** run-agent.sh is invoked with a workspace containing incident_cluster_permissions.json
-- **THEN** the permissions file contents are read from the host
-- **AND** the contents are wrapped in `<kubernetes_cluster_access_permissions>` XML tags
-- **AND** the tagged content is included in the agent's initial prompt
+#### Scenario: Permissions context delivery
+- **WHEN** a K8s Job is created
+- **THEN** `permissions.json` SHALL be mounted from ConfigMap at `/home/agent/incident_cluster_permissions.json`
+- **AND** the file SHALL be read-only
 
-#### Scenario: Baseline triage preloading
-- **WHEN** run-agent.sh is invoked and skill triage script is available
-- **THEN** the script is executed before agent starts
-- **AND** the triage output is wrapped in `<initial_triage_report>` XML tags
-- **AND** the tagged output is included in the agent's initial prompt
-- **AND** execution is limited to 30 seconds timeout
+#### Scenario: System prompt delivery
+- **WHEN** a K8s Job is created
+- **THEN** `system-prompt.md` SHALL be mounted from ConfigMap at `/home/agent/system-prompt.md`
+- **AND** the file SHALL be read-only
+- **AND** the agent SHALL use this file via append-system-prompt-file or equivalent
 
-#### Scenario: Graceful triage failure
-- **WHEN** triage script execution fails or times out
-- **THEN** a warning is logged indicating triage unavailable
-- **AND** the agent proceeds without triage context
-- **AND** the failure does not prevent agent execution
+#### Scenario: Kubeconfig delivery
+- **WHEN** a K8s Job is created
+- **THEN** kubeconfig SHALL be mounted from Secret at `/home/agent/.kube/config`
+- **AND** the file SHALL be read-only
+- **AND** the kubeconfig SHALL use a read-only ServiceAccount with TTL
 
-#### Scenario: Context size monitoring
-- **WHEN** preloaded context exceeds 8,000 tokens (estimated)
-- **THEN** a warning is logged indicating large context size
-- **AND** triage output is truncated if total exceeds 10,000 tokens
-- **AND** incident.json and permissions are never truncated
+### Requirement: Unified Container Entrypoint
+The container SHALL have a unified entrypoint that handles all agent types.
 
-#### Scenario: Context injection location
-- **WHEN** the agent command is constructed
-- **THEN** preloaded context is inserted between system prompt and user prompt
-- **AND** the system prompt remains generic (domain-agnostic)
-- **AND** the preloaded context provides domain-specific data
+#### Scenario: Entrypoint structure
+- **WHEN** the container starts
+- **THEN** `entrypoint.sh` SHALL be the container entrypoint
+- **AND** it SHALL perform agent-specific setup based on `AGENT_CLI` environment variable
+- **AND** it SHALL execute the agent and capture output
+- **AND** it SHALL upload outputs on exit via trap
 
-#### Scenario: Audit trail accuracy
-- **WHEN** preloaded context is assembled
-- **THEN** the full preloaded context is appended to prompt-sent.md
-- **AND** the audit trail shows the complete prompt sent to the agent
-- **AND** this happens after preloading completes but before agent execution
+#### Scenario: Agent path setup
+- **WHEN** the entrypoint runs
+- **THEN** it SHALL create agent-specific directories
+- **AND** it SHALL create symlinks for skills to agent-specific locations
+- **AND** it SHALL export `SESSION_DIR` for teardown to know what to archive
+
+#### Scenario: Agent invocation
+- **WHEN** the entrypoint invokes the agent
+- **THEN** it SHALL construct the CLI command based on `AGENT_CLI`
+- **AND** it SHALL pass `PROMPT` as the investigation prompt
+- **AND** it SHALL pass `LLM_MODEL` as the model selection
+- **AND** stdout and stderr SHALL be captured to agent.log and displayed
+
+### Requirement: Stateless Container Operation
+The container SHALL operate without host volume mounts or persistent state.
+
+#### Scenario: No host mounts
+- **WHEN** inspecting the K8s Job spec
+- **THEN** there SHALL be no hostPath volumes
+- **AND** all volumes SHALL be ConfigMaps or Secrets
+
+#### Scenario: Ephemeral filesystem
+- **WHEN** the container runs
+- **THEN** all writes SHALL be to ephemeral container filesystem
+- **AND** outputs SHALL be uploaded to Object Store before termination
+- **AND** container filesystem contents SHALL NOT be preserved after termination
+
+#### Scenario: Idempotent execution
+- **WHEN** a Job is created with the same incident ID
+- **THEN** execution SHALL be independent of any previous runs
+- **AND** there SHALL be no shared state between executions
+
+### Requirement: In-Container Command Extraction
+The container SHALL extract commands executed by the agent before uploading to Object Store.
+
+#### Scenario: Command extraction from Claude
+- **WHEN** `AGENT_CLI=claude` and the agent completes
+- **THEN** the entrypoint SHALL parse JSONL files from `~/.claude/projects/*/`
+- **AND** extract Bash tool invocations
+- **AND** create `commands-executed.log` with each command prefixed by `$ `
+
+#### Scenario: Command extraction from Codex
+- **WHEN** `AGENT_CLI=codex` and the agent completes
+- **THEN** the entrypoint SHALL parse JSONL files from `~/.codex/sessions/`
+- **AND** extract shell_command function calls
+- **AND** create `commands-executed.log` with each command prefixed by `$ `
+
+#### Scenario: Command extraction from Gemini
+- **WHEN** `AGENT_CLI=gemini` and the agent completes
+- **THEN** the entrypoint SHALL parse JSON files from `~/.gemini/tmp/*/chats/session-*.json`
+- **AND** extract bash tool invocations
+- **AND** create `commands-executed.log` with each command prefixed by `$ `
+
+#### Scenario: Command extraction from Goose
+- **WHEN** `AGENT_CLI=goose` and the agent completes
+- **THEN** the entrypoint SHALL query SQLite database at `~/.config/goose/sessions.db`
+- **AND** extract shell commands from the messages table
+- **AND** create `commands-executed.log` with each command prefixed by `$ `
+
+#### Scenario: Command extraction upload
+- **WHEN** commands have been extracted
+- **THEN** the container SHALL upload `commands-executed.log` to `OUTPUT_URL_COMMANDS`
+- **AND** extraction failures SHALL NOT prevent other uploads
+
+### Requirement: Real-Time Logging
+The container SHALL provide basic real-time logging during agent execution.
+
+#### Scenario: Log capture and display
+- **WHEN** the agent runs
+- **THEN** stdout and stderr SHALL be displayed to the container console in real-time
+- **AND** stdout and stderr SHALL be captured to `/home/agent/logs/agent.log`
+- **AND** both capture and display SHALL use tee or equivalent
+
+#### Scenario: Log streaming via kubectl
+- **WHEN** the K8s Job is running
+- **THEN** logs SHALL be streamable via `kubectl logs -f`
+- **AND** users can observe agent progress in real-time
 

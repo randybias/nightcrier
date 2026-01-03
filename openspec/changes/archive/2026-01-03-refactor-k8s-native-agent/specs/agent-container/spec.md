@@ -2,7 +2,7 @@
 
 ## REMOVED Requirements
 
-### Requirement: Workspace Isolation (Docker-specific)
+### Requirement: Workspace Isolation
 The Docker-specific workspace mounting requirements are removed as Docker execution is eliminated.
 
 #### Scenario: Workspace mounting removal
@@ -10,7 +10,7 @@ The Docker-specific workspace mounting requirements are removed as Docker execut
 - **THEN** the Docker volume mount logic in run-agent.sh SHALL be removed
 - **AND** workspace isolation SHALL be handled by K8s ConfigMap/Secret mounts instead
 
-### Requirement: Modular Agent Runners (Shell Scripts)
+### Requirement: Modular Agent Runners
 The shell-based runner scripts are removed in favor of a unified container entrypoint.
 
 #### Scenario: Runner script removal
@@ -19,7 +19,7 @@ The shell-based runner scripts are removed in favor of a unified container entry
 - **AND** `agent-container/runners/*.sh` SHALL be deleted
 - **AND** agent execution logic SHALL be handled by the container entrypoint
 
-### Requirement: Agent-Agnostic Post-Run Hooks (Docker cp)
+### Requirement: Agent-Agnostic Post-Run Hooks
 The `docker cp` based post-run extraction is removed as containers are stateless.
 
 #### Scenario: Post-run hook removal
