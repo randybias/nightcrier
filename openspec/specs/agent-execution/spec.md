@@ -1,7 +1,7 @@
 # agent-execution Specification
 
 ## Purpose
-TBD - created by archiving change add-agent-concurrency. Update Purpose after archive.
+Defines requirements for concurrent agent execution with per-cluster serialization, event TTL handling, queue overflow management, and graceful shutdown behavior.
 ## Requirements
 ### Requirement: Concurrent Agent Execution
 

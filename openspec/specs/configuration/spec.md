@@ -1,7 +1,7 @@
 # configuration Specification
 
 ## Purpose
-TBD - created by archiving change remove-hardcoded-defaults. Update Purpose after archive.
+Defines requirements for application configuration management including required field validation, tuning parameters, environment variable mappings, and nested configuration structures for agent and Kubernetes settings.
 ## Requirements
 ### Requirement: Tuning Configuration
 
@@ -26,29 +26,17 @@ The system SHALL support a separate tuning configuration file for operational pa
 
 The system SHALL fail fast at startup when required configuration parameters are missing.
 
-#### Scenario: Missing MCP endpoint
-- **WHEN** the application starts
-- **AND** `mcp_endpoint` is not configured
-- **THEN** the application SHALL exit with a non-zero status
-- **AND** the error message SHALL state "mcp_endpoint is required"
-
 #### Scenario: Missing workspace root
 - **WHEN** the application starts
 - **AND** `workspace_root` is not configured
 - **THEN** the application SHALL exit with a non-zero status
 - **AND** the error message SHALL state "workspace_root is required"
 
-#### Scenario: Missing agent script path
-- **WHEN** the application starts
-- **AND** `agent_script_path` is not configured
-- **THEN** the application SHALL exit with a non-zero status
-- **AND** the error message SHALL state "agent_script_path is required"
-
 #### Scenario: Missing agent timeout
 - **WHEN** the application starts
-- **AND** `agent_timeout` is not configured
+- **AND** `agent.timeout` is not configured
 - **THEN** the application SHALL exit with a non-zero status
-- **AND** the error message SHALL state "agent_timeout is required"
+- **AND** the error message SHALL state "agent.timeout must be >= 1"
 
 #### Scenario: Missing subscribe mode
 - **WHEN** the application starts
@@ -58,25 +46,19 @@ The system SHALL fail fast at startup when required configuration parameters are
 
 #### Scenario: Missing agent model
 - **WHEN** the application starts
-- **AND** `agent_model` is not configured
+- **AND** `agent.model` is not configured
 - **THEN** the application SHALL exit with a non-zero status
-- **AND** the error message SHALL state "agent_model is required"
+- **AND** the error message SHALL state "agent.model is required"
 
 #### Scenario: Missing agent CLI
 - **WHEN** the application starts
-- **AND** `agent_cli` is not configured
+- **AND** `agent.cli` is not configured
 - **THEN** the application SHALL exit with a non-zero status
-- **AND** the error message SHALL state "agent_cli is required"
-
-#### Scenario: Missing agent image
-- **WHEN** the application starts
-- **AND** `agent_image` is not configured
-- **THEN** the application SHALL exit with a non-zero status
-- **AND** the error message SHALL state "agent_image is required"
+- **AND** the error message SHALL state "agent.cli is required"
 
 #### Scenario: Optional additional agent prompt
 - **WHEN** the application starts
-- **AND** `additional_agent_prompt` is not configured
+- **AND** `agent.additional_prompt` is not configured
 - **THEN** the application SHALL start successfully
 - **AND** the system prompt SHALL drive investigation methodology
 
@@ -93,12 +75,12 @@ The system SHALL NOT define default values for required configuration parameters
 #### Scenario: No duplicate defaults in executor
 - **WHEN** the agent executor is initialized
 - **THEN** it SHALL receive all configuration values from the Config struct
-- **AND** it SHALL NOT define its own default values for agent_timeout, agent_model, or agent_allowed_tools
+- **AND** it SHALL NOT define its own default values for agent.timeout, agent.model, or agent.allowed_tools
 
 #### Scenario: No duplicate defaults in shell script
 - **WHEN** the agent shell script is invoked
 - **THEN** it SHALL receive all configuration values via environment variables
-- **AND** it SHALL NOT define default values for AGENT_MODEL, AGENT_TIMEOUT, or CLAUDE_ALLOWED_TOOLS
+- **AND** it SHALL NOT define default values for AGENT_MODEL, AGENT_TIMEOUT, or AGENT_ALLOWED_TOOLS
 
 #### Scenario: Environment variables passed to script
 - **WHEN** the Go application invokes the agent script
