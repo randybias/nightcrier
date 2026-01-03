@@ -1,7 +1,7 @@
 # k8s-executor Specification
 
 ## Purpose
-TBD - created by archiving change refactor-k8s-native-agent. Update Purpose after archive.
+Defines requirements for Kubernetes-native agent execution, including Job creation via client-go, ConfigMap-based input delivery, presigned URL output uploads, Job lifecycle management, and artifact processing.
 ## Requirements
 ### Requirement: Job Creation
 The K8s executor SHALL create Kubernetes Jobs to run agent containers.

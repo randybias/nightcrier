@@ -1,7 +1,7 @@
 # agent-container Specification
 
 ## Purpose
-TBD - created by archiving change implement-agent-container. Update Purpose after archive.
+Defines requirements for the multi-agent container image (nc-agent-runner) that executes AI triage agents in Kubernetes, including support for Claude, Codex, Gemini, and Goose CLIs, K8s-native input/output handling, skill management, and stateless operation.
 ## Requirements
 ### Requirement: Multi-Agent Container
 The container SHALL support multiple AI CLI agents but execution is now K8s-native.
