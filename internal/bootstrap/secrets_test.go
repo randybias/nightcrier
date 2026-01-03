@@ -368,9 +368,9 @@ func TestEnsureKubeconfigSecret_UnreadableFile(t *testing.T) {
 	}
 }
 
-// TestEnsureKubeconfigSecret_Idempotent tests that Secret creation is idempotent
-func TestEnsureKubeconfigSecret_Idempotent(t *testing.T) {
-	// Pre-create a Secret
+// TestEnsureKubeconfigSecret_UpdatesOnContentChange tests that Secret is updated when file content changes
+func TestEnsureKubeconfigSecret_UpdatesOnContentChange(t *testing.T) {
+	// Pre-create a Secret with old content
 	existingSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "kubeconfig-test-cluster",
@@ -402,21 +402,73 @@ func TestEnsureKubeconfigSecret_Idempotent(t *testing.T) {
 	namespace := "nightcrier"
 	clusterName := "test-cluster"
 
-	// Try to create Secret again with different file
+	// Call ensureKubeconfigSecret with new file content
 	err = ensureKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
 	if err != nil {
-		t.Fatalf("ensureKubeconfigSecret() should not fail when Secret exists: %v", err)
+		t.Fatalf("ensureKubeconfigSecret() should not fail: %v", err)
 	}
 
-	// Verify Secret was not modified
+	// Verify Secret was updated with new content
 	secret, err := fakeClient.CoreV1().Secrets(namespace).Get(ctx, "kubeconfig-test-cluster", metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Failed to get Secret: %v", err)
 	}
 
-	// Secret should still have the original content
-	if string(secret.Data["config"]) != "existing-kubeconfig-content" {
-		t.Errorf("Secret was modified, config = %s, want existing-kubeconfig-content", string(secret.Data["config"]))
+	// Secret should have the new content (transient credentials are kept fresh)
+	if string(secret.Data["config"]) != "new-kubeconfig-content" {
+		t.Errorf("Secret was not updated, config = %s, want new-kubeconfig-content", string(secret.Data["config"]))
+	}
+}
+
+// TestEnsureKubeconfigSecret_Idempotent tests that Secret is not modified when content is unchanged
+func TestEnsureKubeconfigSecret_Idempotent(t *testing.T) {
+	sameContent := []byte("same-kubeconfig-content")
+
+	// Pre-create a Secret
+	existingSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kubeconfig-test-cluster",
+			Namespace: "nightcrier",
+			Labels: map[string]string{
+				"app":     "nightcrier",
+				"cluster": "test-cluster",
+			},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			"config": sameContent,
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset(existingSecret)
+
+	// Create a temporary kubeconfig file with the SAME content
+	tmpDir := t.TempDir()
+	kubeconfigPath := filepath.Join(tmpDir, "kubeconfig.yaml")
+
+	err := os.WriteFile(kubeconfigPath, sameContent, 0600)
+	if err != nil {
+		t.Fatalf("Failed to create test kubeconfig file: %v", err)
+	}
+
+	ctx := context.Background()
+	namespace := "nightcrier"
+	clusterName := "test-cluster"
+
+	// Call ensureKubeconfigSecret with same content
+	err = ensureKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
+	if err != nil {
+		t.Fatalf("ensureKubeconfigSecret() should not fail when Secret exists: %v", err)
+	}
+
+	// Verify Secret still exists with same content (no unnecessary update)
+	secret, err := fakeClient.CoreV1().Secrets(namespace).Get(ctx, "kubeconfig-test-cluster", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get Secret: %v", err)
+	}
+
+	if string(secret.Data["config"]) != "same-kubeconfig-content" {
+		t.Errorf("Secret content changed unexpectedly, config = %s, want same-kubeconfig-content", string(secret.Data["config"]))
 	}
 }
 

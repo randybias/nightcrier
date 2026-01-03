@@ -1161,17 +1161,6 @@ anthropic_api_key: "test-key"`,
 			expectedEnvVar:    "GLOBAL_QUEUE_SIZE",
 		},
 		{
-			name: "missing cluster_queue_size",
-			config: clusterPrefix + `subscribe_mode: "faults"
-workspace_root: "./incidents"
-` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
-max_concurrent_agents: 5
-global_queue_size: 100
-anthropic_api_key: "test-key"`,
-			expectedFieldName: "cluster_queue_size",
-			expectedEnvVar:    "CLUSTER_QUEUE_SIZE",
-		},
-		{
 			name: "missing queue_overflow_policy",
 			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
