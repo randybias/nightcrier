@@ -75,6 +75,24 @@ type K8sConfig struct {
 	CleanupTTL int `mapstructure:"cleanup_ttl"`
 }
 
+// NATSConfig holds NATS progress tracking configuration.
+type NATSConfig struct {
+	// Enabled controls whether NATS progress tracking is active
+	Enabled bool `mapstructure:"enabled"`
+
+	// Server is the NATS server URL (e.g., "nats://localhost:4222")
+	Server string `mapstructure:"server"`
+
+	// Token is the authentication token for NATS server
+	Token string `mapstructure:"token"`
+
+	// ConnectTimeout is the timeout for initial connection to NATS server
+	ConnectTimeout time.Duration `mapstructure:"connect_timeout"`
+
+	// ReconnectWait is the delay between reconnection attempts
+	ReconnectWait time.Duration `mapstructure:"reconnect_wait"`
+}
+
 // Validate validates the K8sConfig fields
 func (k *K8sConfig) Validate() error {
 	if k.ImagePullPolicy != "" {
@@ -111,6 +129,43 @@ func (k *K8sConfig) ApplyDefaults() {
 	}
 }
 
+// Validate validates the NATSConfig fields.
+// Returns nil if Enabled is false (validation only applies when enabled).
+func (n *NATSConfig) Validate() error {
+	// Skip validation if NATS is disabled
+	if !n.Enabled {
+		return nil
+	}
+
+	// When enabled, server and token are required
+	if n.Server == "" {
+		return fmt.Errorf("nats.server is required when NATS is enabled")
+	}
+	if n.Token == "" {
+		return fmt.Errorf("nats.token is required when NATS is enabled")
+	}
+
+	// Validate timeouts are positive
+	if n.ConnectTimeout <= 0 {
+		return fmt.Errorf("nats.connect_timeout must be positive, got %v", n.ConnectTimeout)
+	}
+	if n.ReconnectWait <= 0 {
+		return fmt.Errorf("nats.reconnect_wait must be positive, got %v", n.ReconnectWait)
+	}
+
+	return nil
+}
+
+// ApplyDefaults sets default values for NATSConfig
+func (n *NATSConfig) ApplyDefaults() {
+	if n.ConnectTimeout == 0 {
+		n.ConnectTimeout = 5 * time.Second
+	}
+	if n.ReconnectWait == 0 {
+		n.ReconnectWait = 2 * time.Second
+	}
+}
+
 // Config holds the application configuration.
 type Config struct {
 	// Cluster Configuration
@@ -141,6 +196,9 @@ type Config struct {
 	// K8s Executor Configuration (nested)
 	K8s K8sConfig `mapstructure:"k8s"`
 
+	// NATS Configuration (optional progress tracking)
+	NATS NATSConfig `mapstructure:"nats"`
+
 	// Event Processing (Phase 1 additions)
 	SeverityThreshold   string `mapstructure:"severity_threshold"`
 	MaxConcurrentAgents int    `mapstructure:"max_concurrent_agents"`
@@ -160,9 +218,9 @@ type Config struct {
 	ObjectStorage ObjectStorage `mapstructure:"object_storage"`
 
 	// Circuit Breaker and Notification Configuration (Phase 2)
-	NotifyOnAgentFailure        bool `mapstructure:"notify_on_agent_failure"`
-	FailureThresholdForAlert    int  `mapstructure:"failure_threshold_for_alert"`
-	UploadFailedInvestigations  bool `mapstructure:"upload_failed_investigations"`
+	NotifyOnAgentFailure       bool `mapstructure:"notify_on_agent_failure"`
+	FailureThresholdForAlert   int  `mapstructure:"failure_threshold_for_alert"`
+	UploadFailedInvestigations bool `mapstructure:"upload_failed_investigations"`
 
 	// State Storage Configuration (SQL Support)
 	// Configures where incident state is persisted. Supports filesystem (backward compatible),
@@ -271,10 +329,10 @@ type ObjectStorage struct {
 func bindEnvVars() {
 	// Map config keys to environment variable names
 	envBindings := map[string]string{
-		"subscribe_mode":                  "SUBSCRIBE_MODE",
-		"workspace_root":                  "WORKSPACE_ROOT",
-		"log_level":                       "LOG_LEVEL",
-		"slack_webhook_url":               "SLACK_WEBHOOK_URL",
+		"subscribe_mode":    "SUBSCRIBE_MODE",
+		"workspace_root":    "WORKSPACE_ROOT",
+		"log_level":         "LOG_LEVEL",
+		"slack_webhook_url": "SLACK_WEBHOOK_URL",
 		// Agent configuration (nested)
 		"agent.cli":                "AGENT_CLI",
 		"agent.model":              "AGENT_MODEL",
@@ -282,11 +340,11 @@ func bindEnvVars() {
 		"agent.system_prompt_file": "AGENT_SYSTEM_PROMPT_FILE",
 		"agent.allowed_tools":      "AGENT_ALLOWED_TOOLS",
 		"agent.additional_prompt":  "ADDITIONAL_AGENT_PROMPT",
-		"anthropic_api_key":               "ANTHROPIC_API_KEY",
-		"openai_api_key":                  "OPENAI_API_KEY",
-		"gemini_api_key":                  "GEMINI_API_KEY",
-		"kubeconfig_path":                 "KUBECONFIG_PATH",
-		"kubernetes_context":              "KUBERNETES_CONTEXT",
+		"anthropic_api_key":        "ANTHROPIC_API_KEY",
+		"openai_api_key":           "OPENAI_API_KEY",
+		"gemini_api_key":           "GEMINI_API_KEY",
+		"kubeconfig_path":          "KUBECONFIG_PATH",
+		"kubernetes_context":       "KUBERNETES_CONTEXT",
 		// K8s configuration (nested)
 		"k8s.namespace":         "K8S_NAMESPACE",
 		"k8s.image":             "K8S_IMAGE",
@@ -295,35 +353,41 @@ func bindEnvVars() {
 		"k8s.memory_limit":      "K8S_MEMORY_LIMIT",
 		"k8s.cpu_limit":         "K8S_CPU_LIMIT",
 		"k8s.cleanup_ttl":       "K8S_CLEANUP_TTL",
-		"severity_threshold":              "SEVERITY_THRESHOLD",
-		"max_concurrent_agents":           "MAX_CONCURRENT_AGENTS",
-		"global_queue_size":               "GLOBAL_QUEUE_SIZE",
-		"cluster_queue_size":              "CLUSTER_QUEUE_SIZE",
-		"event_ttl_seconds":               "EVENT_TTL_SECONDS",
-		"dedup_window_seconds":            "DEDUP_WINDOW_SECONDS",
-		"queue_overflow_policy":           "QUEUE_OVERFLOW_POLICY",
-		"shutdown_timeout":                "SHUTDOWN_TIMEOUT_SECONDS",
-		"sse_reconnect_initial_backoff":              "SSE_RECONNECT_INITIAL_BACKOFF",
-		"sse_reconnect_max_backoff":                  "SSE_RECONNECT_MAX_BACKOFF",
-		"sse_read_timeout":                           "SSE_READ_TIMEOUT_SECONDS",
-		"object_storage.url":                         "OBJECT_STORAGE_URL",
-		"object_storage.signed_url_expiry":           "OBJECT_STORAGE_SIGNED_URL_EXPIRY",
-		"object_storage.aws_access_key_id":           "AWS_ACCESS_KEY_ID",
-		"object_storage.aws_secret_access_key":       "AWS_SECRET_ACCESS_KEY",
-		"object_storage.azure_storage_account":       "AZURE_STORAGE_ACCOUNT",
-		"object_storage.azure_storage_key":           "AZURE_STORAGE_KEY",
-		"notify_on_agent_failure":                    "NOTIFY_ON_AGENT_FAILURE",
-		"failure_threshold_for_alert":     "FAILURE_THRESHOLD_FOR_ALERT",
-		"upload_failed_investigations":    "UPLOAD_FAILED_INVESTIGATIONS",
-		"state_storage.type":                                "STATE_STORAGE_TYPE",
-		"state_storage.sqlite_path":                         "STATE_STORAGE_SQLITE_PATH",
-		"state_storage.postgres_connection_string":          "STATE_STORAGE_POSTGRES_CONNECTION_STRING",
-		"state_storage.postgres_host":                       "STATE_STORAGE_POSTGRES_HOST",
-		"state_storage.postgres_port":                       "STATE_STORAGE_POSTGRES_PORT",
-		"state_storage.postgres_database":                   "STATE_STORAGE_POSTGRES_DATABASE",
-		"state_storage.postgres_user":                       "STATE_STORAGE_POSTGRES_USER",
-		"state_storage.postgres_password":                   "STATE_STORAGE_POSTGRES_PASSWORD",
-		"state_storage.migrations_path":                     "STATE_STORAGE_MIGRATIONS_PATH",
+		// NATS configuration (nested)
+		"nats.enabled":                             "NATS_ENABLED",
+		"nats.server":                              "NATS_SERVER",
+		"nats.token":                               "NATS_TOKEN",
+		"nats.connect_timeout":                     "NATS_CONNECT_TIMEOUT",
+		"nats.reconnect_wait":                      "NATS_RECONNECT_WAIT",
+		"severity_threshold":                       "SEVERITY_THRESHOLD",
+		"max_concurrent_agents":                    "MAX_CONCURRENT_AGENTS",
+		"global_queue_size":                        "GLOBAL_QUEUE_SIZE",
+		"cluster_queue_size":                       "CLUSTER_QUEUE_SIZE",
+		"event_ttl_seconds":                        "EVENT_TTL_SECONDS",
+		"dedup_window_seconds":                     "DEDUP_WINDOW_SECONDS",
+		"queue_overflow_policy":                    "QUEUE_OVERFLOW_POLICY",
+		"shutdown_timeout":                         "SHUTDOWN_TIMEOUT_SECONDS",
+		"sse_reconnect_initial_backoff":            "SSE_RECONNECT_INITIAL_BACKOFF",
+		"sse_reconnect_max_backoff":                "SSE_RECONNECT_MAX_BACKOFF",
+		"sse_read_timeout":                         "SSE_READ_TIMEOUT_SECONDS",
+		"object_storage.url":                       "OBJECT_STORAGE_URL",
+		"object_storage.signed_url_expiry":         "OBJECT_STORAGE_SIGNED_URL_EXPIRY",
+		"object_storage.aws_access_key_id":         "AWS_ACCESS_KEY_ID",
+		"object_storage.aws_secret_access_key":     "AWS_SECRET_ACCESS_KEY",
+		"object_storage.azure_storage_account":     "AZURE_STORAGE_ACCOUNT",
+		"object_storage.azure_storage_key":         "AZURE_STORAGE_KEY",
+		"notify_on_agent_failure":                  "NOTIFY_ON_AGENT_FAILURE",
+		"failure_threshold_for_alert":              "FAILURE_THRESHOLD_FOR_ALERT",
+		"upload_failed_investigations":             "UPLOAD_FAILED_INVESTIGATIONS",
+		"state_storage.type":                       "STATE_STORAGE_TYPE",
+		"state_storage.sqlite_path":                "STATE_STORAGE_SQLITE_PATH",
+		"state_storage.postgres_connection_string": "STATE_STORAGE_POSTGRES_CONNECTION_STRING",
+		"state_storage.postgres_host":              "STATE_STORAGE_POSTGRES_HOST",
+		"state_storage.postgres_port":              "STATE_STORAGE_POSTGRES_PORT",
+		"state_storage.postgres_database":          "STATE_STORAGE_POSTGRES_DATABASE",
+		"state_storage.postgres_user":              "STATE_STORAGE_POSTGRES_USER",
+		"state_storage.postgres_password":          "STATE_STORAGE_POSTGRES_PASSWORD",
+		"state_storage.migrations_path":            "STATE_STORAGE_MIGRATIONS_PATH",
 	}
 
 	for key, envVar := range envBindings {
@@ -336,16 +400,16 @@ func bindEnvVars() {
 func BindFlags(flags *pflag.FlagSet) {
 	// Bind flags that match config keys
 	flagBindings := map[string]string{
-		"workspace-root":                "workspace_root",
-		"log-level":                     "log_level",
-		"config":                        "config_file",
-		"agent-timeout":                 "agent_timeout",
-		"severity-threshold":            "severity_threshold",
-		"max-concurrent-agents":         "max_concurrent_agents",
-		"shutdown-timeout":              "shutdown_timeout",
-		"notify-on-agent-failure":       "notify_on_agent_failure",
-		"failure-threshold-for-alert":   "failure_threshold_for_alert",
-		"upload-failed-investigations":  "upload_failed_investigations",
+		"workspace-root":               "workspace_root",
+		"log-level":                    "log_level",
+		"config":                       "config_file",
+		"agent-timeout":                "agent_timeout",
+		"severity-threshold":           "severity_threshold",
+		"max-concurrent-agents":        "max_concurrent_agents",
+		"shutdown-timeout":             "shutdown_timeout",
+		"notify-on-agent-failure":      "notify_on_agent_failure",
+		"failure-threshold-for-alert":  "failure_threshold_for_alert",
+		"upload-failed-investigations": "upload_failed_investigations",
 	}
 
 	for flagName, configKey := range flagBindings {
@@ -573,6 +637,12 @@ func (c *Config) Validate() error {
 	c.K8s.ApplyDefaults()
 	if err := c.K8s.Validate(); err != nil {
 		return fmt.Errorf("k8s configuration invalid: %w", err)
+	}
+
+	// Apply NATS defaults and validate (NATS is optional)
+	c.NATS.ApplyDefaults()
+	if err := c.NATS.Validate(); err != nil {
+		return fmt.Errorf("nats configuration invalid: %w", err)
 	}
 
 	return nil

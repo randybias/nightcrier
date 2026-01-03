@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -112,20 +113,20 @@ failure_threshold_for_alert: 3
 func buildTestConfig(overrides map[string]interface{}) string {
 	// Default values
 	values := map[string]interface{}{
-		"subscribe_mode":                  "faults",
-		"workspace_root":                  "./incidents",
-		"severity_threshold":              "ERROR",
-		"max_concurrent_agents":           5,
-		"global_queue_size":               100,
-		"cluster_queue_size":              10,
-		"dedup_window_seconds":            300,
-		"queue_overflow_policy":           "drop",
-		"shutdown_timeout":                30,
-		"sse_reconnect_initial_backoff":   1,
-		"sse_reconnect_max_backoff":       60,
-		"sse_read_timeout":                120,
-		"failure_threshold_for_alert":     3,
-		"anthropic_api_key":               "test-key",
+		"subscribe_mode":                "faults",
+		"workspace_root":                "./incidents",
+		"severity_threshold":            "ERROR",
+		"max_concurrent_agents":         5,
+		"global_queue_size":             100,
+		"cluster_queue_size":            10,
+		"dedup_window_seconds":          300,
+		"queue_overflow_policy":         "drop",
+		"shutdown_timeout":              30,
+		"sse_reconnect_initial_backoff": 1,
+		"sse_reconnect_max_backoff":     60,
+		"sse_read_timeout":              120,
+		"failure_threshold_for_alert":   3,
+		"anthropic_api_key":             "test-key",
 	}
 
 	// Apply overrides
@@ -858,9 +859,9 @@ func TestCircuitBreakerConfig(t *testing.T) {
 
 	// Custom config with custom circuit breaker settings
 	customConfig := buildTestConfig(map[string]interface{}{
-		"notify_on_agent_failure":       false,
-		"failure_threshold_for_alert":   5,
-		"upload_failed_investigations":  true,
+		"notify_on_agent_failure":      false,
+		"failure_threshold_for_alert":  5,
+		"upload_failed_investigations": true,
 	})
 
 	tests := []struct {
@@ -994,13 +995,13 @@ func TestCircuitBreakerConfig_IntegrationTest(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	configContent := buildTestConfig(map[string]interface{}{
-		"workspace_root":                "/tmp/incidents",
-		"log_level":                     "debug",
-		"severity_threshold":            "WARNING",
-		"max_concurrent_agents":         10,
-		"notify_on_agent_failure":       false,
-		"failure_threshold_for_alert":   5,
-		"upload_failed_investigations":  true,
+		"workspace_root":               "/tmp/incidents",
+		"log_level":                    "debug",
+		"severity_threshold":           "WARNING",
+		"max_concurrent_agents":        10,
+		"notify_on_agent_failure":      false,
+		"failure_threshold_for_alert":  5,
+		"upload_failed_investigations": true,
 	}) + `
 object_storage:
   url: "azblob://incidents"
@@ -1601,7 +1602,7 @@ state_storage:
 // TestStateStorage_InvalidConnectionString tests validation of invalid postgres connection strings
 func TestStateStorage_InvalidConnectionString(t *testing.T) {
 	tests := []struct {
-		name   string
+		name    string
 		connStr string
 	}{
 		{"empty", ""},
@@ -2072,6 +2073,327 @@ anthropic_api_key: "test-key"
 	}
 	if cfg.K8s.CleanupTTL != 7200 {
 		t.Errorf("K8s.CleanupTTL = %d, want %d", cfg.K8s.CleanupTTL, 7200)
+	}
+}
+
+// TestNATSConfig_Validate tests validation of NATSConfig
+func TestNATSConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  NATSConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "disabled config is valid",
+			config: NATSConfig{
+				Enabled: false,
+			},
+			wantErr: false,
+		},
+		{
+			name: "enabled with all fields valid",
+			config: NATSConfig{
+				Enabled:        true,
+				Server:         "nats://localhost:4222",
+				Token:          "test-token",
+				ConnectTimeout: 5 * time.Second,
+				ReconnectWait:  2 * time.Second,
+			},
+			wantErr: false,
+		},
+		{
+			name: "enabled without server",
+			config: NATSConfig{
+				Enabled:        true,
+				Token:          "test-token",
+				ConnectTimeout: 5 * time.Second,
+				ReconnectWait:  2 * time.Second,
+			},
+			wantErr: true,
+			errMsg:  "nats.server is required",
+		},
+		{
+			name: "enabled without token",
+			config: NATSConfig{
+				Enabled:        true,
+				Server:         "nats://localhost:4222",
+				ConnectTimeout: 5 * time.Second,
+				ReconnectWait:  2 * time.Second,
+			},
+			wantErr: true,
+			errMsg:  "nats.token is required",
+		},
+		{
+			name: "enabled with zero connect timeout",
+			config: NATSConfig{
+				Enabled:        true,
+				Server:         "nats://localhost:4222",
+				Token:          "test-token",
+				ConnectTimeout: 0,
+				ReconnectWait:  2 * time.Second,
+			},
+			wantErr: true,
+			errMsg:  "nats.connect_timeout must be positive",
+		},
+		{
+			name: "enabled with negative connect timeout",
+			config: NATSConfig{
+				Enabled:        true,
+				Server:         "nats://localhost:4222",
+				Token:          "test-token",
+				ConnectTimeout: -1 * time.Second,
+				ReconnectWait:  2 * time.Second,
+			},
+			wantErr: true,
+			errMsg:  "nats.connect_timeout must be positive",
+		},
+		{
+			name: "enabled with zero reconnect wait",
+			config: NATSConfig{
+				Enabled:        true,
+				Server:         "nats://localhost:4222",
+				Token:          "test-token",
+				ConnectTimeout: 5 * time.Second,
+				ReconnectWait:  0,
+			},
+			wantErr: true,
+			errMsg:  "nats.reconnect_wait must be positive",
+		},
+		{
+			name: "enabled with negative reconnect wait",
+			config: NATSConfig{
+				Enabled:        true,
+				Server:         "nats://localhost:4222",
+				Token:          "test-token",
+				ConnectTimeout: 5 * time.Second,
+				ReconnectWait:  -1 * time.Second,
+			},
+			wantErr: true,
+			errMsg:  "nats.reconnect_wait must be positive",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NATSConfig.Validate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("NATSConfig.Validate() error = %v, want error containing %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+// TestNATSConfig_ApplyDefaults tests that ApplyDefaults sets correct default values
+func TestNATSConfig_ApplyDefaults(t *testing.T) {
+	config := NATSConfig{}
+	config.ApplyDefaults()
+
+	tests := []struct {
+		field string
+		got   interface{}
+		want  interface{}
+	}{
+		{"ConnectTimeout", config.ConnectTimeout, 5 * time.Second},
+		{"ReconnectWait", config.ReconnectWait, 2 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.field, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Errorf("NATSConfig.%s = %v, want %v", tt.field, tt.got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNATSConfig_ApplyDefaultsPreservesExisting tests that defaults don't override existing values
+func TestNATSConfig_ApplyDefaultsPreservesExisting(t *testing.T) {
+	config := NATSConfig{
+		ConnectTimeout: 10 * time.Second,
+		ReconnectWait:  5 * time.Second,
+	}
+	config.ApplyDefaults()
+
+	if config.ConnectTimeout != 10*time.Second {
+		t.Errorf("ConnectTimeout = %v, want %v (should preserve existing)", config.ConnectTimeout, 10*time.Second)
+	}
+	if config.ReconnectWait != 5*time.Second {
+		t.Errorf("ReconnectWait = %v, want %v (should preserve existing)", config.ReconnectWait, 5*time.Second)
+	}
+}
+
+// TestNATSConfig_LoadFromYAML tests loading NATS config from YAML
+func TestNATSConfig_LoadFromYAML(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfigWith(`
+nats:
+  enabled: true
+  server: "nats://test-server:4222"
+  token: "test-token-123"
+  connect_timeout: "10s"
+  reconnect_wait: "3s"
+`)
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if !cfg.NATS.Enabled {
+		t.Errorf("NATS.Enabled = %v, want true", cfg.NATS.Enabled)
+	}
+	if cfg.NATS.Server != "nats://test-server:4222" {
+		t.Errorf("NATS.Server = %q, want %q", cfg.NATS.Server, "nats://test-server:4222")
+	}
+	if cfg.NATS.Token != "test-token-123" {
+		t.Errorf("NATS.Token = %q, want %q", cfg.NATS.Token, "test-token-123")
+	}
+	if cfg.NATS.ConnectTimeout != 10*time.Second {
+		t.Errorf("NATS.ConnectTimeout = %v, want %v", cfg.NATS.ConnectTimeout, 10*time.Second)
+	}
+	if cfg.NATS.ReconnectWait != 3*time.Second {
+		t.Errorf("NATS.ReconnectWait = %v, want %v", cfg.NATS.ReconnectWait, 3*time.Second)
+	}
+}
+
+// TestNATSConfig_LoadFromEnvVars tests loading NATS config from environment variables
+func TestNATSConfig_LoadFromEnvVars(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfig()
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	// Set NATS env vars
+	os.Setenv("NATS_ENABLED", "true")
+	os.Setenv("NATS_SERVER", "nats://env-server:4222")
+	os.Setenv("NATS_TOKEN", "env-token-456")
+	os.Setenv("NATS_CONNECT_TIMEOUT", "15s")
+	os.Setenv("NATS_RECONNECT_WAIT", "4s")
+
+	defer func() {
+		os.Unsetenv("NATS_ENABLED")
+		os.Unsetenv("NATS_SERVER")
+		os.Unsetenv("NATS_TOKEN")
+		os.Unsetenv("NATS_CONNECT_TIMEOUT")
+		os.Unsetenv("NATS_RECONNECT_WAIT")
+	}()
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if !cfg.NATS.Enabled {
+		t.Errorf("NATS.Enabled = %v, want true", cfg.NATS.Enabled)
+	}
+	if cfg.NATS.Server != "nats://env-server:4222" {
+		t.Errorf("NATS.Server = %q, want %q", cfg.NATS.Server, "nats://env-server:4222")
+	}
+	if cfg.NATS.Token != "env-token-456" {
+		t.Errorf("NATS.Token = %q, want %q", cfg.NATS.Token, "env-token-456")
+	}
+	if cfg.NATS.ConnectTimeout != 15*time.Second {
+		t.Errorf("NATS.ConnectTimeout = %v, want %v", cfg.NATS.ConnectTimeout, 15*time.Second)
+	}
+	if cfg.NATS.ReconnectWait != 4*time.Second {
+		t.Errorf("NATS.ReconnectWait = %v, want %v", cfg.NATS.ReconnectWait, 4*time.Second)
+	}
+}
+
+// TestNATSConfig_DisabledByDefault tests that NATS is disabled by default
+func TestNATSConfig_DisabledByDefault(t *testing.T) {
+	resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := completeTestConfig()
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadWithConfigFile() failed: %v", err)
+	}
+
+	if cfg.NATS.Enabled {
+		t.Errorf("NATS.Enabled = true, want false (disabled by default)")
+	}
+
+	// Defaults should still be applied
+	if cfg.NATS.ConnectTimeout != 5*time.Second {
+		t.Errorf("NATS.ConnectTimeout = %v, want %v (default)", cfg.NATS.ConnectTimeout, 5*time.Second)
+	}
+	if cfg.NATS.ReconnectWait != 2*time.Second {
+		t.Errorf("NATS.ReconnectWait = %v, want %v (default)", cfg.NATS.ReconnectWait, 2*time.Second)
+	}
+}
+
+// TestNATSConfig_ValidationFailsWhenEnabledWithMissingFields tests validation failures
+func TestNATSConfig_ValidationFailsWhenEnabledWithMissingFields(t *testing.T) {
+	resetViper()
+
+	tests := []struct {
+		name       string
+		yamlConfig string
+		wantErrMsg string
+	}{
+		{
+			name: "missing server",
+			yamlConfig: `
+nats:
+  enabled: true
+  token: "test-token"
+`,
+			wantErrMsg: "nats.server is required",
+		},
+		{
+			name: "missing token",
+			yamlConfig: `
+nats:
+  enabled: true
+  server: "nats://localhost:4222"
+`,
+			wantErrMsg: "nats.token is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetViper()
+
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+			configContent := completeTestConfigWith(tt.yamlConfig)
+			if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+				t.Fatalf("failed to write config file: %v", err)
+			}
+
+			_, err := LoadWithConfigFile(configPath)
+			if err == nil {
+				t.Errorf("LoadWithConfigFile() should fail when %s", tt.name)
+				return
+			}
+
+			if !strings.Contains(err.Error(), tt.wantErrMsg) {
+				t.Errorf("error = %v, want error containing %q", err, tt.wantErrMsg)
+			}
+		})
 	}
 }
 

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"testing"
@@ -202,7 +203,7 @@ func TestUpdateIncidentStatus(t *testing.T) {
 	store := setupTestStore(t, ctx)
 	defer cleanupTestStore(t, store)
 
-	t.Run("update status with started_at", func(t *testing.T) {
+	t.Run("update status with job_started_at", func(t *testing.T) {
 		faultID := uuid.New().String()
 		incidentID := uuid.New().String()
 		event := createTestEvent(faultID)
@@ -229,7 +230,7 @@ func TestUpdateIncidentStatus(t *testing.T) {
 			t.Errorf("expected status %s, got %s", incident.StatusInvestigating, retrieved.Status)
 		}
 		if retrieved.StartedAt == nil {
-			t.Error("expected started_at to be set")
+			t.Error("expected job_started_at to be set")
 		}
 	})
 
@@ -273,7 +274,7 @@ func TestCompleteIncident(t *testing.T) {
 			t.Errorf("expected status %s, got %s", incident.StatusResolved, retrieved.Status)
 		}
 		if retrieved.CompletedAt == nil {
-			t.Error("expected completed_at to be set")
+			t.Error("expected job_completed_at to be set")
 		}
 		if retrieved.ExitCode == nil || *retrieved.ExitCode != 0 {
 			t.Error("expected exit code 0")
@@ -427,6 +428,163 @@ func TestRecordTriageReport(t *testing.T) {
 		err := store.RecordTriageReport(ctx, report)
 		if err != nil {
 			t.Fatalf("failed to record report: %v", err)
+		}
+	})
+}
+
+// TestUpdateExecutionActivity verifies activity tracking rotation logic.
+func TestUpdateExecutionActivity(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t, ctx)
+	defer cleanupTestStore(t, store)
+
+	t.Run("update activity with rotation", func(t *testing.T) {
+		faultID := uuid.New().String()
+		incidentID := uuid.New().String()
+		event := createTestEvent(faultID)
+		inc := createTestIncident(incidentID, event)
+
+		// Create incident first
+		if err := store.CreateIncident(ctx, inc, event); err != nil {
+			t.Fatalf("failed to create incident: %v", err)
+		}
+
+		// Create execution
+		executionID := uuid.New().String()
+		exec := &storage.AgentExecution{
+			ExecutionID: executionID,
+			IncidentID:  incidentID,
+			StartedAt:   time.Now(),
+		}
+		if err := store.RecordAgentExecution(ctx, exec); err != nil {
+			t.Fatalf("failed to record execution: %v", err)
+		}
+
+		// First activity update
+		activity1Time := time.Now()
+		err := store.UpdateExecutionActivity(ctx, executionID, "analyzing logs", activity1Time)
+		if err != nil {
+			t.Fatalf("failed to update activity: %v", err)
+		}
+
+		// Verify first activity is set as current
+		var currentActivity sql.NullString
+		var currentActivityStartedAt sql.NullTime
+		var lastActivity sql.NullString
+		var lastActivityFinishedAt sql.NullTime
+
+		err = store.db.QueryRowContext(ctx, `
+			SELECT current_activity, current_activity_started_at, last_activity, last_activity_finished_at
+			FROM agent_executions
+			WHERE execution_id = $1
+		`, executionID).Scan(&currentActivity, &currentActivityStartedAt, &lastActivity, &lastActivityFinishedAt)
+		if err != nil {
+			t.Fatalf("failed to query execution: %v", err)
+		}
+
+		if !currentActivity.Valid || currentActivity.String != "analyzing logs" {
+			t.Errorf("expected current_activity 'analyzing logs', got %v", currentActivity)
+		}
+		if !currentActivityStartedAt.Valid {
+			t.Error("expected current_activity_started_at to be set")
+		}
+		if lastActivity.Valid {
+			t.Error("expected last_activity to be NULL after first update")
+		}
+		if lastActivityFinishedAt.Valid {
+			t.Error("expected last_activity_finished_at to be NULL after first update")
+		}
+
+		// Second activity update - this should rotate first activity to last
+		time.Sleep(10 * time.Millisecond) // Ensure time difference
+		activity2Time := time.Now()
+		err = store.UpdateExecutionActivity(ctx, executionID, "generating report", activity2Time)
+		if err != nil {
+			t.Fatalf("failed to update activity second time: %v", err)
+		}
+
+		// Verify rotation occurred
+		err = store.db.QueryRowContext(ctx, `
+			SELECT current_activity, current_activity_started_at, last_activity, last_activity_finished_at
+			FROM agent_executions
+			WHERE execution_id = $1
+		`, executionID).Scan(&currentActivity, &currentActivityStartedAt, &lastActivity, &lastActivityFinishedAt)
+		if err != nil {
+			t.Fatalf("failed to query execution after second update: %v", err)
+		}
+
+		if !currentActivity.Valid || currentActivity.String != "generating report" {
+			t.Errorf("expected current_activity 'generating report', got %v", currentActivity)
+		}
+		if !lastActivity.Valid || lastActivity.String != "analyzing logs" {
+			t.Errorf("expected last_activity 'analyzing logs', got %v", lastActivity)
+		}
+		if !lastActivityFinishedAt.Valid {
+			t.Error("expected last_activity_finished_at to be set after rotation")
+		}
+
+		// Verify timestamps rotated correctly
+		if lastActivityFinishedAt.Time.After(currentActivityStartedAt.Time) {
+			t.Error("last_activity_finished_at should be before current_activity_started_at")
+		}
+	})
+
+	t.Run("update nonexistent execution", func(t *testing.T) {
+		err := store.UpdateExecutionActivity(ctx, "nonexistent-id", "activity", time.Now())
+		if err == nil {
+			t.Fatal("expected error for nonexistent execution")
+		}
+	})
+
+	t.Run("multiple activity updates", func(t *testing.T) {
+		faultID := uuid.New().String()
+		incidentID := uuid.New().String()
+		event := createTestEvent(faultID)
+		inc := createTestIncident(incidentID, event)
+
+		// Create incident first
+		if err := store.CreateIncident(ctx, inc, event); err != nil {
+			t.Fatalf("failed to create incident: %v", err)
+		}
+
+		// Create execution
+		executionID := uuid.New().String()
+		exec := &storage.AgentExecution{
+			ExecutionID: executionID,
+			IncidentID:  incidentID,
+			StartedAt:   time.Now(),
+		}
+		if err := store.RecordAgentExecution(ctx, exec); err != nil {
+			t.Fatalf("failed to record execution: %v", err)
+		}
+
+		// Perform multiple activity updates
+		activities := []string{"starting", "analyzing", "investigating", "reporting"}
+		for _, activity := range activities {
+			time.Sleep(5 * time.Millisecond)
+			err := store.UpdateExecutionActivity(ctx, executionID, activity, time.Now())
+			if err != nil {
+				t.Fatalf("failed to update activity to %s: %v", activity, err)
+			}
+		}
+
+		// Verify last two activities
+		var currentActivity sql.NullString
+		var lastActivity sql.NullString
+		err := store.db.QueryRowContext(ctx, `
+			SELECT current_activity, last_activity
+			FROM agent_executions
+			WHERE execution_id = $1
+		`, executionID).Scan(&currentActivity, &lastActivity)
+		if err != nil {
+			t.Fatalf("failed to query execution: %v", err)
+		}
+
+		if !currentActivity.Valid || currentActivity.String != "reporting" {
+			t.Errorf("expected current_activity 'reporting', got %v", currentActivity)
+		}
+		if !lastActivity.Valid || lastActivity.String != "investigating" {
+			t.Errorf("expected last_activity 'investigating', got %v", lastActivity)
 		}
 	})
 }

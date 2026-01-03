@@ -205,6 +205,42 @@ k8s:
   cleanup_ttl: 3600
 
 # =============================================================================
+# NATS Progress Tracking (Optional)
+# =============================================================================
+# Optional NATS integration for real-time progress tracking of agent investigations.
+# When enabled, Nightcrier publishes progress updates to NATS for external monitoring.
+# This is a fire-and-forget mechanism - failures do not affect core functionality.
+#
+# nats:
+#   # Enable NATS progress tracking
+#   # Default: false (disabled)
+#   # Environment variable: NATS_ENABLED
+#   enabled: true
+#
+#   # NATS server URL
+#   # Format: nats://hostname:port
+#   # Required when enabled: true
+#   # Environment variable: NATS_SERVER
+#   server: "nats://localhost:4222"
+#
+#   # Authentication token for NATS server
+#   # Required when enabled: true
+#   # Environment variable: NATS_TOKEN
+#   token: "your-nats-token-here"
+#
+#   # Connection timeout (Go duration format: 5s, 1m, etc.)
+#   # Time to wait for initial connection to NATS server
+#   # Default: 5s
+#   # Environment variable: NATS_CONNECT_TIMEOUT
+#   # connect_timeout: "5s"
+#
+#   # Reconnection wait interval (Go duration format: 2s, 5s, etc.)
+#   # Delay between reconnection attempts if connection is lost
+#   # Default: 2s
+#   # Environment variable: NATS_RECONNECT_WAIT
+#   # reconnect_wait: "2s"
+
+# =============================================================================
 # Event Processing (Required)
 # =============================================================================
 # REQUIRED: Minimum severity level to process: DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -234,7 +270,11 @@ cluster_queue_size: 10
 event_ttl_seconds: 300
 
 # REQUIRED: Deduplication window in seconds (set to 0 to disable)
-# Events for the same resource within this window are deduplicated
+# Events with the same fault_id within this window are deduplicated.
+# This prevents duplicate K8s Jobs from being created when the MCP server
+# sends the same fault event multiple times (e.g., during reconnection).
+# The first event is processed; duplicates within the window are dropped.
+# Default: 300 (5 minutes)
 # Environment variable: DEDUP_WINDOW_SECONDS
 dedup_window_seconds: 300
 

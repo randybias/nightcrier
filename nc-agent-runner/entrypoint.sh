@@ -12,6 +12,10 @@
 
 set -euo pipefail
 
+# Source NATS publishing helper functions
+# shellcheck source=scripts/nats-publish.sh
+source /home/agent/scripts/nats-publish.sh
+
 # Environment variables (set by K8s Job spec)
 # - AGENT_CLI: claude|codex|gemini|goose
 # - LLM_MODEL: AI model to use
@@ -84,6 +88,16 @@ setup_agent_paths() {
             ln -sf /home/agent/skills/k8s4agents/skills ~/.claude/skills
             SESSION_DIR=~/.claude
             echo "Claude: Created symlink ~/.claude/skills -> /home/agent/skills/k8s4agents/skills"
+
+            # Setup NATS progress tracking hooks if enabled
+            if [[ "${NATS_ENABLED:-false}" == "true" ]]; then
+                if [[ -f /home/agent/hooks/claude-settings.json.template ]]; then
+                    cp /home/agent/hooks/claude-settings.json.template ~/.claude/settings.json
+                    echo "Claude: Installed NATS progress hooks to ~/.claude/settings.json"
+                else
+                    echo "Claude: NATS enabled but hooks template not found, skipping"
+                fi
+            fi
             ;;
         codex)
             mkdir -p ~/.codex
@@ -439,6 +453,11 @@ teardown() {
     echo "Starting teardown and artifact upload..."
     echo "=========================================="
 
+    # Publish run.completed event before uploads
+    publish_run_completed
+
+    echo ""
+
     # Extract commands from agent session before archiving
     extract_commands
 
@@ -570,6 +589,11 @@ main() {
 
     # Register teardown to run on exit (handles normal exit, SIGTERM, etc.)
     trap teardown EXIT
+
+    # Publish run.started event after validation passes, before setup
+    publish_run_started
+
+    echo ""
 
     # Clone k8s4agents skill repository if needed
     clone_skills

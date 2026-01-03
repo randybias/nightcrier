@@ -61,6 +61,11 @@ type JobConfig struct {
 
 	// Labels are additional labels to apply to the Job
 	Labels map[string]string
+
+	// NATS configuration for progress tracking
+	NATSEnabled bool
+	NATSServer  string
+	NATSToken   string
 }
 
 // PresignedURLs contains presigned PUT URLs for agent outputs.
@@ -252,6 +257,29 @@ func (c *Client) CreateJob(ctx context.Context, cfg JobConfig) (string, error) {
 			Name:  "OUTPUT_URL_PROMPT_SENT",
 			Value: cfg.PresignedURLs.PromptSent,
 		},
+		// Cluster name for context
+		{
+			Name:  "CLUSTER",
+			Value: cfg.ClusterName,
+		},
+	}
+
+	// Add NATS configuration if enabled
+	if cfg.NATSEnabled {
+		env = append(env, []corev1.EnvVar{
+			{
+				Name:  "NATS_ENABLED",
+				Value: "true",
+			},
+			{
+				Name:  "NATS_SERVER",
+				Value: cfg.NATSServer,
+			},
+			{
+				Name:  "NATS_TOKEN",
+				Value: cfg.NATSToken,
+			},
+		}...)
 	}
 
 	// Build volume mounts

@@ -27,7 +27,8 @@ type ClusterState struct {
 // and global concurrency limits.
 type Dispatcher struct {
 	// Configuration
-	eventTTL time.Duration
+	eventTTL    time.Duration
+	dedupWindow time.Duration
 
 	// Global semaphore (buffered channel) limits total concurrent agents
 	globalSem chan struct{}
@@ -35,6 +36,11 @@ type Dispatcher struct {
 	// Per-cluster state map (protected by RWMutex)
 	clusterStates   map[string]*ClusterState
 	clusterStatesMu sync.RWMutex
+
+	// Fault deduplication: tracks seen fault_ids to prevent duplicate processing
+	// Key is "cluster:fault_id", value is first-seen timestamp
+	seenFaults   map[string]time.Time
+	seenFaultsMu sync.RWMutex
 
 	// Cluster queue configuration
 	clusterQueueSize int
@@ -55,15 +61,24 @@ type Dispatcher struct {
 func NewDispatcher(cfg *config.Config, handler EventHandler) *Dispatcher {
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 
-	return &Dispatcher{
+	d := &Dispatcher{
 		eventTTL:         time.Duration(cfg.EventTTLSeconds) * time.Second,
+		dedupWindow:      time.Duration(cfg.DedupWindowSeconds) * time.Second,
 		globalSem:        make(chan struct{}, cfg.MaxConcurrentAgents),
 		clusterStates:    make(map[string]*ClusterState),
+		seenFaults:       make(map[string]time.Time),
 		clusterQueueSize: cfg.ClusterQueueSize,
 		shutdownCtx:      shutdownCtx,
 		shutdownCancel:   shutdownCancel,
 		handler:          handler,
 	}
+
+	// Start cleanup goroutine for expired dedup entries
+	if d.dedupWindow > 0 {
+		go d.cleanupSeenFaults()
+	}
+
+	return d
 }
 
 // Dispatch handles an incoming event. This method is non-blocking - it either
@@ -84,6 +99,15 @@ func (d *Dispatcher) Dispatch(ctx context.Context, event *events.FaultEvent, clu
 			"cluster", cluster,
 			"timestamp", event.Timestamp,
 			"ttl", d.eventTTL)
+		return
+	}
+
+	// Check for duplicate fault_id within dedup window
+	if d.isDuplicate(event.FaultID, cluster) {
+		slog.Info("dropping duplicate event",
+			"fault_id", event.FaultID,
+			"cluster", cluster,
+			"dedup_window", d.dedupWindow)
 		return
 	}
 
@@ -353,6 +377,68 @@ func (d *Dispatcher) QueueDepth(cluster string) int {
 	}
 
 	return cs.queue.Len()
+}
+
+// isDuplicate checks if a fault_id has been seen within the dedup window.
+// If not seen, it records the fault_id and returns false.
+// If seen within the window, it returns true (duplicate).
+func (d *Dispatcher) isDuplicate(faultID, cluster string) bool {
+	// Skip dedup if window is 0 (disabled)
+	if d.dedupWindow == 0 {
+		return false
+	}
+
+	// Use cluster:fault_id as key to allow same fault on different clusters
+	key := cluster + ":" + faultID
+
+	d.seenFaultsMu.Lock()
+	defer d.seenFaultsMu.Unlock()
+
+	if firstSeen, exists := d.seenFaults[key]; exists {
+		// Check if still within dedup window
+		if time.Since(firstSeen) < d.dedupWindow {
+			return true // Duplicate
+		}
+		// Expired, update timestamp
+		d.seenFaults[key] = time.Now()
+		return false
+	}
+
+	// Not seen before, record it
+	d.seenFaults[key] = time.Now()
+	return false
+}
+
+// cleanupSeenFaults periodically removes expired entries from the seenFaults map.
+// Runs every dedupWindow/2 or every minute, whichever is shorter.
+func (d *Dispatcher) cleanupSeenFaults() {
+	// Cleanup interval: half the dedup window, min 30s, max 1m
+	interval := d.dedupWindow / 2
+	if interval < 30*time.Second {
+		interval = 30 * time.Second
+	}
+	if interval > time.Minute {
+		interval = time.Minute
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-d.shutdownCtx.Done():
+			return
+		case <-ticker.C:
+			d.seenFaultsMu.Lock()
+			now := time.Now()
+			for key, firstSeen := range d.seenFaults {
+				if now.Sub(firstSeen) > d.dedupWindow {
+					delete(d.seenFaults, key)
+				}
+			}
+			d.seenFaultsMu.Unlock()
+		}
+	}
 }
 
 // TotalQueueDepth returns the total queue depth across all clusters.

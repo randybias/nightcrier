@@ -38,6 +38,26 @@ type StateStore interface {
 	// The report content is stored in markdown format.
 	RecordTriageReport(ctx context.Context, report *TriageReport) error
 
+	// UpdateExecutionActivity updates the activity tracking for an agent execution.
+	// This rotates the current activity to last activity before setting new current activity.
+	// Uses incident_id to find the most recent active execution (consistent with UpdateRunStarted/Completed).
+	// The rotation logic:
+	// - current_activity -> last_activity
+	// - current_activity_started_at -> last_activity_finished_at
+	// - activity parameter -> current_activity
+	// - activityTime parameter -> current_activity_started_at
+	UpdateExecutionActivity(ctx context.Context, incidentID, activity string, activityTime time.Time) error
+
+	// UpdateRunStarted updates the run_started_at timestamp when the container publishes run.started event.
+	// This is called by the NATS listener when it receives a run.started event from entrypoint.sh.
+	// Uses incident_id to find the execution record.
+	UpdateRunStarted(ctx context.Context, incidentID string, runStartedAt time.Time) error
+
+	// UpdateRunCompleted updates the run_completed_at timestamp and run_exit_code when the container
+	// publishes run.completed event. This is called by the NATS listener when it receives a
+	// run.completed event from entrypoint.sh. Uses incident_id to find the execution record.
+	UpdateRunCompleted(ctx context.Context, incidentID string, runCompletedAt time.Time, runExitCode int) error
+
 	// GetIncident retrieves an incident by its ID (optional for initial implementation).
 	// This supports future query and dashboard features.
 	GetIncident(ctx context.Context, incidentID string) (*incident.Incident, error)

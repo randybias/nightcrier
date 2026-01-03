@@ -156,7 +156,7 @@ func (s *Store) CreateIncident(ctx context.Context, inc *incident.Incident, even
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO incidents (
 			incident_id, fault_id, triggering_event_id,
-			status, created_at, started_at, completed_at,
+			status, created_at, job_started_at, job_completed_at,
 			exit_code, failure_reason,
 			cluster, namespace, fault_type, severity, context, timestamp,
 			resource_api_version, resource_kind, resource_name, resource_namespace, resource_uid
@@ -201,7 +201,7 @@ func (s *Store) CreateIncident(ctx context.Context, inc *incident.Incident, even
 func (s *Store) UpdateIncidentStatus(ctx context.Context, incidentID string, status string, startedAt *time.Time) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE incidents
-		SET status = ?, started_at = ?
+		SET status = ?, job_started_at = ?
 		WHERE incident_id = ?
 	`, status, startedAt, incidentID)
 	if err != nil {
@@ -233,7 +233,7 @@ func (s *Store) CompleteIncident(ctx context.Context, incidentID string, exitCod
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE incidents
-		SET status = ?, completed_at = ?, exit_code = ?, failure_reason = ?
+		SET status = ?, job_completed_at = ?, exit_code = ?, failure_reason = ?
 		WHERE incident_id = ?
 	`, status, now, exitCode, failureReason, incidentID)
 	if err != nil {
@@ -268,11 +268,11 @@ func (s *Store) RecordAgentExecution(ctx context.Context, exec *storage.AgentExe
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO agent_executions (
 			execution_id, incident_id,
-			started_at, completed_at, exit_code, error_message,
+			job_started_at, job_completed_at, exit_code, error_message,
 			log_paths
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(execution_id) DO UPDATE SET
-			completed_at = excluded.completed_at,
+			job_completed_at = excluded.job_completed_at,
 			exit_code = excluded.exit_code,
 			error_message = excluded.error_message,
 			log_paths = excluded.log_paths
@@ -317,6 +317,104 @@ func (s *Store) RecordTriageReport(ctx context.Context, report *storage.TriageRe
 	return nil
 }
 
+// UpdateExecutionActivity updates the activity tracking for an agent execution.
+// This rotates the current activity to last activity before setting new current activity.
+// The rotation logic ensures we maintain a history of the previous activity.
+// Uses incident_id to find the most recent execution (consistent with UpdateRunStarted/Completed).
+func (s *Store) UpdateExecutionActivity(ctx context.Context, incidentID, activity string, activityTime time.Time) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE agent_executions
+		SET
+			last_activity = current_activity,
+			last_activity_finished_at = current_activity_started_at,
+			current_activity = ?,
+			current_activity_started_at = ?
+		WHERE execution_id = (
+			SELECT execution_id
+			FROM agent_executions
+			WHERE incident_id = ?
+			AND run_started_at IS NOT NULL
+			ORDER BY job_started_at DESC
+			LIMIT 1
+		)
+	`, activity, activityTime, incidentID)
+	if err != nil {
+		return fmt.Errorf("failed to update execution activity: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("no active execution found for incident: %s", incidentID)
+	}
+
+	return nil
+}
+
+// UpdateRunStarted updates the run_started_at timestamp when the container publishes run.started event.
+// Uses incident_id to find the most recent execution record for this incident.
+func (s *Store) UpdateRunStarted(ctx context.Context, incidentID string, runStartedAt time.Time) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE agent_executions
+		SET run_started_at = ?
+		WHERE execution_id = (
+			SELECT execution_id
+			FROM agent_executions
+			WHERE incident_id = ?
+			AND run_started_at IS NULL
+			ORDER BY job_started_at DESC
+			LIMIT 1
+		)
+	`, runStartedAt, incidentID)
+	if err != nil {
+		return fmt.Errorf("failed to update run_started_at: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("no pending execution found for incident: %s", incidentID)
+	}
+
+	return nil
+}
+
+// UpdateRunCompleted updates the run_completed_at timestamp and run_exit_code when the container
+// publishes run.completed event. Uses incident_id to find the most recent execution record.
+func (s *Store) UpdateRunCompleted(ctx context.Context, incidentID string, runCompletedAt time.Time, runExitCode int) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE agent_executions
+		SET
+			run_completed_at = ?,
+			run_exit_code = ?
+		WHERE execution_id = (
+			SELECT execution_id
+			FROM agent_executions
+			WHERE incident_id = ?
+			AND run_completed_at IS NULL
+			ORDER BY job_started_at DESC
+			LIMIT 1
+		)
+	`, runCompletedAt, runExitCode, incidentID)
+	if err != nil {
+		return fmt.Errorf("failed to update run_completed_at: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("no pending execution found for incident: %s", incidentID)
+	}
+
+	return nil
+}
+
 // GetIncident retrieves an incident by its ID.
 // Returns nil if the incident is not found.
 func (s *Store) GetIncident(ctx context.Context, incidentID string) (*incident.Incident, error) {
@@ -329,7 +427,7 @@ func (s *Store) GetIncident(ctx context.Context, incidentID string) (*incident.I
 	err := s.db.QueryRowContext(ctx, `
 		SELECT
 			incident_id, fault_id, triggering_event_id,
-			status, created_at, started_at, completed_at,
+			status, created_at, job_started_at, job_completed_at,
 			exit_code, failure_reason,
 			cluster, namespace, fault_type, severity, context, timestamp,
 			resource_api_version, resource_kind, resource_name, resource_namespace, resource_uid
@@ -409,7 +507,7 @@ func (s *Store) ListIncidents(ctx context.Context, filters *storage.IncidentFilt
 	query := `
 		SELECT
 			incident_id, fault_id, triggering_event_id,
-			status, created_at, started_at, completed_at,
+			status, created_at, job_started_at, job_completed_at,
 			exit_code, failure_reason,
 			cluster, namespace, fault_type, severity, context, timestamp,
 			resource_api_version, resource_kind, resource_name, resource_namespace, resource_uid

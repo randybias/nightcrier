@@ -52,6 +52,10 @@ type K8sExecutorConfig struct {
 	SystemPromptFile string
 	// Debug mode - includes session archive and separate stderr
 	Debug bool
+	// NATS configuration for progress tracking
+	NATSEnabled bool
+	NATSServer  string
+	NATSToken   string
 }
 
 // K8sExecutor implements the executor interface using Kubernetes Jobs.
@@ -158,6 +162,20 @@ func (e *K8sExecutor) ExecuteWithPrompt(ctx context.Context, workspacePath strin
 		return -1, LogPaths{}, fmt.Errorf("failed to create Job: %w", err)
 	}
 	slog.Info("Job created", "name", jobName, "incident_id", incidentID)
+
+	// Record agent execution at Job creation time so NATS listener can update run_started_at
+	// The processor will update this record with completion data when the Job finishes
+	if e.stateStore != nil {
+		initialExec := &storage.AgentExecution{
+			ExecutionID: executionID,
+			IncidentID:  incidentID,
+			StartedAt:   startedAt,
+		}
+		if err := e.stateStore.RecordAgentExecution(ctx, initialExec); err != nil {
+			slog.Warn("failed to record initial agent execution", "incident_id", incidentID, "error", err)
+			// Don't fail - this is non-critical for the Job execution
+		}
+	}
 
 	// Phase 3.1: Watch Job for completion
 	slog.Info("watching Job for completion", "job", jobName, "timeout", e.config.Timeout)
@@ -355,6 +373,9 @@ func (e *K8sExecutor) createJob(
 			"incident-id": incidentID,
 			"cluster":     clusterName,
 		},
+		NATSEnabled: e.config.NATSEnabled,
+		NATSServer:  e.config.NATSServer,
+		NATSToken:   e.config.NATSToken,
 	}
 
 	return e.k8sClient.CreateJob(ctx, cfg)

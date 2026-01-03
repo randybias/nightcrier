@@ -23,6 +23,7 @@ import (
 	"github.com/randybias/nightcrier/internal/events"
 	"github.com/randybias/nightcrier/internal/health"
 	"github.com/randybias/nightcrier/internal/incident"
+	"github.com/randybias/nightcrier/internal/nats"
 	"github.com/randybias/nightcrier/internal/reporting"
 	"github.com/randybias/nightcrier/internal/storage"
 	"github.com/randybias/nightcrier/internal/storage/postgres"
@@ -275,6 +276,9 @@ func run(cmd *cobra.Command, args []string) error {
 			Model:            cfg.Agent.Model,
 			SystemPromptFile: cfg.Agent.SystemPromptFile,
 			Debug:            cfg.LogLevel == "debug",
+			NATSEnabled:      cfg.NATS.Enabled,
+			NATSServer:       cfg.NATS.Server,
+			NATSToken:        cfg.NATS.Token,
 		}
 		k8sExec := agent.NewK8sExecutor(
 			k8sExecCfg,
@@ -393,6 +397,47 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Initialize NATS client and listener if enabled
+	var natsClient *nats.Client
+	var natsListener *nats.Listener
+	if cfg.NATS.Enabled {
+		slog.Info("initializing NATS client",
+			"server", cfg.NATS.Server,
+			"connect_timeout", cfg.NATS.ConnectTimeout,
+			"reconnect_wait", cfg.NATS.ReconnectWait)
+
+		var err error
+		natsClient, err = nats.Connect(
+			cfg.NATS.Server,
+			cfg.NATS.Token,
+			nats.WithName("nightcrier"),
+			nats.WithTimeout(cfg.NATS.ConnectTimeout),
+			nats.WithReconnectWait(cfg.NATS.ReconnectWait),
+		)
+		if err != nil {
+			slog.Warn("failed to connect to NATS server (continuing without progress tracking)",
+				"error", err,
+				"server", cfg.NATS.Server)
+		} else {
+			slog.Info("NATS client connected successfully")
+
+			// Only create listener if we have a stateStore
+			if stateStore != nil {
+				natsListener = nats.NewListener(natsClient, stateStore)
+				go func() {
+					if err := natsListener.Start(ctx); err != nil {
+						slog.Warn("NATS listener stopped", "error", err)
+					}
+				}()
+				slog.Info("NATS listener started, subscribing to progress events")
+			} else {
+				slog.Warn("NATS enabled but no stateStore available, listener not started")
+			}
+		}
+	} else {
+		slog.Info("NATS progress tracking disabled")
+	}
+
 	// Phase 3: Initialize connection manager (validates cluster permissions)
 	// This runs kubectl auth can-i checks for all clusters with triage enabled
 	slog.Info("initializing connection manager - validating permissions")
@@ -473,6 +518,16 @@ func run(cmd *cobra.Command, args []string) error {
 				slog.Warn("dispatcher shutdown timed out", "error", err)
 			}
 
+			// Shutdown NATS listener and client
+			if natsListener != nil {
+				slog.Info("shutting down NATS listener")
+				natsListener.Stop()
+			}
+			if natsClient != nil {
+				slog.Info("closing NATS client")
+				natsClient.Close()
+			}
+
 			return nil
 
 		case event, ok := <-eventChan:
@@ -538,8 +593,6 @@ func run(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
-
-	return nil
 }
 
 func processEvent(ctx context.Context, event *events.FaultEvent, clusterName string, kubeconfig string, permissions *cluster.ClusterPermissions, workspaceMgr *agent.WorkspaceManager, executor AgentExecutor, slackNotifier *reporting.SlackNotifier, storageBackend storage.Storage, stateStore storage.StateStore, circuitBreaker *reporting.CircuitBreaker, cfg *config.Config, tuning *config.TuningConfig) error {
@@ -633,23 +686,6 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 		if err := stateStore.UpdateIncidentStatus(ctx, incidentID, incident.StatusInvestigating, &startedAt); err != nil {
 			slog.Error("failed to update incident status in state store", "incident_id", incidentID, "error", err)
 		}
-
-		// Record agent execution start in state store
-		slog.Debug("recording agent execution start in state store", "incident_id", incidentID)
-		agentExec := &storage.AgentExecution{
-			ExecutionID:  incidentID, // Use incident ID as execution ID for now
-			IncidentID:   incidentID,
-			StartedAt:    startedAt,
-			CompletedAt:  nil,
-			ExitCode:     nil,
-			ErrorMessage: "",
-			LogPaths:     nil,
-		}
-		if err := stateStore.RecordAgentExecution(ctx, agentExec); err != nil {
-			slog.Error("failed to record agent execution start in state store", "incident_id", incidentID, "error", err)
-		} else {
-			slog.Info("agent execution start recorded in state store", "incident_id", incidentID, "execution_id", agentExec.ExecutionID)
-		}
 	}
 
 	// Execute agent
@@ -657,39 +693,6 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 
 	// Update incident with completion info
 	inc.MarkCompleted(exitCode, execErr)
-
-	// Populate log paths in incident for local reference
-	inc.LogPaths = map[string]string{
-		"agent-stdout.log": logPaths.Stdout,
-		"agent-stderr.log": logPaths.Stderr,
-		"agent-full.log":   logPaths.Combined,
-	}
-
-	// Update agent execution with completion info in state store
-	if stateStore != nil {
-		slog.Debug("updating agent execution with completion info in state store", "incident_id", incidentID, "exit_code", exitCode)
-		completedAt := time.Now()
-		execErrMsg := ""
-		if execErr != nil {
-			execErrMsg = execErr.Error()
-		}
-		agentExec := &storage.AgentExecution{
-			ExecutionID:  incidentID, // Use incident ID as execution ID for now
-			IncidentID:   incidentID,
-			StartedAt:    startedAt,
-			CompletedAt:  &completedAt,
-			ExitCode:     &exitCode,
-			ErrorMessage: execErrMsg,
-			LogPaths:     inc.LogPaths,
-		}
-		if err := stateStore.RecordAgentExecution(ctx, agentExec); err != nil {
-			slog.Error("failed to update agent execution completion in state store", "incident_id", incidentID, "error", err)
-		} else {
-			slog.Info("agent execution completion recorded in state store", "incident_id", incidentID, "execution_id", agentExec.ExecutionID)
-		}
-	} else {
-		slog.Warn("stateStore is nil, skipping agent execution update", "incident_id", incidentID)
-	}
 
 	// Detect agent failures (exit code 0 but missing or invalid output)
 	agentFailed, failureReason := detectAgentFailure(exitCode, execErr)
@@ -765,13 +768,6 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 		}
 	}
 
-	// Mark incident as complete in state store
-	if stateStore != nil {
-		if err := stateStore.CompleteIncident(ctx, incidentID, exitCode, inc.FailureReason); err != nil {
-			slog.Error("failed to complete incident in state store", "incident_id", incidentID, "error", err)
-		}
-	}
-
 	// Write updated incident.json with completion info
 	if err := inc.WriteToFile(incidentPath); err != nil {
 		return fmt.Errorf("failed to update incident: %w", err)
@@ -780,76 +776,10 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 	// Calculate duration
 	duration := inc.CompletedAt.Sub(startedAt)
 
-	// Save incident artifacts to storage
-	// For K8s executor, artifacts are already uploaded and info is in logPaths
-	// For Docker executor, we need to read and upload artifacts here
-	var reportURL string
-	var rootCause string
-	var confidence string
-
-	// Check if K8s executor already provided artifact information
-	if logPaths.ReportURL != "" {
-		// K8s executor path - artifacts already uploaded, info in logPaths
-		reportURL = logPaths.ReportURL
-		rootCause = logPaths.RootCause
-		confidence = logPaths.Confidence
-		slog.Info("using artifact info from K8s executor",
-			"incident_id", incidentID,
-			"report_url", reportURL,
-			"root_cause", rootCause,
-			"confidence", confidence)
-	} else if storageBackend != nil {
-		// Docker executor path - need to read and upload artifacts
-		// Skip storage upload for agent failures (missing/invalid output) unless configured otherwise
-		if inc.Status == incident.StatusAgentFailed && !cfg.UploadFailedInvestigations {
-			slog.Info("skipping storage upload due to agent failure",
-				"incident_id", incidentID,
-				"reason", inc.FailureReason,
-				"config", "upload_failed_investigations=false")
-		} else {
-			// Read the generated artifacts and convert markdown to HTML
-			artifacts, err := readIncidentArtifacts(workspacePath, incidentID, logPaths)
-			if err != nil {
-				slog.Warn("failed to read incident artifacts for storage", "error", err)
-			} else {
-				// Record triage report in state store
-				if stateStore != nil {
-					report := &storage.TriageReport{
-						ReportID:       uuid.New().String(),
-						IncidentID:     incidentID,
-						ExecutionID:    incidentID, // Match the AgentExecution.ExecutionID
-						GeneratedAt:    time.Now(),
-						ReportMarkdown: string(artifacts.InvestigationMD),
-						ReportHTML:     string(artifacts.InvestigationHTML),
-					}
-					if err := stateStore.RecordTriageReport(ctx, report); err != nil {
-						slog.Error("failed to record triage report in state store", "incident_id", incidentID, "error", err)
-					}
-				}
-
-				// Upload artifacts to storage (Azure or filesystem)
-				saveResult, err := storageBackend.SaveIncident(ctx, incidentID, artifacts)
-				if err != nil {
-					slog.Error("failed to save incident to storage", "error", err)
-				} else {
-					reportURL = saveResult.ReportURL
-					slog.Info("incident artifacts saved to storage",
-						"incident_id", incidentID,
-						"artifact_count", len(saveResult.ArtifactURLs),
-						"log_url_count", len(saveResult.LogURLs),
-						"report_url", reportURL)
-
-					// Populate log URLs in incident from storage result
-					inc.LogURLs = saveResult.LogURLs
-
-					// Update incident.json with log URLs
-					if err := inc.WriteToFile(incidentPath); err != nil {
-						slog.Warn("failed to update incident.json with log URLs", "error", err)
-					}
-				}
-			}
-		}
-	}
+	// Get artifact info from K8s executor (artifacts already uploaded by processor)
+	reportURL := logPaths.ReportURL
+	rootCause := logPaths.RootCause
+	confidence := logPaths.Confidence
 
 	slog.Info("event processed",
 		"incident_id", incidentID,
@@ -949,137 +879,6 @@ func setupLogging(level string) {
 		Level: logLevel,
 	})
 	slog.SetDefault(slog.New(handler))
-}
-
-// readIncidentArtifacts reads the generated artifacts from the workspace for storage upload.
-// It also converts the markdown report to HTML for better browser rendering.
-// It reads agent logs if they exist.
-func readIncidentArtifacts(workspacePath, incidentID string, logPaths agent.LogPaths) (*storage.IncidentArtifacts, error) {
-	// Read incident.json
-	incidentPath := filepath.Join(workspacePath, "incident.json")
-	incidentJSON, err := os.ReadFile(incidentPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read incident.json: %w", err)
-	}
-
-	// Read investigation.md
-	investigationPath := filepath.Join(workspacePath, "output", "investigation.md")
-	investigationMD, err := os.ReadFile(investigationPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read investigation.md: %w", err)
-	}
-
-	// Convert markdown to HTML for better browser rendering
-	investigationHTML := reporting.ConvertMarkdownToHTML(investigationMD, incidentID)
-
-	// Read agent logs if they exist (logs are optional)
-	var agentLogs storage.AgentLogs
-
-	// Read stdout log
-	if logPaths.Stdout != "" {
-		stdout, err := os.ReadFile(logPaths.Stdout)
-		if err != nil {
-			slog.Debug("failed to read agent stdout log (this is normal if logging disabled)",
-				"path", logPaths.Stdout,
-				"error", err)
-		} else {
-			agentLogs.Stdout = stdout
-			slog.Debug("read agent stdout log",
-				"path", logPaths.Stdout,
-				"size", len(stdout))
-		}
-	}
-
-	// Read stderr log
-	if logPaths.Stderr != "" {
-		stderr, err := os.ReadFile(logPaths.Stderr)
-		if err != nil {
-			slog.Debug("failed to read agent stderr log (this is normal if logging disabled)",
-				"path", logPaths.Stderr,
-				"error", err)
-		} else {
-			agentLogs.Stderr = stderr
-			slog.Debug("read agent stderr log",
-				"path", logPaths.Stderr,
-				"size", len(stderr))
-		}
-	}
-
-	// Read combined log
-	if logPaths.Combined != "" {
-		combined, err := os.ReadFile(logPaths.Combined)
-		if err != nil {
-			slog.Debug("failed to read agent combined log (this is normal if logging disabled)",
-				"path", logPaths.Combined,
-				"error", err)
-		} else {
-			agentLogs.Combined = combined
-			slog.Debug("read agent combined log",
-				"path", logPaths.Combined,
-				"size", len(combined))
-		}
-	}
-
-	// Read commands executed log (DEBUG mode only - generated from session JSONL)
-	commandsLogPath := filepath.Join(workspacePath, "logs", "agent-commands-executed.log")
-	if commandsData, err := os.ReadFile(commandsLogPath); err != nil {
-		slog.Debug("agent commands log not found (this is normal in production mode)",
-			"path", commandsLogPath,
-			"error", err)
-	} else {
-		agentLogs.CommandsExecuted = commandsData
-		slog.Debug("read agent commands log",
-			"path", commandsLogPath,
-			"size", len(commandsData))
-	}
-
-	// Read cluster permissions file (optional - only present if triage was enabled)
-	var clusterPermissionsJSON []byte
-	permissionsPath := filepath.Join(workspacePath, "incident_cluster_permissions.json")
-	if permsData, err := os.ReadFile(permissionsPath); err != nil {
-		slog.Debug("cluster permissions file not found (this is normal if triage disabled)",
-			"path", permissionsPath,
-			"error", err)
-	} else {
-		clusterPermissionsJSON = permsData
-		slog.Debug("read cluster permissions file",
-			"path", permissionsPath,
-			"size", len(permsData))
-	}
-
-	// Read agent session archive if present (DEBUG mode only)
-	// Archive name is agent-session.tar.gz for all agent types
-	var agentSessionArchive []byte
-	sessionArchivePath := filepath.Join(workspacePath, "logs", "agent-session.tar.gz")
-	if sessionData, err := os.ReadFile(sessionArchivePath); err != nil {
-		slog.Debug("agent session archive not found (this is normal in production mode)",
-			"path", sessionArchivePath,
-			"error", err)
-	} else {
-		agentSessionArchive = sessionData
-		slog.Debug("read agent session archive",
-			"path", sessionArchivePath,
-			"size", len(sessionData))
-	}
-
-	// Read prompt-sent.md (optional - may not exist for older incidents)
-	promptSentPath := filepath.Join(workspacePath, "prompt-sent.md")
-	promptSent, err := os.ReadFile(promptSentPath)
-	if err != nil {
-		// prompt-sent.md is optional, log but don't fail
-		slog.Debug("prompt-sent.md not found (optional artifact)", "path", promptSentPath)
-		promptSent = nil
-	}
-
-	return &storage.IncidentArtifacts{
-		IncidentJSON:           incidentJSON,
-		InvestigationMD:        investigationMD,
-		InvestigationHTML:      investigationHTML,
-		ClusterPermissionsJSON: clusterPermissionsJSON,
-		AgentLogs:              agentLogs,
-		AgentSessionArchive:    agentSessionArchive,
-		PromptSent:             promptSent,
-	}, nil
 }
 
 // printStartupBanner displays configuration summary at startup

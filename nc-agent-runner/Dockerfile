@@ -1,7 +1,19 @@
-# nc-agent-runner: AI Agent Container for Kubernetes Incident Triage
-# Supports Claude Code, OpenAI Codex, Google Gemini, and Goose AI agents
-# Built for multi-arch support (amd64, arm64)
+# ============================================================================
+# Stage 1: Build nats-cli with proper Go version
+# ============================================================================
+FROM golang:1.24-bookworm AS nats-builder
 
+ARG NATS_CLI_VERSION=v0.3.0
+
+# Build nats-cli from source
+RUN go install github.com/nats-io/natscli/nats@${NATS_CLI_VERSION}
+
+# The binary will be in /go/bin/nats
+
+
+# ============================================================================
+# Stage 2: Main agent container
+# ============================================================================
 FROM debian:bookworm-slim
 
 # Install base dependencies
@@ -41,7 +53,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
-    # Build tools
+    # Build tools (removed golang - not needed in final image)
     make \
     && rm -rf /var/lib/apt/lists/*
 
@@ -63,6 +75,10 @@ RUN curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | gpg --d
 
 # Install Helm 3.x
 RUN curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Copy nats-cli binary from builder stage
+COPY --from=nats-builder /go/bin/nats /usr/local/bin/nats
+RUN chmod +x /usr/local/bin/nats && nats --version
 
 # Create npm global directory with proper permissions
 ENV NPM_CONFIG_PREFIX=/home/npm-global
@@ -122,9 +138,11 @@ policy = "never"
 access = true
 EOF
 
-# Copy entrypoint script
+# Copy entrypoint script, NATS helper, and hooks
 COPY --chown=${USER_NAME}:${USER_NAME} nc-agent-runner/entrypoint.sh /home/${USER_NAME}/entrypoint.sh
-RUN chmod +x /home/${USER_NAME}/entrypoint.sh
+COPY --chown=${USER_NAME}:${USER_NAME} nc-agent-runner/scripts/nats-publish.sh /home/${USER_NAME}/scripts/nats-publish.sh
+COPY --chown=${USER_NAME}:${USER_NAME} nc-agent-runner/hooks/ /home/${USER_NAME}/hooks/
+RUN chmod +x /home/${USER_NAME}/entrypoint.sh /home/${USER_NAME}/scripts/nats-publish.sh /home/${USER_NAME}/hooks/*.sh
 
 # Switch to non-root user
 USER ${USER_NAME}
@@ -138,4 +156,4 @@ ENTRYPOINT ["/home/agent/entrypoint.sh"]
 # Labels
 LABEL maintainer="nightcrier"
 LABEL description="AI agent runner container with kubectl, helm, and multiple AI CLIs (Claude, Codex, Goose, Gemini) for Kubernetes incident investigation"
-LABEL version="1.0.0"
+LABEL version="1.0.0-nats"
