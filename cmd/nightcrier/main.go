@@ -19,6 +19,7 @@ import (
 	"github.com/randybias/nightcrier/internal/bootstrap"
 	"github.com/randybias/nightcrier/internal/cluster"
 	"github.com/randybias/nightcrier/internal/config"
+	"github.com/randybias/nightcrier/internal/dispatcher"
 	"github.com/randybias/nightcrier/internal/events"
 	"github.com/randybias/nightcrier/internal/health"
 	"github.com/randybias/nightcrier/internal/incident"
@@ -401,6 +402,38 @@ func run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to initialize connection manager: %w", err)
 	}
 
+	// Build kubeconfig and permissions maps for the event handler
+	// These are static per-cluster and are used by the dispatcher's event handler
+	kubeconfigMap := make(map[string]string)
+	permissionsMap := make(map[string]*cluster.ClusterPermissions)
+	for _, clusterCfg := range cfg.Clusters {
+		kubeconfigMap[clusterCfg.Name] = clusterCfg.Triage.Kubeconfig
+		// Permissions will be looked up from the event since they're set during Initialize
+	}
+
+	// Create the event handler closure that captures all dependencies
+	eventHandler := func(ctx context.Context, event *events.FaultEvent, clusterName string) error {
+		// Look up cluster-specific data
+		kubeconfig := kubeconfigMap[clusterName]
+		permissions := permissionsMap[clusterName]
+
+		// Get executor for this cluster
+		executor, ok := executors[clusterName]
+		if !ok {
+			return fmt.Errorf("no executor found for cluster: %s", clusterName)
+		}
+
+		// Process the event
+		return processEvent(ctx, event, clusterName, kubeconfig, permissions, workspaceMgr, executor, slackNotifier, storageBackend, stateStore, circuitBreaker, cfg, tuning)
+	}
+
+	// Create dispatcher with the event handler
+	eventDispatcher := dispatcher.NewDispatcher(cfg, eventHandler)
+	slog.Info("dispatcher initialized",
+		"max_concurrent_agents", cfg.MaxConcurrentAgents,
+		"cluster_queue_size", cfg.ClusterQueueSize,
+		"event_ttl_seconds", cfg.EventTTLSeconds)
+
 	// Phase 4: Start health monitoring server if enabled
 	if healthPort > 0 {
 		healthServer := health.NewServer(connectionMgr, healthPort)
@@ -430,12 +463,30 @@ func run(cmd *cobra.Command, args []string) error {
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Info("shutting down...")
+			slog.Info("shutting down, waiting for in-flight agents...")
+
+			// Graceful shutdown: wait for dispatcher to complete in-flight agents
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer shutdownCancel()
+
+			if err := eventDispatcher.Shutdown(shutdownCtx); err != nil {
+				slog.Warn("dispatcher shutdown timed out", "error", err)
+			}
+
 			return nil
 
 		case event, ok := <-eventChan:
 			if !ok {
-				slog.Info("event channel closed")
+				slog.Info("event channel closed, waiting for in-flight agents...")
+
+				// Event channel closed, wait for dispatcher to complete
+				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer shutdownCancel()
+
+				if err := eventDispatcher.Shutdown(shutdownCtx); err != nil {
+					slog.Warn("dispatcher shutdown timed out", "error", err)
+				}
+
 				return nil
 			}
 
@@ -459,14 +510,11 @@ func run(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
-			kubeconfig, ok := clusterEvent["Kubeconfig"].(string)
-			if !ok {
-				slog.Error("missing or invalid Kubeconfig in event", "cluster", clusterName)
-				continue
+			// Extract and cache cluster permissions from the event
+			// These are set during connectionMgr.Initialize() and included with each event
+			if permissions, ok := clusterEvent["Permissions"].(*cluster.ClusterPermissions); ok && permissions != nil {
+				permissionsMap[clusterName] = permissions
 			}
-
-			// Phase 3: Extract cluster permissions (may be nil if triage disabled)
-			permissions, _ := clusterEvent["Permissions"].(*cluster.ClusterPermissions)
 
 			// Extract the FaultEvent
 			faultEvent, ok := clusterEvent["Event"].(*events.FaultEvent)
@@ -477,25 +525,15 @@ func run(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
-			// Get the executor for this cluster
-			executor, ok := executors[clusterName]
-			if !ok {
-				slog.Error("no executor found for cluster", "cluster", clusterName)
-				continue
-			}
+			// Dispatch the event to the dispatcher (non-blocking)
+			// The dispatcher handles concurrency limits and per-cluster serialization
+			eventDispatcher.Dispatch(ctx, faultEvent, clusterName)
 
-			// Process the event with cluster context (including permissions)
-			if err := processEvent(ctx, faultEvent, clusterName, kubeconfig, permissions, workspaceMgr, executor, slackNotifier, storageBackend, stateStore, circuitBreaker, cfg, tuning); err != nil {
-				slog.Error("failed to process event",
-					"cluster", clusterName,
-					"fault_id", faultEvent.FaultID,
-					"error", err)
-			}
-
-			// Single-run mode: exit after first event is processed
+			// Single-run mode: exit after first event is dispatched
+			// Note: We wait for the dispatcher to process it during shutdown
 			if singleRun {
 				singleRunProcessed = true
-				slog.Info("single-run mode: event processed, initiating shutdown")
+				slog.Info("single-run mode: event dispatched, initiating shutdown")
 				cancel()
 			}
 		}
@@ -1010,7 +1048,7 @@ func readIncidentArtifacts(workspacePath, incidentID string, logPaths agent.LogP
 	}
 
 	// Read agent session archive if present (DEBUG mode only)
-	// Archive name depends on agent: claude-session.tar.gz for Claude, etc.
+	// Archive name is agent-session.tar.gz for all agent types
 	var agentSessionArchive []byte
 	sessionArchivePath := filepath.Join(workspacePath, "logs", "agent-session.tar.gz")
 	if sessionData, err := os.ReadFile(sessionArchivePath); err != nil {
@@ -1093,6 +1131,8 @@ func printStartupBanner(cfg *config.Config, configFile string) {
 	fmt.Println("╠═══════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║  Log Level:      %-45s ║\n", cfg.LogLevel)
 	fmt.Printf("║  Max Concurrent: %-45s ║\n", fmt.Sprintf("%d agents", cfg.MaxConcurrentAgents))
+	fmt.Printf("║  Queue Size:     %-45s ║\n", fmt.Sprintf("%d events/cluster", cfg.ClusterQueueSize))
+	fmt.Printf("║  Event TTL:      %-45s ║\n", fmt.Sprintf("%ds", cfg.EventTTLSeconds))
 	fmt.Printf("║  Severity:       %-45s ║\n", cfg.SeverityThreshold)
 	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")
 	fmt.Println()

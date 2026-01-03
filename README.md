@@ -126,7 +126,8 @@ See [Architecture](docs/architecture.md) for detailed execution flow diagrams an
 - **Circuit breaker** for agent failure handling
 - **Intelligent validation** to prevent spurious notifications
 - **System health monitoring** with degraded/recovered alerts
-- **Multi-cluster support** with independent triage configuration per cluster (serialized as on triage agent active at a time per monitored cluster)
+- **Multi-cluster support** with independent triage configuration per cluster
+- **Intelligent concurrency** - parallel execution across clusters with per-cluster serialization
 
 ## Quick Start
 

@@ -165,11 +165,11 @@ func generateIndexHTMLWithSignedURLs(incidentID string, artifactURLs map[string]
 		"agent-stderr.log":                  {"Agent Standard Error", "Agent's diagnostic output and errors (DEBUG mode only)", "secondary"},
 		"agent-full.log":                    {"Agent Combined Log", "Complete timestamped agent execution log (DEBUG mode only)", "secondary"},
 		"agent-commands-executed.log":       {"Agent Commands Executed", "Bash commands run by the agent during investigation (DEBUG mode only)", "secondary"},
-		"claude-session.tar.gz":             {"Claude Session Archive", "Complete Claude Code session with turn history and internal logs (DEBUG mode only)", "secondary"},
+		"agent-session.tar.gz":              {"Agent Session Archive", "Complete agent session with turn history and internal logs (DEBUG mode only)", "secondary"},
 	}
 
 	// Sort files for consistent display - logs and session archive last since operators only need them for troubleshooting
-	orderedFiles := []string{"investigation.html", "investigation.md", "incident.json", "incident_cluster_permissions.json", "prompt-sent.md", "agent-stdout.log", "agent-stderr.log", "agent-full.log", "agent-commands-executed.log", "claude-session.tar.gz"}
+	orderedFiles := []string{"investigation.html", "investigation.md", "incident.json", "incident_cluster_permissions.json", "prompt-sent.md", "agent-stdout.log", "agent-stderr.log", "agent-full.log", "agent-commands-executed.log", "agent-session.tar.gz"}
 	for _, filename := range orderedFiles {
 		if url, exists := artifactURLs[filename]; exists {
 			desc := fileDescriptions[filename]

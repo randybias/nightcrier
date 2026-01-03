@@ -27,6 +27,95 @@ Nightcrier uses **Kubernetes-native stateless agent execution**:
 5. **Artifact Upload** - Results are uploaded directly to Object Storage from within the container
 6. **Cleanup** - ConfigMap is deleted after Job completion
 
+## Agent Concurrency Model
+
+Nightcrier implements a sophisticated concurrency model that balances parallelism with cluster-level ordering guarantees.
+
+### Design Goals
+
+1. **Cross-cluster parallelism** - Events from different clusters should be processed in parallel
+2. **Per-cluster serialization** - Events for the same cluster must be processed one at a time
+3. **Non-blocking ingestion** - Event arrival should never block the SSE event loop
+4. **Bounded memory** - Queue sizes must be bounded to prevent memory exhaustion
+5. **Relevance prioritization** - Newer events are more relevant than older ones
+
+### Architecture
+
+```
+                              ┌─────────────────────────────────────────────────────────┐
+                              │                    Agent Coordinator                     │
+                              │                                                          │
+┌──────────────┐              │  ┌─────────────────────────────────────────────────┐   │
+│ SSE Events   │──Enqueue()──>│  │         Per-Cluster Queues (bounded)            │   │
+│ (non-blocking)│              │  │                                                 │   │
+└──────────────┘              │  │  cluster-a: [event3] [event2] [event1]         │   │
+                              │  │  cluster-b: [event2] [event1]                   │   │
+                              │  │  cluster-c: [event1]                            │   │
+                              │  │                                                 │   │
+                              │  └────────────────────────┬────────────────────────┘   │
+                              │                           │                             │
+                              │                           v                             │
+                              │  ┌─────────────────────────────────────────────────┐   │
+                              │  │           Global Semaphore                       │   │
+                              │  │        (max_concurrent_agents = 10)             │   │
+                              │  └────────────────────────┬────────────────────────┘   │
+                              │                           │                             │
+                              │            ┌──────────────┼──────────────┐             │
+                              │            v              v              v             │
+                              │     ┌──────────┐  ┌──────────┐  ┌──────────┐         │
+                              │     │ Worker   │  │ Worker   │  │ Worker   │  ...    │
+                              │     │(cluster-a)│ │(cluster-b)│ │(cluster-c)│         │
+                              │     └──────────┘  └──────────┘  └──────────┘         │
+                              │                                                          │
+                              └─────────────────────────────────────────────────────────┘
+```
+
+### Concurrency Guarantees
+
+| Guarantee | Mechanism |
+|-----------|-----------|
+| Cross-cluster parallelism | Global semaphore allows up to `max_concurrent_agents` concurrent workers |
+| Per-cluster serialization | Each cluster has exactly one worker goroutine processing events sequentially |
+| Non-blocking ingestion | `Enqueue()` returns immediately; drops events if queue is full |
+| Stale event dropping | Events older than `event_ttl_seconds` are discarded before execution |
+| Queue overflow handling | When queue is full, oldest event is dropped to make room for newer events |
+
+### Event Lifecycle
+
+```
+1. Event Received (SSE)
+        │
+        v
+2. Enqueue() called (non-blocking)
+        │
+        ├── Queue full? ──Yes──> Drop oldest event, add new event
+        │
+        └── No ──> Add to cluster queue
+                          │
+                          v
+3. Worker picks up event
+        │
+        ├── Event stale? ──Yes──> Log + discard
+        │
+        └── No ──> Acquire semaphore slot
+                          │
+                          v
+4. Execute agent investigation
+        │
+        v
+5. Release semaphore slot
+        │
+        v
+6. Process next event in queue (goto 3)
+```
+
+### Configuration
+
+See [Configuration](configuration.md#agent-concurrency-configuration) for settings:
+- `max_concurrent_agents` - Global parallelism limit (default: 10)
+- `cluster_queue_size` - Per-cluster queue depth (default: 10)
+- `event_ttl_seconds` - Event staleness threshold (default: 300)
+
 ## Detailed Execution Flow
 
 ```
