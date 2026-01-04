@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	_ "embed"
@@ -44,7 +46,20 @@ type Config struct {
 }
 
 // NewServer creates a new admin UI server.
+// The server only binds to loopback addresses (127.0.0.1 or localhost) for security.
 func NewServer(cfg Config) (*Server, error) {
+	// Validate that the listen address is loopback only (security requirement)
+	host, _, err := net.SplitHostPort(cfg.ListenAddr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid listen address %q: %w", cfg.ListenAddr, err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return nil, fmt.Errorf("admin UI must bind to loopback address (127.0.0.1 or localhost), not %q", host)
+	}
+	if !strings.HasPrefix(host, "127.") && host != "localhost" && host != "::1" {
+		return nil, fmt.Errorf("admin UI must bind to loopback address (127.0.0.1 or localhost), not %q", host)
+	}
+
 	// Parse templates with custom functions
 	funcMap := template.FuncMap{
 		"formatTime": func(t time.Time) string {
