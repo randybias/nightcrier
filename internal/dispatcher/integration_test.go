@@ -22,10 +22,13 @@ import (
 // integrationConfig creates a config suitable for integration testing with
 // higher limits and longer timeouts than unit tests.
 func integrationConfig(opts ...func(*config.Config)) *config.Config {
+	// Default DropEventsWhileBusy to false for tests that rely on queueing behavior
+	defaultDropEvents := false
 	cfg := &config.Config{
-		MaxConcurrentAgents: 20,
-		ClusterQueueSize:    50,
-		EventTTLSeconds:     600, // 10 minutes
+		MaxConcurrentAgents:          20,
+		ClusterFailureEventQueueSize: 50,
+		EventTTLSeconds:              600, // 10 minutes
+		DropEventsWhileBusy:          &defaultDropEvents,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -145,7 +148,7 @@ func TestIntegration_ConcurrentEventsAcrossClusters(t *testing.T) {
 
 	cfg := integrationConfig(func(c *config.Config) {
 		c.MaxConcurrentAgents = maxConcurrentSlots
-		c.ClusterQueueSize = eventsPerCluster + 5 // Room for all events
+		c.ClusterFailureEventQueueSize = eventsPerCluster + 5 // Room for all events
 	})
 
 	tracker := newOrderTracker()
@@ -273,7 +276,7 @@ func TestIntegration_SerializedEventsForSameCluster(t *testing.T) {
 
 	cfg := integrationConfig(func(c *config.Config) {
 		c.MaxConcurrentAgents = 10 // Enough slots to show serialization is enforced
-		c.ClusterQueueSize = numEvents + 5
+		c.ClusterFailureEventQueueSize = numEvents + 5
 	})
 
 	type execRecord struct {
@@ -405,7 +408,7 @@ func TestIntegration_ShutdownWithInFlightAgents(t *testing.T) {
 
 	cfg := integrationConfig(func(c *config.Config) {
 		c.MaxConcurrentAgents = maxConcurrent
-		c.ClusterQueueSize = 10
+		c.ClusterFailureEventQueueSize = 10
 	})
 
 	var startedCount atomic.Int64
@@ -503,7 +506,7 @@ func TestIntegration_ShutdownTimeoutWithBlockedAgents(t *testing.T) {
 
 	cfg := integrationConfig(func(c *config.Config) {
 		c.MaxConcurrentAgents = numAgents
-		c.ClusterQueueSize = 10
+		c.ClusterFailureEventQueueSize = 10
 	})
 
 	blockCh := make(chan struct{})
@@ -577,7 +580,7 @@ func TestIntegration_ShutdownTimeoutWithBlockedAgents(t *testing.T) {
 func TestIntegration_ShutdownRejectsNewEvents(t *testing.T) {
 	cfg := integrationConfig(func(c *config.Config) {
 		c.MaxConcurrentAgents = 5
-		c.ClusterQueueSize = 10
+		c.ClusterFailureEventQueueSize = 10
 	})
 
 	var processedBefore atomic.Int64
@@ -656,7 +659,7 @@ func TestIntegration_ErrorRecoveryAcrossClusters(t *testing.T) {
 
 	cfg := integrationConfig(func(c *config.Config) {
 		c.MaxConcurrentAgents = 10
-		c.ClusterQueueSize = 20
+		c.ClusterFailureEventQueueSize = 20
 	})
 
 	var successCount atomic.Int64
@@ -738,7 +741,7 @@ func TestIntegration_ErrorRecoveryWithinCluster(t *testing.T) {
 
 	cfg := integrationConfig(func(c *config.Config) {
 		c.MaxConcurrentAgents = 5
-		c.ClusterQueueSize = 20
+		c.ClusterFailureEventQueueSize = 20
 	})
 
 	var mu sync.Mutex
@@ -859,7 +862,7 @@ func TestIntegration_HighLoadStress(t *testing.T) {
 
 	cfg := integrationConfig(func(c *config.Config) {
 		c.MaxConcurrentAgents = maxConcurrentSlots
-		c.ClusterQueueSize = eventsPerCluster + 10
+		c.ClusterFailureEventQueueSize = eventsPerCluster + 10
 	})
 
 	var completedCount atomic.Int64

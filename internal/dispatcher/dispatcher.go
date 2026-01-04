@@ -18,9 +18,10 @@ type EventHandler func(ctx context.Context, event *events.FaultEvent, cluster st
 
 // ClusterState tracks the state of event processing for a single cluster.
 type ClusterState struct {
-	mu      sync.Mutex
-	running bool
-	queue   *EventQueue
+	mu           sync.Mutex
+	running      bool
+	queue        *EventQueue
+	droppedCount int64 // Number of events dropped while busy (observability)
 }
 
 // Dispatcher manages concurrent event processing with per-cluster serialization
@@ -43,7 +44,8 @@ type Dispatcher struct {
 	seenFaultsMu sync.RWMutex
 
 	// Cluster queue configuration
-	clusterQueueSize int
+	dropEventsWhileBusy bool
+	clusterQueueSize    int
 
 	// Shutdown coordination
 	closed   atomic.Bool
@@ -61,16 +63,23 @@ type Dispatcher struct {
 func NewDispatcher(cfg *config.Config, handler EventHandler) *Dispatcher {
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 
+	// Get dropEventsWhileBusy value (default true if nil)
+	dropEvents := true
+	if cfg.DropEventsWhileBusy != nil {
+		dropEvents = *cfg.DropEventsWhileBusy
+	}
+
 	d := &Dispatcher{
-		eventTTL:         time.Duration(cfg.EventTTLSeconds) * time.Second,
-		dedupWindow:      time.Duration(cfg.DedupWindowSeconds) * time.Second,
-		globalSem:        make(chan struct{}, cfg.MaxConcurrentAgents),
-		clusterStates:    make(map[string]*ClusterState),
-		seenFaults:       make(map[string]time.Time),
-		clusterQueueSize: cfg.ClusterQueueSize,
-		shutdownCtx:      shutdownCtx,
-		shutdownCancel:   shutdownCancel,
-		handler:          handler,
+		eventTTL:            time.Duration(cfg.EventTTLSeconds) * time.Second,
+		dedupWindow:         time.Duration(cfg.DedupWindowSeconds) * time.Second,
+		globalSem:           make(chan struct{}, cfg.MaxConcurrentAgents),
+		clusterStates:       make(map[string]*ClusterState),
+		seenFaults:          make(map[string]time.Time),
+		dropEventsWhileBusy: dropEvents,
+		clusterQueueSize:    cfg.ClusterFailureEventQueueSize,
+		shutdownCtx:         shutdownCtx,
+		shutdownCancel:      shutdownCancel,
+		handler:             handler,
 	}
 
 	// Start cleanup goroutine for expired dedup entries
@@ -116,7 +125,18 @@ func (d *Dispatcher) Dispatch(ctx context.Context, event *events.FaultEvent, clu
 
 	cs.mu.Lock()
 	if cs.running {
-		// Cluster busy - queue the event
+		// Cluster busy - check if we should drop or queue
+		if d.dropEventsWhileBusy {
+			cs.droppedCount++
+			cs.mu.Unlock()
+			slog.Info("dropping event, cluster busy with active triage",
+				"fault_id", event.FaultID,
+				"cluster", cluster,
+				"dropped_count", cs.droppedCount,
+				"reason", "drop_events_while_busy enabled")
+			return
+		}
+		// Queue the event (drop_events_while_busy is false)
 		cs.queue.Enqueue(&QueuedEvent{
 			Event:      event,
 			EnqueuedAt: time.Now(),

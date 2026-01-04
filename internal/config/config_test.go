@@ -55,7 +55,7 @@ k8s:
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
-cluster_queue_size: 10
+cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
@@ -98,7 +98,7 @@ k8s:
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
-cluster_queue_size: 10
+cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
@@ -118,7 +118,7 @@ func buildTestConfig(overrides map[string]interface{}) string {
 		"severity_threshold":            "ERROR",
 		"max_concurrent_agents":         5,
 		"global_queue_size":             100,
-		"cluster_queue_size":            10,
+		"cluster_failure_event_queue_size": 3,
 		"dedup_window_seconds":          300,
 		"queue_overflow_policy":         "drop",
 		"shutdown_timeout":              30,
@@ -213,8 +213,8 @@ func TestLoadWithAllRequiredFields(t *testing.T) {
 	if cfg.GlobalQueueSize != 100 {
 		t.Errorf("GlobalQueueSize = %d, want %d", cfg.GlobalQueueSize, 100)
 	}
-	if cfg.ClusterQueueSize != 10 {
-		t.Errorf("ClusterQueueSize = %d, want %d", cfg.ClusterQueueSize, 10)
+	if cfg.ClusterFailureEventQueueSize != 3 {
+		t.Errorf("ClusterFailureEventQueueSize = %d, want %d", cfg.ClusterFailureEventQueueSize, 3)
 	}
 	if cfg.DedupWindowSeconds != 300 {
 		t.Errorf("DedupWindowSeconds = %d, want %d", cfg.DedupWindowSeconds, 300)
@@ -309,7 +309,7 @@ k8s:
 severity_threshold: "CRITICAL"
 max_concurrent_agents: 3
 global_queue_size: 50
-cluster_queue_size: 5
+cluster_failure_event_queue_size: 5
 dedup_window_seconds: 600
 queue_overflow_policy: "reject"
 shutdown_timeout: 30
@@ -352,8 +352,8 @@ anthropic_api_key: "test-key"
 	if cfg.GlobalQueueSize != 50 {
 		t.Errorf("GlobalQueueSize = %d, want %d", cfg.GlobalQueueSize, 50)
 	}
-	if cfg.ClusterQueueSize != 5 {
-		t.Errorf("ClusterQueueSize = %d, want %d", cfg.ClusterQueueSize, 5)
+	if cfg.ClusterFailureEventQueueSize != 5 {
+		t.Errorf("ClusterFailureEventQueueSize = %d, want %d", cfg.ClusterFailureEventQueueSize, 5)
 	}
 	if cfg.DedupWindowSeconds != 600 {
 		t.Errorf("DedupWindowSeconds = %d, want %d", cfg.DedupWindowSeconds, 600)
@@ -394,7 +394,7 @@ k8s:
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
-cluster_queue_size: 10
+cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
@@ -460,7 +460,7 @@ k8s:
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
-cluster_queue_size: 10
+cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
@@ -529,8 +529,8 @@ clusters:
 			wantErr: true,
 		},
 		{
-			name:    "cluster_queue_size < 1",
-			config:  clusterPrefix + "cluster_queue_size: 0\nanthropic_api_key: \"test-key\"\n",
+			name:    "cluster_failure_event_queue_size < 1",
+			config:  clusterPrefix + "cluster_failure_event_queue_size: 0\nanthropic_api_key: \"test-key\"\n",
 			wantErr: true,
 		},
 		{
@@ -1168,7 +1168,7 @@ workspace_root: "./incidents"
 ` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
-cluster_queue_size: 10
+cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 anthropic_api_key: "test-key"`,
 			expectedFieldName: "queue_overflow_policy",
@@ -1181,7 +1181,7 @@ workspace_root: "./incidents"
 ` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
-cluster_queue_size: 10
+cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 anthropic_api_key: "test-key"`,
@@ -1195,7 +1195,7 @@ workspace_root: "./incidents"
 ` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
-cluster_queue_size: 10
+cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
@@ -1210,7 +1210,7 @@ workspace_root: "./incidents"
 ` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
-cluster_queue_size: 10
+cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
@@ -1226,7 +1226,7 @@ workspace_root: "./incidents"
 ` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
-cluster_queue_size: 10
+cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
@@ -1243,7 +1243,7 @@ workspace_root: "./incidents"
 ` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
-cluster_queue_size: 10
+cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
@@ -2013,7 +2013,7 @@ k8s:
 severity_threshold: "WARNING"
 max_concurrent_agents: 8
 global_queue_size: 200
-cluster_queue_size: 20
+cluster_failure_event_queue_size: 20
 dedup_window_seconds: 600
 queue_overflow_policy: "reject"
 shutdown_timeout: 60
@@ -2427,7 +2427,7 @@ k8s:
 severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
-cluster_queue_size: 10
+cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30

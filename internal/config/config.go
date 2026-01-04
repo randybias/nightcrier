@@ -200,14 +200,15 @@ type Config struct {
 	NATS NATSConfig `mapstructure:"nats"`
 
 	// Event Processing (Phase 1 additions)
-	SeverityThreshold   string `mapstructure:"severity_threshold"`
-	MaxConcurrentAgents int    `mapstructure:"max_concurrent_agents"`
-	GlobalQueueSize     int    `mapstructure:"global_queue_size"`
-	ClusterQueueSize    int    `mapstructure:"cluster_queue_size"` // default: 10
-	EventTTLSeconds     int    `mapstructure:"event_ttl_seconds"`  // default: 300
-	DedupWindowSeconds  int    `mapstructure:"dedup_window_seconds"`
-	QueueOverflowPolicy string `mapstructure:"queue_overflow_policy"`
-	ShutdownTimeout     int    `mapstructure:"shutdown_timeout"` // seconds
+	SeverityThreshold            string `mapstructure:"severity_threshold"`
+	MaxConcurrentAgents          int    `mapstructure:"max_concurrent_agents"`
+	GlobalQueueSize              int    `mapstructure:"global_queue_size"`
+	DropEventsWhileBusy          *bool  `mapstructure:"drop_events_while_busy"`            // default: true
+	ClusterFailureEventQueueSize int    `mapstructure:"cluster_failure_event_queue_size"` // default: 3
+	EventTTLSeconds              int    `mapstructure:"event_ttl_seconds"`                // default: 300
+	DedupWindowSeconds           int    `mapstructure:"dedup_window_seconds"`
+	QueueOverflowPolicy          string `mapstructure:"queue_overflow_policy"`
+	ShutdownTimeout              int    `mapstructure:"shutdown_timeout"` // seconds
 
 	// SSE/MCP Reconnection
 	SSEReconnectInitialBackoff int `mapstructure:"sse_reconnect_initial_backoff"` // seconds
@@ -527,9 +528,15 @@ func (c *Config) Validate() error {
 		return missingFieldError("global_queue_size", "GLOBAL_QUEUE_SIZE")
 	}
 
-	// Apply default for ClusterQueueSize (optional with default: 10)
-	if c.ClusterQueueSize == 0 {
-		c.ClusterQueueSize = 10
+	// Apply default for DropEventsWhileBusy (optional with default: true)
+	if c.DropEventsWhileBusy == nil {
+		defaultTrue := true
+		c.DropEventsWhileBusy = &defaultTrue
+	}
+
+	// Apply default for ClusterFailureEventQueueSize (optional with default: 3)
+	if c.ClusterFailureEventQueueSize == 0 {
+		c.ClusterFailureEventQueueSize = 3
 	}
 
 	// Apply default for EventTTLSeconds (optional with default: 300)
@@ -582,8 +589,8 @@ func (c *Config) Validate() error {
 	if c.GlobalQueueSize < 1 {
 		return fmt.Errorf("global_queue_size must be >= 1, got %d. Set via GLOBAL_QUEUE_SIZE environment variable or config file", c.GlobalQueueSize)
 	}
-	if c.ClusterQueueSize < 1 {
-		return fmt.Errorf("cluster_queue_size must be >= 1, got %d. Set via CLUSTER_QUEUE_SIZE environment variable or config file", c.ClusterQueueSize)
+	if c.ClusterFailureEventQueueSize < 1 {
+		return fmt.Errorf("cluster_failure_event_queue_size must be >= 1, got %d. Set via CLUSTER_FAILURE_EVENT_QUEUE_SIZE environment variable or config file", c.ClusterFailureEventQueueSize)
 	}
 	if c.EventTTLSeconds < 1 {
 		return fmt.Errorf("event_ttl_seconds must be >= 1, got %d. Set via EVENT_TTL_SECONDS environment variable or config file", c.EventTTLSeconds)

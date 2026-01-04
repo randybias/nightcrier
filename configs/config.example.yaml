@@ -257,11 +257,21 @@ max_concurrent_agents: 5
 # Environment variable: GLOBAL_QUEUE_SIZE
 global_queue_size: 100
 
+# Optional: Drop events while cluster is busy with active triage
+# When true (default), new fault events are dropped while an agent is investigating
+# that cluster, avoiding event buildup during long-running investigations.
+# When false, events are queued up to cluster_failure_event_queue_size.
+# Default: true
+# Environment variable: DROP_EVENTS_WHILE_BUSY
+drop_events_while_busy: true
+
 # Optional: Maximum size of per-cluster event queues
-# Each cluster gets its own queue to ensure fair processing
-# Default: 10
-# Environment variable: CLUSTER_QUEUE_SIZE
-cluster_queue_size: 10
+# Only used when drop_events_while_busy is false.
+# Each cluster gets its own queue to ensure fair processing.
+# When queue is full, oldest events are dropped to make room.
+# Default: 3
+# Environment variable: CLUSTER_FAILURE_EVENT_QUEUE_SIZE
+cluster_failure_event_queue_size: 3
 
 # Optional: Time-to-live for queued events in seconds
 # Events older than this are dropped from the queue

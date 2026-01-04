@@ -476,7 +476,8 @@ func run(cmd *cobra.Command, args []string) error {
 	eventDispatcher := dispatcher.NewDispatcher(cfg, eventHandler)
 	slog.Info("dispatcher initialized",
 		"max_concurrent_agents", cfg.MaxConcurrentAgents,
-		"cluster_queue_size", cfg.ClusterQueueSize,
+		"drop_events_while_busy", *cfg.DropEventsWhileBusy,
+		"cluster_failure_event_queue_size", cfg.ClusterFailureEventQueueSize,
 		"event_ttl_seconds", cfg.EventTTLSeconds)
 
 	// Phase 4: Start health monitoring server if enabled
@@ -930,7 +931,7 @@ func printStartupBanner(cfg *config.Config, configFile string) {
 	fmt.Println("╠═══════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║  Log Level:      %-45s ║\n", cfg.LogLevel)
 	fmt.Printf("║  Max Concurrent: %-45s ║\n", fmt.Sprintf("%d agents", cfg.MaxConcurrentAgents))
-	fmt.Printf("║  Queue Size:     %-45s ║\n", fmt.Sprintf("%d events/cluster", cfg.ClusterQueueSize))
+	fmt.Printf("║  Queue Size:     %-45s ║\n", fmt.Sprintf("%d events/cluster", cfg.ClusterFailureEventQueueSize))
 	fmt.Printf("║  Event TTL:      %-45s ║\n", fmt.Sprintf("%ds", cfg.EventTTLSeconds))
 	fmt.Printf("║  Severity:       %-45s ║\n", cfg.SeverityThreshold)
 	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")

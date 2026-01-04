@@ -18,10 +18,13 @@ import (
 
 // testConfig creates a config suitable for testing with sensible defaults.
 func testConfig(opts ...func(*config.Config)) *config.Config {
+	// Default DropEventsWhileBusy to false for tests that rely on queueing behavior
+	defaultDropEvents := false
 	cfg := &config.Config{
-		MaxConcurrentAgents: 5,
-		ClusterQueueSize:    10,
-		EventTTLSeconds:     300, // 5 minutes
+		MaxConcurrentAgents:          5,
+		ClusterFailureEventQueueSize: 10,
+		EventTTLSeconds:              300, // 5 minutes
+		DropEventsWhileBusy:          &defaultDropEvents,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -36,10 +39,10 @@ func withMaxConcurrentAgents(n int) func(*config.Config) {
 	}
 }
 
-// withClusterQueueSize sets the cluster queue size for testing.
-func withClusterQueueSize(n int) func(*config.Config) {
+// withClusterFailureEventQueueSize sets the cluster queue size for testing.
+func withClusterFailureEventQueueSize(n int) func(*config.Config) {
 	return func(cfg *config.Config) {
-		cfg.ClusterQueueSize = n
+		cfg.ClusterFailureEventQueueSize = n
 	}
 }
 
@@ -230,8 +233,8 @@ func TestNewDispatcher(t *testing.T) {
 	if d.eventTTL != time.Duration(cfg.EventTTLSeconds)*time.Second {
 		t.Errorf("expected eventTTL %v, got %v", time.Duration(cfg.EventTTLSeconds)*time.Second, d.eventTTL)
 	}
-	if d.clusterQueueSize != cfg.ClusterQueueSize {
-		t.Errorf("expected clusterQueueSize %d, got %d", cfg.ClusterQueueSize, d.clusterQueueSize)
+	if d.clusterQueueSize != cfg.ClusterFailureEventQueueSize {
+		t.Errorf("expected clusterQueueSize %d, got %d", cfg.ClusterFailureEventQueueSize, d.clusterQueueSize)
 	}
 	if d.IsClosed() {
 		t.Error("expected dispatcher to not be closed initially")
@@ -494,7 +497,7 @@ func TestDispatcher_NonBlockingDispatch(t *testing.T) {
 func TestDispatcher_NonBlockingWhenQueueFull(t *testing.T) {
 	cfg := testConfig(
 		withMaxConcurrentAgents(1),
-		withClusterQueueSize(2),
+		withClusterFailureEventQueueSize(2),
 	)
 	tracker := newHandlerTracker()
 	tracker.blockCh = make(chan struct{}) // Block the handler
@@ -634,7 +637,7 @@ func TestDispatcher_EventWithNoTimestampNotExpired(t *testing.T) {
 func TestDispatcher_QueueOverflowDropsOldest(t *testing.T) {
 	cfg := testConfig(
 		withMaxConcurrentAgents(1),
-		withClusterQueueSize(2),
+		withClusterFailureEventQueueSize(2),
 	)
 	tracker := newHandlerTracker()
 	tracker.blockCh = make(chan struct{})
@@ -693,7 +696,7 @@ func TestDispatcher_QueueOverflowDropsOldest(t *testing.T) {
 func TestDispatcher_TotalQueueDepth(t *testing.T) {
 	cfg := testConfig(
 		withMaxConcurrentAgents(2),
-		withClusterQueueSize(5),
+		withClusterFailureEventQueueSize(5),
 	)
 	tracker := newHandlerTracker()
 	tracker.blockCh = make(chan struct{})
@@ -987,7 +990,7 @@ func TestDispatcher_ShutdownTimeout(t *testing.T) {
 func TestDispatcher_ShutdownClearsQueuedEvents(t *testing.T) {
 	cfg := testConfig(
 		withMaxConcurrentAgents(1),
-		withClusterQueueSize(5),
+		withClusterFailureEventQueueSize(5),
 	)
 	tracker := newHandlerTracker()
 	tracker.blockCh = make(chan struct{})
@@ -1110,7 +1113,7 @@ func TestDispatcher_RaceConditions(t *testing.T) {
 	// This test is designed to catch race conditions when run with -race flag
 	cfg := testConfig(
 		withMaxConcurrentAgents(5),
-		withClusterQueueSize(10),
+		withClusterFailureEventQueueSize(10),
 	)
 
 	var processCount atomic.Int64
@@ -1247,5 +1250,140 @@ func TestDispatcher_ContextCancellation(t *testing.T) {
 	// Clean shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
+	d.Shutdown(shutdownCtx)
+}
+
+// -----------------------------------------------------------------------------
+// Test: DropEventsWhileBusy behavior
+// -----------------------------------------------------------------------------
+
+// withDropEventsWhileBusy sets the drop_events_while_busy flag for testing.
+func withDropEventsWhileBusy(drop bool) func(*config.Config) {
+	return func(cfg *config.Config) {
+		cfg.DropEventsWhileBusy = &drop
+	}
+}
+
+func TestDispatcher_DropEventsWhileBusyEnabled(t *testing.T) {
+	cfg := testConfig(
+		withMaxConcurrentAgents(1),
+		withDropEventsWhileBusy(true),
+	)
+	tracker := newHandlerTracker()
+	tracker.blockCh = make(chan struct{}) // Block the handler
+
+	d := NewDispatcher(cfg, tracker.handler)
+	ctx := context.Background()
+
+	// Dispatch first event (will start processing, blocks)
+	d.Dispatch(ctx, testEvent("fault-1"), "cluster")
+	tracker.waitForNStarts(t, 1, time.Second)
+
+	// With drop_events_while_busy=true, subsequent events should be dropped
+	d.Dispatch(ctx, testEvent("fault-2"), "cluster")
+	d.Dispatch(ctx, testEvent("fault-3"), "cluster")
+
+	// Queue should be empty (events dropped, not queued)
+	if d.QueueDepth("cluster") != 0 {
+		t.Errorf("expected queue depth 0 (events should be dropped), got %d", d.QueueDepth("cluster"))
+	}
+
+	// Release handler
+	close(tracker.blockCh)
+	tracker.waitForNCompletions(t, 1, 2*time.Second)
+
+	// Verify only the first event was processed
+	processed := tracker.getProcessed()
+	if len(processed) != 1 || processed[0] != "fault-1" {
+		t.Errorf("expected only fault-1 to be processed, got %v", processed)
+	}
+
+	// Clean shutdown
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	d.Shutdown(shutdownCtx)
+}
+
+func TestDispatcher_DropEventsWhileBusyDisabled(t *testing.T) {
+	cfg := testConfig(
+		withMaxConcurrentAgents(1),
+		withDropEventsWhileBusy(false),
+		withClusterFailureEventQueueSize(5),
+	)
+	tracker := newHandlerTracker()
+	tracker.blockCh = make(chan struct{}) // Block the handler
+
+	d := NewDispatcher(cfg, tracker.handler)
+	ctx := context.Background()
+
+	// Dispatch first event (will start processing, blocks)
+	d.Dispatch(ctx, testEvent("fault-1"), "cluster")
+	tracker.waitForNStarts(t, 1, time.Second)
+
+	// With drop_events_while_busy=false, events should be queued
+	d.Dispatch(ctx, testEvent("fault-2"), "cluster")
+	d.Dispatch(ctx, testEvent("fault-3"), "cluster")
+
+	// Queue should have events
+	if d.QueueDepth("cluster") != 2 {
+		t.Errorf("expected queue depth 2, got %d", d.QueueDepth("cluster"))
+	}
+
+	// Release handler
+	close(tracker.blockCh)
+	tracker.waitForNCompletions(t, 3, 5*time.Second)
+
+	// Verify all events were processed in order
+	processed := tracker.getProcessed()
+	expected := []string{"fault-1", "fault-2", "fault-3"}
+	if len(processed) != len(expected) {
+		t.Fatalf("expected %d processed, got %d: %v", len(expected), len(processed), processed)
+	}
+	for i, exp := range expected {
+		if processed[i] != exp {
+			t.Errorf("position %d: expected %q, got %q", i, exp, processed[i])
+		}
+	}
+
+	// Clean shutdown
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	d.Shutdown(shutdownCtx)
+}
+
+func TestDispatcher_DropEventsWhileBusyDefaultTrue(t *testing.T) {
+	// When DropEventsWhileBusy is nil, it should default to true
+	cfg := &config.Config{
+		MaxConcurrentAgents:          1,
+		ClusterFailureEventQueueSize: 10,
+		EventTTLSeconds:              300,
+		DropEventsWhileBusy:          nil, // Not set - should default to true
+	}
+
+	tracker := newHandlerTracker()
+	tracker.blockCh = make(chan struct{})
+
+	d := NewDispatcher(cfg, tracker.handler)
+	ctx := context.Background()
+
+	// Dispatch first event (will start processing, blocks)
+	d.Dispatch(ctx, testEvent("fault-1"), "cluster")
+	tracker.waitForNStarts(t, 1, time.Second)
+
+	// With default (nil -> true), events should be dropped
+	d.Dispatch(ctx, testEvent("fault-2"), "cluster")
+
+	// Queue should be empty
+	if d.QueueDepth("cluster") != 0 {
+		t.Errorf("expected queue depth 0 with default drop behavior, got %d", d.QueueDepth("cluster"))
+	}
+
+	// Release handler
+	close(tracker.blockCh)
+	tracker.waitForNCompletions(t, 1, 2*time.Second)
+
+	// Clean shutdown
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	d.Shutdown(shutdownCtx)
 }

@@ -16,27 +16,27 @@ See proposal.md "Implementation Note" section for details.
 - [x] Update config.example.yaml with improved dedup documentation
 - [x] All existing dispatcher tests pass
 
-## Implementation Tasks (drop_events_while_busy - NOT YET STARTED)
+## Implementation Tasks ✅ COMPLETE
 
-- [ ] Add `DropEventsWhileBusy` field to config struct (bool, default true)
-- [ ] Rename `ClusterQueueSize` to `ClusterFailureEventQueueSize` in config struct
-- [ ] Update config field tags (mapstructure, env var names)
-- [ ] Change default queue size from 10 to 3
-- [ ] Update config validation (if any)
-- [ ] Add `droppedCount` field to ClusterState for observability
-- [ ] Update Dispatcher to check `DropEventsWhileBusy` flag in Dispatch()
-- [ ] Add INFO log when dropping event due to active triage
-- [ ] Update config.example.yaml with new field names and defaults
-- [ ] Update any other example configs (codex, gemini, claude, goose)
+- [x] Add `DropEventsWhileBusy` field to config struct (bool pointer, default true)
+- [x] Rename `ClusterQueueSize` to `ClusterFailureEventQueueSize` in config struct
+- [x] Update config field tags (mapstructure, env var names)
+- [x] Change default queue size from 10 to 3
+- [x] Update config validation (if any)
+- [x] Add `droppedCount` field to ClusterState for observability
+- [x] Update Dispatcher to check `DropEventsWhileBusy` flag in Dispatch()
+- [x] Add INFO log when dropping event due to active triage
+- [x] Update config.example.yaml with new field names and defaults
 
-## Test Tasks
+## Test Tasks ✅ COMPLETE
 
-- [ ] Add unit test: events dropped when busy and flag is true
-- [ ] Add unit test: events queued when busy and flag is false
-- [ ] Add unit test: dropped count tracked correctly
-- [ ] Update existing queue tests to use renamed config field
-- [ ] Verify config parsing with new field names
+- [x] Add unit test: events dropped when busy and flag is true (TestDispatcher_DropEventsWhileBusyEnabled)
+- [x] Add unit test: events queued when busy and flag is false (TestDispatcher_DropEventsWhileBusyDisabled)
+- [x] Add unit test: default behavior when flag is nil (TestDispatcher_DropEventsWhileBusyDefaultTrue)
+- [x] Update existing queue tests to use renamed config field
+- [x] Verify config parsing with new field names
+- [x] All dispatcher tests pass
 
 ## Documentation Tasks
 
-- [ ] Update docs/configuration.md with new options
+- [ ] Update docs/configuration.md with new options (if file exists)
