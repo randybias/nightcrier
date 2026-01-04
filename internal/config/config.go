@@ -289,10 +289,6 @@ type Config struct {
 	OpenAIAPIKey    string `mapstructure:"openai_api_key"`
 	GeminiAPIKey    string `mapstructure:"gemini_api_key"`
 
-	// Kubernetes Configuration (deprecated - use ExecutionClusters instead)
-	KubeconfigPath    string `mapstructure:"kubeconfig_path"`
-	KubernetesContext string `mapstructure:"kubernetes_context"`
-
 	// NATS Configuration (optional progress tracking)
 	NATS NATSConfig `mapstructure:"nats"`
 
@@ -441,8 +437,6 @@ func bindEnvVars() {
 		"anthropic_api_key":        "ANTHROPIC_API_KEY",
 		"openai_api_key":           "OPENAI_API_KEY",
 		"gemini_api_key":           "GEMINI_API_KEY",
-		"kubeconfig_path":          "KUBECONFIG_PATH",
-		"kubernetes_context":       "KUBERNETES_CONTEXT",
 		// Execution defaults configuration (nested)
 		"execution_defaults.namespace":            "EXECUTION_DEFAULTS_NAMESPACE",
 		"execution_defaults.runner_image":         "EXECUTION_DEFAULTS_RUNNER_IMAGE",

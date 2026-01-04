@@ -30,14 +30,16 @@ The following parameters **must** be provided. The application will fail fast on
 - `AGENT_CLI` - AI CLI tool to use: `claude`, `codex`, `goose`, or `gemini`
 - At least one LLM API key: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`
 
-### K8s Executor Configuration
-- `K8S_NAMESPACE` - Namespace for Jobs and ConfigMaps (default: `nightcrier`)
-- `K8S_IMAGE` - Container image for agent Jobs (e.g., `nc-agent-runner:latest`)
-- `K8S_TIMEOUT` - Job timeout in seconds (default: `600`)
-- `K8S_MEMORY_LIMIT` - Container memory limit (default: `2Gi`)
-- `K8S_CPU_LIMIT` - Container CPU limit (default: `1`)
-- `KUBECONFIG_PATH` - Path to kubeconfig for executor cluster access
-- `KUBERNETES_CONTEXT` - Kubernetes context to use for executor
+### Execution Cluster Configuration
+At least one `execution_clusters[]` entry must be configured in the YAML config file.
+The first execution cluster's kubeconfig is used for bootstrap and Job execution.
+
+Default values can be set via `execution_defaults`:
+- `EXECUTION_DEFAULTS_NAMESPACE` - Namespace for Jobs and ConfigMaps (default: `nightcrier`)
+- `EXECUTION_DEFAULTS_RUNNER_IMAGE` - Container image for agent Jobs (default: `nc-agent-runner:latest`)
+- `EXECUTION_DEFAULTS_TIMEOUT` - Job timeout in seconds (default: `600`)
+- `EXECUTION_DEFAULTS_MEMORY_LIMIT` - Container memory limit (default: `2Gi`)
+- `EXECUTION_DEFAULTS_CPU_LIMIT` - Container CPU limit (default: `1`)
 
 ### Event Processing and Concurrency
 - `MAX_CONCURRENT_AGENTS` - Maximum number of concurrent agent executions globally (default: `10`)

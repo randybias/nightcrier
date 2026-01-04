@@ -150,11 +150,11 @@ agent:
 # gemini_api_key: "..."
 
 # =============================================================================
-# Kubernetes Bootstrap Configuration (FALLBACK - usually not needed)
+# Execution Defaults (Kubernetes-native agent execution)
 # =============================================================================
 # BOOTSTRAP BEHAVIOR:
-# On startup, Nightcrier automatically provisions required Kubernetes resources
-# if they don't already exist:
+# On startup, Nightcrier uses the FIRST execution cluster's kubeconfig to
+# automatically provision required Kubernetes resources if they don't exist:
 #   - Namespace (from execution_defaults.namespace)
 #   - ServiceAccount, Role, RoleBinding (for agent execution)
 #   - ai-api-keys Secret (from API keys above)
@@ -163,16 +163,8 @@ agent:
 # Bootstrap operations are IDEMPOTENT - existing resources are never modified.
 # If resources already exist (manually created or from previous runs), they are skipped.
 #
-# KUBECONFIG PRECEDENCE:
-# When execution_clusters[] is defined (recommended), the FIRST execution cluster's
-# kubeconfig_path is used for both bootstrap and Job execution. The settings below
-# are only used as FALLBACK when no execution_clusters are configured.
-#
-# - execution_clusters[0].kubeconfig_path (PRIMARY - use this)
-# - kubeconfig_path below (FALLBACK - deprecated, only if no execution_clusters)
-#
 # KUBECONFIG TYPES:
-# - Execution cluster kubeconfig: Admin access for bootstrap + Job execution
+# - execution_clusters[].kubeconfig_path: Admin access for bootstrap + Job execution
 #   Requires elevated permissions (create namespaces, RBAC, Secrets, Jobs)
 #
 # - triage.target_kubeconfig_path (per monitored cluster): Read-only for AI agents
@@ -180,17 +172,6 @@ agent:
 #   Stored in triage-kubeconfig-{cluster-name} Secrets
 #   Should have limited, read-only permissions
 #
-# FALLBACK: Path to kubeconfig file (only used if execution_clusters is empty)
-# Environment variable: KUBECONFIG_PATH
-# kubeconfig_path: "~/.kube/config"
-
-# FALLBACK: Kubernetes context to use (only used if execution_clusters is empty)
-# Environment variable: KUBERNETES_CONTEXT
-# kubernetes_context: "my-cluster"
-
-# =============================================================================
-# Execution Defaults (Kubernetes-native agent execution)
-# =============================================================================
 # Default settings for execution clusters. These values are used when
 # execution_clusters is empty or when a cluster doesn't override them.
 execution_defaults:

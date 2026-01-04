@@ -202,23 +202,20 @@ func run(cmd *cobra.Command, args []string) error {
 		"url", cfg.ObjectStorage.URL,
 		"signed_url_expiry", expiry)
 
-	// Initialize K8s client for executor (using first execution cluster or defaults)
-	var execKubeconfig string
-	if len(cfg.ExecutionClusters) > 0 {
-		execKubeconfig = cfg.ExecutionClusters[0].KubeconfigPath
-	} else {
-		execKubeconfig = cfg.KubeconfigPath // Fallback to deprecated field
+	// Initialize K8s client for executor (requires at least one execution cluster)
+	if len(cfg.ExecutionClusters) == 0 {
+		return fmt.Errorf("at least one execution_cluster must be configured for agent Job execution")
 	}
+	execCluster := cfg.ExecutionClusters[0]
 	k8sClient, err := k8s.NewClient(k8s.ClientConfig{
-		Kubeconfig: execKubeconfig,
-		Context:    cfg.KubernetesContext,
+		Kubeconfig: execCluster.KubeconfigPath,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create K8s client: %w", err)
 	}
 	slog.Info("K8s client initialized",
-		"kubeconfig", execKubeconfig,
-		"context", cfg.KubernetesContext,
+		"kubeconfig", execCluster.KubeconfigPath,
+		"context", "",
 		"namespace", cfg.ExecutionDefaults.Namespace)
 
 	// Bootstrap Kubernetes resources (namespace, RBAC, secrets)
