@@ -150,36 +150,41 @@ agent:
 # gemini_api_key: "..."
 
 # =============================================================================
-# Kubernetes Configuration
+# Kubernetes Bootstrap Configuration (FALLBACK - usually not needed)
 # =============================================================================
 # BOOTSTRAP BEHAVIOR:
 # On startup, Nightcrier automatically provisions required Kubernetes resources
 # if they don't already exist:
 #   - Namespace (from execution_defaults.namespace)
 #   - ServiceAccount, Role, RoleBinding (for agent execution)
-#   - ai-api-keys Secret (from API keys below)
+#   - ai-api-keys Secret (from API keys above)
 #   - triage-kubeconfig-{cluster} Secrets (from triage.target_kubeconfig_path paths)
 #
 # Bootstrap operations are IDEMPOTENT - existing resources are never modified.
 # If resources already exist (manually created or from previous runs), they are skipped.
 #
-# KUBECONFIG DISTINCTION:
-# - kubeconfig_path: Admin kubeconfig for Nightcrier to connect and bootstrap resources
-#   Requires elevated permissions (create namespaces, RBAC, Secrets)
-#   Sourced from: KUBECONFIG env var > kubeconfig_path config > ~/.kube/config
+# KUBECONFIG PRECEDENCE:
+# When execution_clusters[] is defined (recommended), the FIRST execution cluster's
+# kubeconfig_path is used for both bootstrap and Job execution. The settings below
+# are only used as FALLBACK when no execution_clusters are configured.
 #
-# - triage.target_kubeconfig_path (per cluster): Read-only kubeconfig for AI agents
-#   Used by agents running in Jobs to investigate incidents
-#   Stored in triage-kubeconfig-{cluster-name} Secrets for agent access
+# - execution_clusters[0].kubeconfig_path (PRIMARY - use this)
+# - kubeconfig_path below (FALLBACK - deprecated, only if no execution_clusters)
+#
+# KUBECONFIG TYPES:
+# - Execution cluster kubeconfig: Admin access for bootstrap + Job execution
+#   Requires elevated permissions (create namespaces, RBAC, Secrets, Jobs)
+#
+# - triage.target_kubeconfig_path (per monitored cluster): Read-only for AI agents
+#   Used by agents to investigate incidents on the TARGET cluster
+#   Stored in triage-kubeconfig-{cluster-name} Secrets
 #   Should have limited, read-only permissions
 #
-# These are typically DIFFERENT files with different permission levels.
-#
-# Path to kubeconfig file for bootstrap connection
+# FALLBACK: Path to kubeconfig file (only used if execution_clusters is empty)
 # Environment variable: KUBECONFIG_PATH
 # kubeconfig_path: "~/.kube/config"
 
-# Kubernetes context to use (default: current context)
+# FALLBACK: Kubernetes context to use (only used if execution_clusters is empty)
 # Environment variable: KUBERNETES_CONTEXT
 # kubernetes_context: "my-cluster"
 
