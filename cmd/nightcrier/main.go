@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,10 +11,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/randybias/nightcrier/internal/adminui"
 	"github.com/randybias/nightcrier/internal/agent"
 	"github.com/randybias/nightcrier/internal/agent/k8s"
 	"github.com/randybias/nightcrier/internal/bootstrap"
@@ -52,6 +55,7 @@ var (
 	logLevel      string
 	agentTimeout  int
 	healthPort    int
+	adminListen   string
 )
 
 func main() {
@@ -84,6 +88,9 @@ func init() {
 
 	// Health monitoring flags
 	rootCmd.Flags().IntVar(&healthPort, "health-port", 8080, "Port for health monitoring HTTP endpoint (0 to disable)")
+
+	// Admin UI flags
+	rootCmd.Flags().StringVar(&adminListen, "admin-listen", "", "Address for admin UI server (e.g., 127.0.0.1:8847)")
 
 	// Test mode flags
 	rootCmd.Flags().Bool("single-run", false, "Process one fault event then exit (for test harnesses)")
@@ -581,6 +588,43 @@ func run(cmd *cobra.Command, args []string) error {
 		slog.Info("health monitoring server disabled", "reason", "health-port=0")
 	}
 
+	// Start admin UI server if enabled
+	if adminListen != "" && stateStore != nil {
+		// Get the underlying sql.DB from the state store
+		var adminDB *sql.DB
+		switch s := stateStore.(type) {
+		case *sqlite.Store:
+			adminDB = s.DB()
+		case *postgres.Store:
+			adminDB = s.DB()
+		}
+
+		if adminDB != nil {
+			adminCfg := adminui.Config{
+				DB:           adminDB,
+				ListenAddr:   adminListen,
+				ObjectSigner: objectStore,
+			}
+			adminServer, err := adminui.NewServer(adminCfg)
+			if err != nil {
+				slog.Error("failed to create admin UI server", "error", err)
+			} else {
+				go func() {
+					slog.Info("starting admin UI server",
+						"addr", adminListen,
+						"endpoint", fmt.Sprintf("http://%s/admin", adminListen))
+					if err := adminServer.Start(); err != nil && err != http.ErrServerClosed {
+						slog.Error("admin UI server failed", "error", err)
+					}
+				}()
+			}
+		} else {
+			slog.Warn("admin UI disabled: could not get database connection from state store")
+		}
+	} else if adminListen != "" {
+		slog.Warn("admin UI disabled: requires SQL state storage (sqlite or postgres)")
+	}
+
 	// Start the ConnectionManager and get event channel
 	eventChan := connectionMgr.Start(ctx)
 	defer connectionMgr.Stop()
@@ -1033,4 +1077,49 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// buildObjectBaseURL constructs the base URL for accessing artifacts in object storage.
+// For Azure Blob Storage: https://<account>.blob.core.windows.net/<container>
+// For S3: https://<bucket>.s3.<region>.amazonaws.com (or custom endpoint)
+func buildObjectBaseURL(cfg *config.Config) string {
+	storageURL := cfg.ObjectStorage.URL
+	if storageURL == "" {
+		return ""
+	}
+
+	// Azure Blob Storage: azblob://container-name
+	if strings.HasPrefix(storageURL, "azblob://") {
+		container := strings.TrimPrefix(storageURL, "azblob://")
+		account := cfg.ObjectStorage.AzureStorageAccount
+		if account != "" {
+			return fmt.Sprintf("https://%s.blob.core.windows.net/%s", account, container)
+		}
+	}
+
+	// S3: s3://bucket-name?region=us-east-1&endpoint=...
+	if strings.HasPrefix(storageURL, "s3://") {
+		// Parse the URL to extract bucket and endpoint
+		parsed, err := url.Parse(storageURL)
+		if err != nil {
+			return ""
+		}
+		bucket := parsed.Host
+
+		// Check for custom endpoint (e.g., MinIO, RustFS)
+		endpoint := parsed.Query().Get("endpoint")
+		if endpoint != "" {
+			// Custom endpoint: http://endpoint/bucket
+			return fmt.Sprintf("%s/%s", strings.TrimSuffix(endpoint, "/"), bucket)
+		}
+
+		// Standard S3
+		region := parsed.Query().Get("region")
+		if region == "" {
+			region = "us-east-1"
+		}
+		return fmt.Sprintf("https://%s.s3.%s.amazonaws.com", bucket, region)
+	}
+
+	return ""
 }

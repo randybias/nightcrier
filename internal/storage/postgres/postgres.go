@@ -43,6 +43,12 @@ type Store struct {
 	db *sql.DB
 }
 
+// DB returns the underlying sql.DB connection.
+// This is exposed for use by components like the admin UI that need direct database access.
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
 // New creates a new PostgreSQL StateStore with the provided configuration.
 // It establishes a connection pool and validates connectivity.
 //
