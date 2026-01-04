@@ -188,7 +188,3 @@ The system SHALL manage cluster connection lifecycle during configuration reload
 - **THEN** the old connection SHALL be closed
 - **AND** a new connection to "http://new:8080" SHALL be established
 
-## RENAMED Requirements
-
-- FROM: `### Requirement: Multi-Cluster Configuration` scenario "Clusters defined in configuration file"
-- TO: `### Requirement: Multi-Cluster Configuration` scenario "Monitored clusters defined in configuration file"
