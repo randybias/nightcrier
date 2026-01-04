@@ -600,10 +600,24 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 
 		if adminDB != nil {
+			// Build cluster info for admin UI display
+			clusterInfos := make([]adminui.ClusterInfo, len(cfg.MonitoredClusters))
+			for i, c := range cfg.MonitoredClusters {
+				clusterInfos[i] = adminui.ClusterInfo{
+					Name:          c.Name,
+					Environment:   c.Environment,
+					MCPEndpoint:   c.MCP.Endpoint,
+					TriageEnabled: c.Triage.Enabled,
+				}
+			}
+
 			adminCfg := adminui.Config{
 				DB:           adminDB,
 				ListenAddr:   adminListen,
 				ObjectSigner: objectStore,
+				JobCanceller: k8sClient,
+				Namespace:    cfg.ExecutionDefaults.Namespace,
+				Clusters:     clusterInfos,
 			}
 			adminServer, err := adminui.NewServer(adminCfg)
 			if err != nil {

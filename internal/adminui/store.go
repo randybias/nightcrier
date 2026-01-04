@@ -4,6 +4,7 @@ package adminui
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 )
 
@@ -256,4 +257,109 @@ func (s *Store) getLatestExecution(ctx context.Context, incidentID string) (*exe
 	}
 
 	return &exec, nil
+}
+
+// DeleteIncident removes an incident and all associated data from the database.
+// This deletes: triage_reports, agent_executions, and the incident itself.
+// Faults are NOT deleted (they may be shared across incidents).
+func (s *Store) DeleteIncident(ctx context.Context, incidentID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete triage_reports first (depends on both incidents and agent_executions)
+	_, err = tx.ExecContext(ctx, `DELETE FROM triage_reports WHERE incident_id = $1`, incidentID)
+	if err != nil {
+		return fmt.Errorf("failed to delete triage reports: %w", err)
+	}
+
+	// Delete agent_executions (depends on incidents)
+	_, err = tx.ExecContext(ctx, `DELETE FROM agent_executions WHERE incident_id = $1`, incidentID)
+	if err != nil {
+		return fmt.Errorf("failed to delete agent executions: %w", err)
+	}
+
+	// Delete the incident
+	result, err := tx.ExecContext(ctx, `DELETE FROM incidents WHERE incident_id = $1`, incidentID)
+	if err != nil {
+		return fmt.Errorf("failed to delete incident: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("incident not found: %s", incidentID)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// GetRunningTriageByExecutionID returns a running triage by its execution ID.
+func (s *Store) GetRunningTriageByExecutionID(ctx context.Context, executionID string) (*RunningTriage, error) {
+	query := `
+		SELECT
+			ae.execution_id,
+			ae.incident_id,
+			i.cluster,
+			COALESCE(i.namespace, '') as namespace,
+			i.fault_type,
+			ae.job_started_at,
+			ae.run_started_at,
+			ae.run_completed_at,
+			COALESCE(ae.current_activity, '') as current_activity,
+			ae.current_activity_started_at
+		FROM agent_executions ae
+		JOIN incidents i ON ae.incident_id = i.incident_id
+		WHERE ae.execution_id = $1 AND ae.job_completed_at IS NULL
+	`
+
+	var t RunningTriage
+	err := s.db.QueryRowContext(ctx, query, executionID).Scan(
+		&t.ExecutionID,
+		&t.IncidentID,
+		&t.Cluster,
+		&t.Namespace,
+		&t.FaultType,
+		&t.JobStartedAt,
+		&t.RunStartedAt,
+		&t.RunCompletedAt,
+		&t.CurrentActivity,
+		&t.CurrentActivityStartedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &t, nil
+}
+
+// CancelExecution marks an execution as cancelled by setting job_completed_at and error_message.
+func (s *Store) CancelExecution(ctx context.Context, executionID string) error {
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE agent_executions
+		SET job_completed_at = $1, error_message = 'cancelled by user'
+		WHERE execution_id = $2 AND job_completed_at IS NULL
+	`, now, executionID)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("execution not found or already completed: %s", executionID)
+	}
+
+	return nil
 }

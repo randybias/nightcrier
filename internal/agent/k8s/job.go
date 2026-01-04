@@ -402,6 +402,19 @@ func (c *Client) CreateJob(ctx context.Context, cfg JobConfig) (string, error) {
 	return createdJob.Name, nil
 }
 
+// CancelJob deletes a Kubernetes Job by name in the given namespace.
+// It uses the DeletePropagationBackground policy to also clean up pods.
+func (c *Client) CancelJob(ctx context.Context, namespace, jobName string) error {
+	propagation := metav1.DeletePropagationBackground
+	err := c.clientset.BatchV1().Jobs(namespace).Delete(ctx, jobName, metav1.DeleteOptions{
+		PropagationPolicy: &propagation,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete Job %s in namespace %s: %w", jobName, namespace, err)
+	}
+	return nil
+}
+
 // boolPtr returns a pointer to a bool value.
 func boolPtr(b bool) *bool {
 	return &b

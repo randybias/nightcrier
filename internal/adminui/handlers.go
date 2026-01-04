@@ -27,11 +27,27 @@ type ObjectSigner interface {
 	SignedURL(ctx context.Context, key string) (string, time.Time, error)
 }
 
+// JobCanceller can cancel running K8s jobs.
+type JobCanceller interface {
+	CancelJob(ctx context.Context, namespace, jobName string) error
+}
+
+// ClusterInfo holds display information about a monitored cluster.
+type ClusterInfo struct {
+	Name          string
+	Environment   string
+	MCPEndpoint   string
+	TriageEnabled bool
+}
+
 // Server serves the admin UI.
 type Server struct {
 	store        *Store
 	tmpl         *template.Template
 	objectSigner ObjectSigner
+	jobCanceller JobCanceller
+	namespace    string
+	clusters     []ClusterInfo
 	server       *http.Server
 }
 
@@ -43,6 +59,12 @@ type Config struct {
 	ListenAddr string
 	// ObjectSigner generates signed URLs for artifacts (optional)
 	ObjectSigner ObjectSigner
+	// JobCanceller cancels running K8s jobs (optional, required for cancel action)
+	JobCanceller JobCanceller
+	// Namespace is the K8s namespace where triage jobs run (required for cancel action)
+	Namespace string
+	// Clusters is the list of monitored clusters to display
+	Clusters []ClusterInfo
 }
 
 // NewServer creates a new admin UI server.
@@ -100,6 +122,9 @@ func NewServer(cfg Config) (*Server, error) {
 		store:        store,
 		tmpl:         tmpl,
 		objectSigner: cfg.ObjectSigner,
+		jobCanceller: cfg.JobCanceller,
+		namespace:    cfg.Namespace,
+		clusters:     cfg.Clusters,
 		server: &http.Server{
 			Addr:         cfg.ListenAddr,
 			Handler:      mux,
@@ -111,6 +136,8 @@ func NewServer(cfg Config) (*Server, error) {
 	// Register routes
 	mux.HandleFunc("/admin", s.handleAdmin)
 	mux.HandleFunc("/admin/logo", s.handleLogo)
+	mux.HandleFunc("/admin/incidents/", s.handleDeleteIncident)
+	mux.HandleFunc("/admin/triages/", s.handleCancelTriage)
 	mux.HandleFunc("/", s.handleRedirect)
 
 	return s, nil
@@ -147,6 +174,7 @@ type incidentView struct {
 
 // adminData holds data for the admin template.
 type adminData struct {
+	Clusters       []ClusterInfo
 	RunningTriages []RunningTriage
 	Incidents      []incidentView
 	RefreshTime    time.Time
@@ -188,6 +216,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := adminData{
+		Clusters:       s.clusters,
 		RunningTriages: triages,
 		Incidents:      incidentViews,
 		RefreshTime:    time.Now(),
@@ -199,4 +228,74 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to render page", http.StatusInternalServerError)
 		return
 	}
+}
+
+// handleDeleteIncident handles POST /admin/incidents/{id}/delete
+func (s *Server) handleDeleteIncident(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract incident ID from path: /admin/incidents/{id}/delete
+	path := strings.TrimPrefix(r.URL.Path, "/admin/incidents/")
+	incidentID := strings.TrimSuffix(path, "/delete")
+	if incidentID == "" || incidentID == path {
+		http.Error(w, "Invalid incident ID", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	if err := s.store.DeleteIncident(ctx, incidentID); err != nil {
+		slog.Error("failed to delete incident", "incident_id", incidentID, "error", err)
+		http.Error(w, "Failed to delete incident", http.StatusInternalServerError)
+		return
+	}
+
+	slog.Info("incident deleted", "incident_id", incidentID)
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+// handleCancelTriage handles POST /admin/triages/{id}/cancel
+func (s *Server) handleCancelTriage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract execution ID from path: /admin/triages/{id}/cancel
+	path := strings.TrimPrefix(r.URL.Path, "/admin/triages/")
+	executionID := strings.TrimSuffix(path, "/cancel")
+	if executionID == "" || executionID == path {
+		http.Error(w, "Invalid execution ID", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Cancel the K8s job if canceller is available
+	if s.jobCanceller != nil {
+		// Look up the running triage to get the incident ID for the job name
+		triage, err := s.store.GetRunningTriageByExecutionID(ctx, executionID)
+		if err != nil {
+			slog.Warn("failed to look up triage for cancellation", "execution_id", executionID, "error", err)
+		} else if triage != nil {
+			// Job name is triage-{incidentID}
+			jobName := fmt.Sprintf("triage-%s", triage.IncidentID)
+			if err := s.jobCanceller.CancelJob(ctx, s.namespace, jobName); err != nil {
+				slog.Warn("failed to cancel K8s job", "execution_id", executionID, "job_name", jobName, "error", err)
+				// Continue to mark as cancelled even if job deletion fails
+			}
+		}
+	}
+
+	// Mark execution as cancelled in database
+	if err := s.store.CancelExecution(ctx, executionID); err != nil {
+		slog.Error("failed to cancel execution", "execution_id", executionID, "error", err)
+		http.Error(w, "Failed to cancel execution", http.StatusInternalServerError)
+		return
+	}
+
+	slog.Info("triage cancelled", "execution_id", executionID)
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }

@@ -148,6 +148,23 @@
         .btn:hover {
             background: #e94560;
         }
+        .btn-danger {
+            background: #7f1d1d;
+        }
+        .btn-danger:hover {
+            background: #ef4444;
+        }
+        .btn-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .cluster-pane {
+            flex: 0 0 auto;
+            max-height: 20vh;
+            overflow-y: auto;
+        }
+        .triage-enabled { color: #22c55e; }
+        .triage-disabled { color: #666; }
         .empty-state {
             padding: 2rem;
             text-align: center;
@@ -197,6 +214,24 @@
                 setTimeout(() => el.classList.remove('copied'), 1000);
             });
         }
+        function confirmDelete(incidentId) {
+            if (confirm('Delete incident ' + incidentId + '? This cannot be undone.')) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/admin/incidents/' + incidentId + '/delete';
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
+        function confirmCancel(executionId) {
+            if (confirm('Cancel this triage run? The K8s job will be killed.')) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/admin/triages/' + executionId + '/cancel';
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
     </script>
 </head>
 <body>
@@ -208,6 +243,39 @@
         <span class="refresh-info">Last refresh: {{formatTime .RefreshTime}} (auto-refresh every 5s)</span>
     </header>
     <main>
+        <div class="pane cluster-pane">
+            <div class="pane-header">
+                <span>Monitored Clusters</span>
+                <span class="count">{{len .Clusters}}</span>
+            </div>
+            <div class="pane-content">
+                {{if .Clusters}}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Environment</th>
+                            <th>MCP Endpoint</th>
+                            <th>Triage</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Clusters}}
+                        <tr>
+                            <td>{{.Name}}</td>
+                            <td>{{if .Environment}}{{.Environment}}{{else}}-{{end}}</td>
+                            <td class="mono">{{.MCPEndpoint}}</td>
+                            <td class="{{if .TriageEnabled}}triage-enabled{{else}}triage-disabled{{end}}">{{if .TriageEnabled}}enabled{{else}}disabled{{end}}</td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+                {{else}}
+                <div class="empty-state">No clusters configured</div>
+                {{end}}
+            </div>
+        </div>
+
         <div class="pane top-pane">
             <div class="pane-header">
                 <span>Running Triages</span>
@@ -224,6 +292,7 @@
                             <th>Fault Type</th>
                             <th>Age</th>
                             <th>Activity</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -237,6 +306,9 @@
                             <td>{{.FaultType}}</td>
                             <td>{{formatDuration .Age}}</td>
                             <td class="activity" title="{{.CurrentActivity}}">{{if .CurrentActivity}}{{.CurrentActivity}}{{else}}-{{end}}</td>
+                            <td>
+                                <button class="btn btn-danger" onclick="confirmCancel('{{.ExecutionID}}')">Cancel</button>
+                            </td>
                         </tr>
                         {{end}}
                     </tbody>
@@ -280,11 +352,14 @@
                             <td>{{.Severity}}</td>
                             <td class="status-{{.Status}}">{{.Status}}</td>
                             <td>
-                                {{if .ViewURL}}
-                                <a href="{{.ViewURL}}" target="_blank" class="btn">View</a>
-                                {{else}}
-                                <span class="btn" style="opacity: 0.5; cursor: not-allowed;">View</span>
-                                {{end}}
+                                <div class="btn-group">
+                                    {{if and .ViewURL (ne .Status "investigating") (ne .Status "pending")}}
+                                    <a href="{{.ViewURL}}" target="_blank" class="btn">View</a>
+                                    {{else}}
+                                    <span class="btn" style="opacity: 0.5; cursor: not-allowed;">View</span>
+                                    {{end}}
+                                    <button class="btn btn-danger" onclick="confirmDelete('{{.IncidentID}}')">Delete</button>
+                                </div>
                             </td>
                         </tr>
                         {{end}}
