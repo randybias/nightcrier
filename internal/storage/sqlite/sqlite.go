@@ -24,6 +24,12 @@ type Store struct {
 	db *sql.DB
 }
 
+// DB returns the underlying sql.DB connection.
+// This is exposed for use by components like the admin UI that need direct database access.
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
 // Config holds configuration options for the SQLite store.
 type Config struct {
 	// Path is the filesystem path to the SQLite database file.

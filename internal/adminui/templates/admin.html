@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="5">
+    <title>Nightcrier Admin</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background: #16213e;
+            padding: 1rem 2rem;
+            border-bottom: 1px solid #0f3460;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        header .brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        header .logo {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            object-fit: cover;
+        }
+        header h1 {
+            font-size: 1.5rem;
+            color: #e94560;
+        }
+        header .refresh-info {
+            font-size: 0.85rem;
+            color: #888;
+        }
+        main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 1rem;
+            gap: 1rem;
+        }
+        .pane {
+            background: #16213e;
+            border-radius: 8px;
+            border: 1px solid #0f3460;
+            overflow: hidden;
+        }
+        .pane-header {
+            background: #0f3460;
+            padding: 0.75rem 1rem;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .pane-header .count {
+            background: #e94560;
+            color: white;
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.85rem;
+        }
+        .pane-content {
+            overflow-x: auto;
+        }
+        .top-pane {
+            flex: 0 0 auto;
+            max-height: 35vh;
+            overflow-y: auto;
+        }
+        .bottom-pane {
+            flex: 1;
+            overflow-y: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        th, td {
+            text-align: left;
+            padding: 0.6rem 1rem;
+            border-bottom: 1px solid #0f3460;
+        }
+        th {
+            background: #1a1a2e;
+            font-weight: 600;
+            color: #888;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+        tr:hover {
+            background: #1f2b47;
+        }
+        .indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+        .indicator.gray { background: #666; }
+        .indicator.blue { background: #3b82f6; }
+        .indicator.green { background: #22c55e; }
+        .indicator.red { background: #ef4444; }
+        .state-badge {
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .state-queued { background: #f59e0b; color: #000; }
+        .state-running { background: #3b82f6; color: #fff; }
+        .state-finishing { background: #8b5cf6; color: #fff; }
+        .status-pending { color: #f59e0b; }
+        .status-investigating { color: #3b82f6; }
+        .status-resolved { color: #22c55e; }
+        .status-failed, .status-agent_failed { color: #ef4444; }
+        .btn {
+            display: inline-block;
+            padding: 0.3rem 0.8rem;
+            background: #0f3460;
+            color: #eee;
+            border: none;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+        .btn:hover {
+            background: #e94560;
+        }
+        .empty-state {
+            padding: 2rem;
+            text-align: center;
+            color: #666;
+        }
+        .activity {
+            font-size: 0.8rem;
+            color: #888;
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .mono {
+            font-family: 'SF Mono', Monaco, Consolas, monospace;
+            font-size: 0.85rem;
+        }
+        .truncate {
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .copyable {
+            cursor: pointer;
+            position: relative;
+        }
+        .copyable:hover {
+            color: #e94560;
+        }
+        .copyable:active::after {
+            content: 'Copied!';
+            position: absolute;
+            left: 0;
+            top: -1.5em;
+            font-size: 0.7rem;
+            color: #22c55e;
+            background: #1a1a2e;
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+        }
+    </style>
+    <script>
+        function copyToClipboard(text, el) {
+            navigator.clipboard.writeText(text).then(() => {
+                el.classList.add('copied');
+                setTimeout(() => el.classList.remove('copied'), 1000);
+            });
+        }
+    </script>
+</head>
+<body>
+    <header>
+        <div class="brand">
+            <img src="/admin/logo" alt="Nightcrier" class="logo">
+            <h1>Nightcrier Admin</h1>
+        </div>
+        <span class="refresh-info">Last refresh: {{formatTime .RefreshTime}} (auto-refresh every 5s)</span>
+    </header>
+    <main>
+        <div class="pane top-pane">
+            <div class="pane-header">
+                <span>Running Triages</span>
+                <span class="count">{{len .RunningTriages}}</span>
+            </div>
+            <div class="pane-content">
+                {{if .RunningTriages}}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>State</th>
+                            <th>Cluster</th>
+                            <th>Incident ID</th>
+                            <th>Fault Type</th>
+                            <th>Age</th>
+                            <th>Activity</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .RunningTriages}}
+                        <tr>
+                            <td>
+                                <span class="state-badge state-{{.RunState}}">{{.RunState}}</span>
+                            </td>
+                            <td>{{.Cluster}}</td>
+                            <td class="mono copyable" title="Click to copy: {{.IncidentID}}" onclick="copyToClipboard('{{.IncidentID}}', this)">{{truncate .IncidentID 24}}</td>
+                            <td>{{.FaultType}}</td>
+                            <td>{{formatDuration .Age}}</td>
+                            <td class="activity" title="{{.CurrentActivity}}">{{if .CurrentActivity}}{{.CurrentActivity}}{{else}}-{{end}}</td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+                {{else}}
+                <div class="empty-state">No running triages</div>
+                {{end}}
+            </div>
+        </div>
+
+        <div class="pane bottom-pane">
+            <div class="pane-header">
+                <span>Incidents</span>
+                <span class="count">{{len .Incidents}}</span>
+            </div>
+            <div class="pane-content">
+                {{if .Incidents}}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Triage</th>
+                            <th>Incident ID</th>
+                            <th>Created</th>
+                            <th>Cluster</th>
+                            <th>Namespace</th>
+                            <th>Fault Type</th>
+                            <th>Severity</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Incidents}}
+                        <tr>
+                            <td><span class="indicator {{.TriageIndicator}}" title="{{.TriageIndicator}}"></span></td>
+                            <td class="mono copyable" title="Click to copy: {{.IncidentID}}" onclick="copyToClipboard('{{.IncidentID}}', this)">{{truncate .IncidentID 12}}</td>
+                            <td>{{formatTime .CreatedAt}}</td>
+                            <td>{{.Cluster}}</td>
+                            <td>{{if .Namespace}}{{.Namespace}}{{else}}-{{end}}</td>
+                            <td>{{.FaultType}}</td>
+                            <td>{{.Severity}}</td>
+                            <td class="status-{{.Status}}">{{.Status}}</td>
+                            <td>
+                                {{if .ViewURL}}
+                                <a href="{{.ViewURL}}" target="_blank" class="btn">View</a>
+                                {{else}}
+                                <span class="btn" style="opacity: 0.5; cursor: not-allowed;">View</span>
+                                {{end}}
+                            </td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+                {{else}}
+                <div class="empty-state">No incidents</div>
+                {{end}}
+            </div>
+        </div>
+    </main>
+</body>
+</html>
