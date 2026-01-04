@@ -159,7 +159,7 @@ func (e *K8sExecutor) ExecuteOnCluster(ctx context.Context, workspacePath string
 		"timeout", execCluster.Timeout)
 
 	executionID := uuid.New().String()
-	startedAt := time.Now()
+	startedAt := time.Now().UTC()
 
 	// Phase 1.1: Generate presigned PUT URLs for outputs
 	slog.Info("generating presigned URLs for outputs", "incident_id", incidentID)

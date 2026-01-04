@@ -811,8 +811,8 @@ func processEvent(ctx context.Context, event *events.FaultEvent, clusterName str
 			"cluster", clusterName)
 	}
 
-	// Mark agent start time
-	startedAt := time.Now()
+	// Mark agent start time (use UTC for database consistency)
+	startedAt := time.Now().UTC()
 	inc.StartedAt = &startedAt
 
 	// Update incident status to investigating in state store

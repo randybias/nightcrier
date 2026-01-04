@@ -141,7 +141,7 @@ func (l *Listener) handleProgressEvent(msg *nats.Msg) {
 			slog.Warn("failed to parse run.started timestamp, using current time",
 				"timestamp", event.Timestamp,
 				"error", err)
-			runStartedAt = time.Now()
+			runStartedAt = time.Now().UTC()
 		}
 
 		// Update run_started_at in database
