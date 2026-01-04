@@ -145,6 +145,43 @@ CREATE TABLE IF NOT EXISTS triage_reports (
 CREATE INDEX IF NOT EXISTS idx_triage_reports_incident_id ON triage_reports(incident_id);
 CREATE INDEX IF NOT EXISTS idx_triage_reports_execution_id ON triage_reports(execution_id);
 CREATE INDEX IF NOT EXISTS idx_triage_reports_generated_at ON triage_reports(generated_at);
+
+-- Monitored clusters: where fault events are detected
+CREATE TABLE IF NOT EXISTS monitored_clusters (
+    name TEXT PRIMARY KEY,
+    environment TEXT,
+    labels TEXT,  -- JSON object stored as TEXT for SQLite compatibility
+    mcp_endpoint TEXT NOT NULL,
+    mcp_api_key TEXT,
+    triage_enabled INTEGER NOT NULL DEFAULT 0,
+    target_kubeconfig TEXT,
+    allow_secrets_access INTEGER NOT NULL DEFAULT 0,
+    execution_cluster TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    source TEXT NOT NULL DEFAULT 'database'
+);
+
+-- Execution clusters: where agent Jobs run
+CREATE TABLE IF NOT EXISTS execution_clusters (
+    name TEXT PRIMARY KEY,
+    kubeconfig TEXT NOT NULL,
+    namespace TEXT NOT NULL DEFAULT 'nightcrier',
+    runner_image TEXT NOT NULL DEFAULT 'nc-agent-runner:latest',
+    image_pull_policy TEXT NOT NULL DEFAULT 'IfNotPresent',
+    timeout INTEGER NOT NULL DEFAULT 600,
+    memory_limit TEXT NOT NULL DEFAULT '2Gi',
+    cpu_limit TEXT NOT NULL DEFAULT '1',
+    cleanup_ttl INTEGER NOT NULL DEFAULT 3600,
+    max_concurrent_agents INTEGER NOT NULL DEFAULT 10,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    source TEXT NOT NULL DEFAULT 'database'
+);
+
+CREATE INDEX IF NOT EXISTS idx_monitored_clusters_environment ON monitored_clusters(environment);
+CREATE INDEX IF NOT EXISTS idx_monitored_clusters_source ON monitored_clusters(source);
+CREATE INDEX IF NOT EXISTS idx_execution_clusters_source ON execution_clusters(source);
 `
 	_, err := db.Exec(schema)
 	return err
@@ -918,4 +955,606 @@ func TestClose(t *testing.T) {
 	if err == nil {
 		t.Error("GetIncident() should fail after Close()")
 	}
+}
+
+// =============================================================================
+// Cluster Storage Tests
+// =============================================================================
+
+func TestMonitoredCluster_CRUD(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	t.Run("create and get", func(t *testing.T) {
+		cluster := &storage.MonitoredClusterRecord{
+			Name:               "test-cluster-1",
+			Environment:        "production",
+			Labels:             map[string]string{"region": "us-east-1", "tier": "critical"},
+			MCPEndpoint:        "http://mcp-server:8080/mcp",
+			MCPAPIKey:          "test-api-key",
+			TriageEnabled:      true,
+			TargetKubeconfig:   "apiVersion: v1\nkind: Config\n...",
+			AllowSecretsAccess: false,
+			ExecutionCluster:   "exec-cluster-1",
+			Source:             "yaml",
+		}
+
+		err := store.UpsertMonitoredCluster(ctx, cluster)
+		if err != nil {
+			t.Fatalf("UpsertMonitoredCluster() error = %v", err)
+		}
+
+		retrieved, err := store.GetMonitoredCluster(ctx, cluster.Name)
+		if err != nil {
+			t.Fatalf("GetMonitoredCluster() error = %v", err)
+		}
+		if retrieved == nil {
+			t.Fatal("GetMonitoredCluster() returned nil")
+		}
+
+		// Verify fields
+		if retrieved.Name != cluster.Name {
+			t.Errorf("Name = %v, want %v", retrieved.Name, cluster.Name)
+		}
+		if retrieved.Environment != cluster.Environment {
+			t.Errorf("Environment = %v, want %v", retrieved.Environment, cluster.Environment)
+		}
+		if retrieved.MCPEndpoint != cluster.MCPEndpoint {
+			t.Errorf("MCPEndpoint = %v, want %v", retrieved.MCPEndpoint, cluster.MCPEndpoint)
+		}
+		if retrieved.TriageEnabled != cluster.TriageEnabled {
+			t.Errorf("TriageEnabled = %v, want %v", retrieved.TriageEnabled, cluster.TriageEnabled)
+		}
+		if retrieved.Labels["region"] != "us-east-1" {
+			t.Errorf("Labels[region] = %v, want us-east-1", retrieved.Labels["region"])
+		}
+		if retrieved.Source != "yaml" {
+			t.Errorf("Source = %v, want yaml", retrieved.Source)
+		}
+	})
+
+	t.Run("update existing", func(t *testing.T) {
+		cluster := &storage.MonitoredClusterRecord{
+			Name:          "test-cluster-2",
+			Environment:   "staging",
+			MCPEndpoint:   "http://mcp-staging:8080/mcp",
+			TriageEnabled: false,
+			Source:        "yaml",
+		}
+
+		// Create
+		err := store.UpsertMonitoredCluster(ctx, cluster)
+		if err != nil {
+			t.Fatalf("Initial UpsertMonitoredCluster() error = %v", err)
+		}
+
+		// Update
+		cluster.Environment = "production"
+		cluster.TriageEnabled = true
+		err = store.UpsertMonitoredCluster(ctx, cluster)
+		if err != nil {
+			t.Fatalf("Update UpsertMonitoredCluster() error = %v", err)
+		}
+
+		// Verify update
+		retrieved, err := store.GetMonitoredCluster(ctx, cluster.Name)
+		if err != nil {
+			t.Fatalf("GetMonitoredCluster() error = %v", err)
+		}
+		if retrieved.Environment != "production" {
+			t.Errorf("Environment = %v, want production", retrieved.Environment)
+		}
+		if !retrieved.TriageEnabled {
+			t.Error("TriageEnabled should be true after update")
+		}
+	})
+
+	t.Run("get non-existent", func(t *testing.T) {
+		retrieved, err := store.GetMonitoredCluster(ctx, "non-existent-cluster")
+		if err != nil {
+			t.Fatalf("GetMonitoredCluster() error = %v", err)
+		}
+		if retrieved != nil {
+			t.Error("GetMonitoredCluster() should return nil for non-existent cluster")
+		}
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		cluster := &storage.MonitoredClusterRecord{
+			Name:        "test-cluster-delete",
+			MCPEndpoint: "http://mcp:8080/mcp",
+			Source:      "database",
+		}
+
+		err := store.UpsertMonitoredCluster(ctx, cluster)
+		if err != nil {
+			t.Fatalf("UpsertMonitoredCluster() error = %v", err)
+		}
+
+		err = store.DeleteMonitoredCluster(ctx, cluster.Name)
+		if err != nil {
+			t.Fatalf("DeleteMonitoredCluster() error = %v", err)
+		}
+
+		retrieved, err := store.GetMonitoredCluster(ctx, cluster.Name)
+		if err != nil {
+			t.Fatalf("GetMonitoredCluster() after delete error = %v", err)
+		}
+		if retrieved != nil {
+			t.Error("Cluster should be nil after delete")
+		}
+	})
+}
+
+func TestMonitoredCluster_List(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// Create multiple clusters
+	clusters := []*storage.MonitoredClusterRecord{
+		{Name: "cluster-a", Environment: "production", MCPEndpoint: "http://a:8080/mcp", Source: "yaml"},
+		{Name: "cluster-b", Environment: "staging", MCPEndpoint: "http://b:8080/mcp", Source: "yaml"},
+		{Name: "cluster-c", Environment: "production", MCPEndpoint: "http://c:8080/mcp", Source: "database"},
+	}
+
+	for _, c := range clusters {
+		if err := store.UpsertMonitoredCluster(ctx, c); err != nil {
+			t.Fatalf("UpsertMonitoredCluster() error = %v", err)
+		}
+	}
+
+	list, err := store.ListMonitoredClusters(ctx)
+	if err != nil {
+		t.Fatalf("ListMonitoredClusters() error = %v", err)
+	}
+
+	if len(list) != 3 {
+		t.Errorf("ListMonitoredClusters() returned %d clusters, want 3", len(list))
+	}
+
+	// Verify ordering (by name)
+	if list[0].Name != "cluster-a" {
+		t.Errorf("First cluster name = %v, want cluster-a", list[0].Name)
+	}
+}
+
+func TestExecutionCluster_CRUD(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	t.Run("create and get", func(t *testing.T) {
+		cluster := &storage.ExecutionClusterRecord{
+			Name:                "exec-cluster-1",
+			Kubeconfig:          "apiVersion: v1\nkind: Config\n...",
+			Namespace:           "nightcrier",
+			RunnerImage:         "nc-agent-runner:v1.0.0",
+			ImagePullPolicy:     "Always",
+			Timeout:             900,
+			MemoryLimit:         "4Gi",
+			CPULimit:            "2",
+			CleanupTTL:          7200,
+			MaxConcurrentAgents: 5,
+			Source:              "yaml",
+		}
+
+		err := store.UpsertExecutionCluster(ctx, cluster)
+		if err != nil {
+			t.Fatalf("UpsertExecutionCluster() error = %v", err)
+		}
+
+		retrieved, err := store.GetExecutionCluster(ctx, cluster.Name)
+		if err != nil {
+			t.Fatalf("GetExecutionCluster() error = %v", err)
+		}
+		if retrieved == nil {
+			t.Fatal("GetExecutionCluster() returned nil")
+		}
+
+		// Verify fields
+		if retrieved.Name != cluster.Name {
+			t.Errorf("Name = %v, want %v", retrieved.Name, cluster.Name)
+		}
+		if retrieved.Namespace != cluster.Namespace {
+			t.Errorf("Namespace = %v, want %v", retrieved.Namespace, cluster.Namespace)
+		}
+		if retrieved.RunnerImage != cluster.RunnerImage {
+			t.Errorf("RunnerImage = %v, want %v", retrieved.RunnerImage, cluster.RunnerImage)
+		}
+		if retrieved.Timeout != cluster.Timeout {
+			t.Errorf("Timeout = %v, want %v", retrieved.Timeout, cluster.Timeout)
+		}
+		if retrieved.MemoryLimit != cluster.MemoryLimit {
+			t.Errorf("MemoryLimit = %v, want %v", retrieved.MemoryLimit, cluster.MemoryLimit)
+		}
+		if retrieved.MaxConcurrentAgents != cluster.MaxConcurrentAgents {
+			t.Errorf("MaxConcurrentAgents = %v, want %v", retrieved.MaxConcurrentAgents, cluster.MaxConcurrentAgents)
+		}
+	})
+
+	t.Run("update existing", func(t *testing.T) {
+		cluster := &storage.ExecutionClusterRecord{
+			Name:            "exec-cluster-2",
+			Kubeconfig:      "initial-config",
+			Namespace:       "default",
+			RunnerImage:     "runner:v1",
+			ImagePullPolicy: "IfNotPresent",
+			Timeout:         600,
+			MemoryLimit:     "2Gi",
+			CPULimit:        "1",
+			CleanupTTL:      3600,
+			Source:          "yaml",
+		}
+
+		// Create
+		if err := store.UpsertExecutionCluster(ctx, cluster); err != nil {
+			t.Fatalf("Initial UpsertExecutionCluster() error = %v", err)
+		}
+
+		// Update
+		cluster.Namespace = "nightcrier-prod"
+		cluster.RunnerImage = "runner:v2"
+		cluster.MemoryLimit = "4Gi"
+		if err := store.UpsertExecutionCluster(ctx, cluster); err != nil {
+			t.Fatalf("Update UpsertExecutionCluster() error = %v", err)
+		}
+
+		// Verify update
+		retrieved, err := store.GetExecutionCluster(ctx, cluster.Name)
+		if err != nil {
+			t.Fatalf("GetExecutionCluster() error = %v", err)
+		}
+		if retrieved.Namespace != "nightcrier-prod" {
+			t.Errorf("Namespace = %v, want nightcrier-prod", retrieved.Namespace)
+		}
+		if retrieved.RunnerImage != "runner:v2" {
+			t.Errorf("RunnerImage = %v, want runner:v2", retrieved.RunnerImage)
+		}
+		if retrieved.MemoryLimit != "4Gi" {
+			t.Errorf("MemoryLimit = %v, want 4Gi", retrieved.MemoryLimit)
+		}
+	})
+
+	t.Run("get non-existent", func(t *testing.T) {
+		retrieved, err := store.GetExecutionCluster(ctx, "non-existent-exec")
+		if err != nil {
+			t.Fatalf("GetExecutionCluster() error = %v", err)
+		}
+		if retrieved != nil {
+			t.Error("GetExecutionCluster() should return nil for non-existent cluster")
+		}
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		cluster := &storage.ExecutionClusterRecord{
+			Name:            "exec-cluster-delete",
+			Kubeconfig:      "config",
+			Namespace:       "test",
+			RunnerImage:     "runner:latest",
+			ImagePullPolicy: "Never",
+			Timeout:         300,
+			MemoryLimit:     "1Gi",
+			CPULimit:        "500m",
+			CleanupTTL:      1800,
+			Source:          "database",
+		}
+
+		if err := store.UpsertExecutionCluster(ctx, cluster); err != nil {
+			t.Fatalf("UpsertExecutionCluster() error = %v", err)
+		}
+
+		if err := store.DeleteExecutionCluster(ctx, cluster.Name); err != nil {
+			t.Fatalf("DeleteExecutionCluster() error = %v", err)
+		}
+
+		retrieved, err := store.GetExecutionCluster(ctx, cluster.Name)
+		if err != nil {
+			t.Fatalf("GetExecutionCluster() after delete error = %v", err)
+		}
+		if retrieved != nil {
+			t.Error("Cluster should be nil after delete")
+		}
+	})
+}
+
+func TestExecutionCluster_List(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// Create multiple clusters
+	clusters := []*storage.ExecutionClusterRecord{
+		{Name: "exec-a", Kubeconfig: "config-a", Namespace: "ns-a", RunnerImage: "img", ImagePullPolicy: "Always", Timeout: 600, MemoryLimit: "2Gi", CPULimit: "1", CleanupTTL: 3600, Source: "yaml"},
+		{Name: "exec-b", Kubeconfig: "config-b", Namespace: "ns-b", RunnerImage: "img", ImagePullPolicy: "Always", Timeout: 600, MemoryLimit: "2Gi", CPULimit: "1", CleanupTTL: 3600, Source: "database"},
+	}
+
+	for _, c := range clusters {
+		if err := store.UpsertExecutionCluster(ctx, c); err != nil {
+			t.Fatalf("UpsertExecutionCluster() error = %v", err)
+		}
+	}
+
+	list, err := store.ListExecutionClusters(ctx)
+	if err != nil {
+		t.Fatalf("ListExecutionClusters() error = %v", err)
+	}
+
+	if len(list) != 2 {
+		t.Errorf("ListExecutionClusters() returned %d clusters, want 2", len(list))
+	}
+
+	// Verify ordering (by name)
+	if list[0].Name != "exec-a" {
+		t.Errorf("First cluster name = %v, want exec-a", list[0].Name)
+	}
+}
+
+func TestSyncMonitoredClustersFromYAML(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	t.Run("initial sync", func(t *testing.T) {
+		clusters := []storage.MonitoredClusterRecord{
+			{Name: "yaml-cluster-1", MCPEndpoint: "http://1:8080/mcp"},
+			{Name: "yaml-cluster-2", MCPEndpoint: "http://2:8080/mcp"},
+		}
+
+		err := store.SyncMonitoredClustersFromYAML(ctx, clusters)
+		if err != nil {
+			t.Fatalf("SyncMonitoredClustersFromYAML() error = %v", err)
+		}
+
+		list, err := store.ListMonitoredClusters(ctx)
+		if err != nil {
+			t.Fatalf("ListMonitoredClusters() error = %v", err)
+		}
+
+		if len(list) != 2 {
+			t.Errorf("Expected 2 clusters, got %d", len(list))
+		}
+
+		// Verify source is set to yaml
+		for _, c := range list {
+			if c.Source != "yaml" {
+				t.Errorf("Cluster %s source = %v, want yaml", c.Name, c.Source)
+			}
+		}
+	})
+
+	t.Run("sync removes old yaml clusters", func(t *testing.T) {
+		// Initial sync with 2 clusters
+		initial := []storage.MonitoredClusterRecord{
+			{Name: "keep-cluster", MCPEndpoint: "http://keep:8080/mcp"},
+			{Name: "remove-cluster", MCPEndpoint: "http://remove:8080/mcp"},
+		}
+		if err := store.SyncMonitoredClustersFromYAML(ctx, initial); err != nil {
+			t.Fatalf("Initial sync error = %v", err)
+		}
+
+		// Sync with only 1 cluster (remove-cluster should be deleted)
+		updated := []storage.MonitoredClusterRecord{
+			{Name: "keep-cluster", MCPEndpoint: "http://keep:8080/mcp"},
+		}
+		if err := store.SyncMonitoredClustersFromYAML(ctx, updated); err != nil {
+			t.Fatalf("Updated sync error = %v", err)
+		}
+
+		// Verify remove-cluster was deleted
+		removed, err := store.GetMonitoredCluster(ctx, "remove-cluster")
+		if err != nil {
+			t.Fatalf("GetMonitoredCluster() error = %v", err)
+		}
+		if removed != nil {
+			t.Error("remove-cluster should have been deleted")
+		}
+
+		// Verify keep-cluster still exists
+		kept, err := store.GetMonitoredCluster(ctx, "keep-cluster")
+		if err != nil {
+			t.Fatalf("GetMonitoredCluster() error = %v", err)
+		}
+		if kept == nil {
+			t.Error("keep-cluster should still exist")
+		}
+	})
+
+	t.Run("sync preserves database clusters", func(t *testing.T) {
+		// Create a database-sourced cluster
+		dbCluster := &storage.MonitoredClusterRecord{
+			Name:        "db-cluster",
+			MCPEndpoint: "http://db:8080/mcp",
+			Source:      "database",
+		}
+		if err := store.UpsertMonitoredCluster(ctx, dbCluster); err != nil {
+			t.Fatalf("UpsertMonitoredCluster() error = %v", err)
+		}
+
+		// Sync with yaml clusters (should not affect db-cluster)
+		yamlClusters := []storage.MonitoredClusterRecord{
+			{Name: "yaml-only", MCPEndpoint: "http://yaml:8080/mcp"},
+		}
+		if err := store.SyncMonitoredClustersFromYAML(ctx, yamlClusters); err != nil {
+			t.Fatalf("SyncMonitoredClustersFromYAML() error = %v", err)
+		}
+
+		// Verify db-cluster is preserved
+		db, err := store.GetMonitoredCluster(ctx, "db-cluster")
+		if err != nil {
+			t.Fatalf("GetMonitoredCluster() error = %v", err)
+		}
+		if db == nil {
+			t.Error("db-cluster should be preserved after yaml sync")
+		}
+	})
+}
+
+func TestSyncExecutionClustersFromYAML(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	t.Run("initial sync", func(t *testing.T) {
+		clusters := []storage.ExecutionClusterRecord{
+			{Name: "yaml-exec-1", Kubeconfig: "c1", Namespace: "ns1", RunnerImage: "img", ImagePullPolicy: "Always", Timeout: 600, MemoryLimit: "2Gi", CPULimit: "1", CleanupTTL: 3600},
+			{Name: "yaml-exec-2", Kubeconfig: "c2", Namespace: "ns2", RunnerImage: "img", ImagePullPolicy: "Always", Timeout: 600, MemoryLimit: "2Gi", CPULimit: "1", CleanupTTL: 3600},
+		}
+
+		err := store.SyncExecutionClustersFromYAML(ctx, clusters)
+		if err != nil {
+			t.Fatalf("SyncExecutionClustersFromYAML() error = %v", err)
+		}
+
+		list, err := store.ListExecutionClusters(ctx)
+		if err != nil {
+			t.Fatalf("ListExecutionClusters() error = %v", err)
+		}
+
+		if len(list) != 2 {
+			t.Errorf("Expected 2 clusters, got %d", len(list))
+		}
+
+		// Verify source is set to yaml
+		for _, c := range list {
+			if c.Source != "yaml" {
+				t.Errorf("Cluster %s source = %v, want yaml", c.Name, c.Source)
+			}
+		}
+	})
+
+	t.Run("sync removes old yaml clusters", func(t *testing.T) {
+		// Create a new store for isolation
+		store2 := setupTestStore(t)
+		defer store2.Close()
+
+		initial := []storage.ExecutionClusterRecord{
+			{Name: "keep-exec", Kubeconfig: "c", Namespace: "ns", RunnerImage: "img", ImagePullPolicy: "Always", Timeout: 600, MemoryLimit: "2Gi", CPULimit: "1", CleanupTTL: 3600},
+			{Name: "remove-exec", Kubeconfig: "c", Namespace: "ns", RunnerImage: "img", ImagePullPolicy: "Always", Timeout: 600, MemoryLimit: "2Gi", CPULimit: "1", CleanupTTL: 3600},
+		}
+		if err := store2.SyncExecutionClustersFromYAML(ctx, initial); err != nil {
+			t.Fatalf("Initial sync error = %v", err)
+		}
+
+		updated := []storage.ExecutionClusterRecord{
+			{Name: "keep-exec", Kubeconfig: "c", Namespace: "ns", RunnerImage: "img", ImagePullPolicy: "Always", Timeout: 600, MemoryLimit: "2Gi", CPULimit: "1", CleanupTTL: 3600},
+		}
+		if err := store2.SyncExecutionClustersFromYAML(ctx, updated); err != nil {
+			t.Fatalf("Updated sync error = %v", err)
+		}
+
+		removed, _ := store2.GetExecutionCluster(ctx, "remove-exec")
+		if removed != nil {
+			t.Error("remove-exec should have been deleted")
+		}
+
+		kept, _ := store2.GetExecutionCluster(ctx, "keep-exec")
+		if kept == nil {
+			t.Error("keep-exec should still exist")
+		}
+	})
+
+	t.Run("sync preserves database clusters", func(t *testing.T) {
+		// Create a new store for isolation
+		store3 := setupTestStore(t)
+		defer store3.Close()
+
+		dbCluster := &storage.ExecutionClusterRecord{
+			Name:            "db-exec",
+			Kubeconfig:      "c",
+			Namespace:       "ns",
+			RunnerImage:     "img",
+			ImagePullPolicy: "Always",
+			Timeout:         600,
+			MemoryLimit:     "2Gi",
+			CPULimit:        "1",
+			CleanupTTL:      3600,
+			Source:          "database",
+		}
+		if err := store3.UpsertExecutionCluster(ctx, dbCluster); err != nil {
+			t.Fatalf("UpsertExecutionCluster() error = %v", err)
+		}
+
+		yamlClusters := []storage.ExecutionClusterRecord{
+			{Name: "yaml-exec-only", Kubeconfig: "c", Namespace: "ns", RunnerImage: "img", ImagePullPolicy: "Always", Timeout: 600, MemoryLimit: "2Gi", CPULimit: "1", CleanupTTL: 3600},
+		}
+		if err := store3.SyncExecutionClustersFromYAML(ctx, yamlClusters); err != nil {
+			t.Fatalf("SyncExecutionClustersFromYAML() error = %v", err)
+		}
+
+		db, _ := store3.GetExecutionCluster(ctx, "db-exec")
+		if db == nil {
+			t.Error("db-exec should be preserved after yaml sync")
+		}
+	})
+}
+
+func TestMonitoredCluster_LabelsJSON(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	t.Run("empty labels", func(t *testing.T) {
+		cluster := &storage.MonitoredClusterRecord{
+			Name:        "no-labels-cluster",
+			MCPEndpoint: "http://mcp:8080/mcp",
+			Labels:      nil,
+			Source:      "yaml",
+		}
+
+		if err := store.UpsertMonitoredCluster(ctx, cluster); err != nil {
+			t.Fatalf("UpsertMonitoredCluster() error = %v", err)
+		}
+
+		retrieved, err := store.GetMonitoredCluster(ctx, cluster.Name)
+		if err != nil {
+			t.Fatalf("GetMonitoredCluster() error = %v", err)
+		}
+
+		// Labels should be nil or empty, not cause an error
+		if retrieved.Labels != nil && len(retrieved.Labels) > 0 {
+			t.Errorf("Expected empty labels, got %v", retrieved.Labels)
+		}
+	})
+
+	t.Run("complex labels", func(t *testing.T) {
+		cluster := &storage.MonitoredClusterRecord{
+			Name:        "complex-labels-cluster",
+			MCPEndpoint: "http://mcp:8080/mcp",
+			Labels: map[string]string{
+				"region":      "us-west-2",
+				"environment": "production",
+				"team":        "platform",
+				"cost-center": "engineering",
+			},
+			Source: "yaml",
+		}
+
+		if err := store.UpsertMonitoredCluster(ctx, cluster); err != nil {
+			t.Fatalf("UpsertMonitoredCluster() error = %v", err)
+		}
+
+		retrieved, err := store.GetMonitoredCluster(ctx, cluster.Name)
+		if err != nil {
+			t.Fatalf("GetMonitoredCluster() error = %v", err)
+		}
+
+		if len(retrieved.Labels) != 4 {
+			t.Errorf("Expected 4 labels, got %d", len(retrieved.Labels))
+		}
+		if retrieved.Labels["region"] != "us-west-2" {
+			t.Errorf("Labels[region] = %v, want us-west-2", retrieved.Labels["region"])
+		}
+		if retrieved.Labels["cost-center"] != "engineering" {
+			t.Errorf("Labels[cost-center] = %v, want engineering", retrieved.Labels["cost-center"])
+		}
+	})
 }

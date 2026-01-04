@@ -207,10 +207,10 @@ Nightcrier uses two types of kubeconfig files:
    - Requires elevated permissions (namespace, RBAC, Secret creation)
    - Sourced from: `KUBECONFIG` env var, `kubeconfig_path` config, or `~/.kube/config`
 
-2. **Triage kubeconfig** (`triage.kubeconfig` per cluster) - Read-only access for agents
+2. **Triage kubeconfig** (`triage.target_kubeconfig_path` per monitored cluster) - Read-only access for agents
    - Used by AI agents running in Jobs to investigate incidents
    - Should have limited, read-only permissions
-   - Stored in `kubeconfig-{cluster-name}` Secrets
+   - Stored in `triage-kubeconfig-{cluster-name}` Secrets
 
 ### Troubleshooting
 

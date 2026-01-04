@@ -24,6 +24,7 @@ import (
 	"github.com/randybias/nightcrier/internal/health"
 	"github.com/randybias/nightcrier/internal/incident"
 	"github.com/randybias/nightcrier/internal/nats"
+	"github.com/randybias/nightcrier/internal/reload"
 	"github.com/randybias/nightcrier/internal/reporting"
 	"github.com/randybias/nightcrier/internal/storage"
 	"github.com/randybias/nightcrier/internal/storage/postgres"
@@ -134,7 +135,7 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Create ConnectionManager for multi-cluster support
 	mgrConfig := &cluster.ManagerConfig{
-		Clusters:                   cfg.Clusters,
+		Clusters:                   cfg.MonitoredClusters,
 		SubscribeMode:              cfg.SubscribeMode,
 		GlobalQueueSize:            cfg.GlobalQueueSize,
 		QueueOverflowPolicy:        cfg.QueueOverflowPolicy,
@@ -146,7 +147,7 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create and inject MCP clients for each cluster
-	for _, clusterCfg := range cfg.Clusters {
+	for _, clusterCfg := range cfg.MonitoredClusters {
 		mcpClient := events.NewClient(clusterCfg.MCP.Endpoint, cfg.SubscribeMode, tuning)
 		if err := connectionMgr.SetClusterClient(clusterCfg.Name, mcpClient); err != nil {
 			return fmt.Errorf("failed to set client for cluster %s: %w", clusterCfg.Name, err)
@@ -201,40 +202,46 @@ func run(cmd *cobra.Command, args []string) error {
 		"url", cfg.ObjectStorage.URL,
 		"signed_url_expiry", expiry)
 
-	// Initialize K8s client for executor
+	// Initialize K8s client for executor (using first execution cluster or defaults)
+	var execKubeconfig string
+	if len(cfg.ExecutionClusters) > 0 {
+		execKubeconfig = cfg.ExecutionClusters[0].KubeconfigPath
+	} else {
+		execKubeconfig = cfg.KubeconfigPath // Fallback to deprecated field
+	}
 	k8sClient, err := k8s.NewClient(k8s.ClientConfig{
-		Kubeconfig: cfg.KubeconfigPath,
+		Kubeconfig: execKubeconfig,
 		Context:    cfg.KubernetesContext,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create K8s client: %w", err)
 	}
 	slog.Info("K8s client initialized",
-		"kubeconfig", cfg.KubeconfigPath,
+		"kubeconfig", execKubeconfig,
 		"context", cfg.KubernetesContext,
-		"namespace", cfg.K8s.Namespace)
+		"namespace", cfg.ExecutionDefaults.Namespace)
 
 	// Bootstrap Kubernetes resources (namespace, RBAC, secrets)
 	slog.Info("bootstrapping kubernetes resources...")
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer bootstrapCancel()
 
-	bootstrapClusters := make([]bootstrap.ClusterConfig, 0, len(cfg.Clusters))
-	for _, c := range cfg.Clusters {
+	bootstrapClusters := make([]bootstrap.MonitoredClusterConfig, 0, len(cfg.MonitoredClusters))
+	for _, c := range cfg.MonitoredClusters {
 		if c.Triage.Enabled && c.Triage.Kubeconfig != "" {
-			bootstrapClusters = append(bootstrapClusters, bootstrap.ClusterConfig{
-				Name:              c.Name,
-				TriageKubeconfig:  c.Triage.Kubeconfig,
+			bootstrapClusters = append(bootstrapClusters, bootstrap.MonitoredClusterConfig{
+				Name:                 c.Name,
+				TargetKubeconfigPath: c.Triage.Kubeconfig,
 			})
 		}
 	}
 
 	bootstrapConfig := bootstrap.Config{
-		Namespace:       cfg.K8s.Namespace,
-		AnthropicAPIKey: cfg.AnthropicAPIKey,
-		OpenAIAPIKey:    cfg.OpenAIAPIKey,
-		GeminiAPIKey:    cfg.GeminiAPIKey,
-		Clusters:        bootstrapClusters,
+		Namespace:         cfg.ExecutionDefaults.Namespace,
+		AnthropicAPIKey:   cfg.AnthropicAPIKey,
+		OpenAIAPIKey:      cfg.OpenAIAPIKey,
+		GeminiAPIKey:      cfg.GeminiAPIKey,
+		MonitoredClusters: bootstrapClusters,
 	}
 
 	bootstrapMgr := bootstrap.NewManager(k8sClient.Clientset(), bootstrapConfig)
@@ -259,50 +266,113 @@ func run(cmd *cobra.Command, args []string) error {
 			"resources", existingCount)
 	}
 
-	// Create K8s executors per cluster
-	executors := make(map[string]AgentExecutor)
-	k8sExecutorRefs := make(map[string]*agent.K8sExecutor) // Keep refs to inject stateStore later
-
-	for _, clusterCfg := range cfg.Clusters {
-		k8sExecCfg := agent.K8sExecutorConfig{
-			Namespace:        cfg.K8s.Namespace,
-			Image:            cfg.K8s.Image,
-			ImagePullPolicy:  cfg.K8s.ImagePullPolicy,
-			Timeout:          cfg.K8s.Timeout,
-			MemoryLimit:      cfg.K8s.MemoryLimit,
-			CPULimit:         cfg.K8s.CPULimit,
-			CleanupTTL:       int32(cfg.K8s.CleanupTTL),
-			AgentCLI:         cfg.Agent.CLI,
-			Model:            cfg.Agent.Model,
-			SystemPromptFile: cfg.Agent.SystemPromptFile,
-			Debug:            cfg.LogLevel == "debug",
-			NATSEnabled:      cfg.NATS.Enabled,
-			NATSServer:       cfg.NATS.Server,
-			NATSToken:        cfg.NATS.Token,
-		}
-		k8sExec := agent.NewK8sExecutor(
-			k8sExecCfg,
-			k8sClient,
-			objectStore,
-			nil, // stateStore will be set later after it's initialized
-			storageBackend,
-			tuning,
-		)
-		executors[clusterCfg.Name] = k8sExec
-		k8sExecutorRefs[clusterCfg.Name] = k8sExec
-		slog.Info("K8s executor created for cluster",
-			"cluster", clusterCfg.Name,
-			"namespace", cfg.K8s.Namespace,
-			"image", cfg.K8s.Image)
+	// Create ExecutionClusterManager for managing execution clusters
+	execClusterConfigs := make([]cluster.ExecutionClusterConfig, 0, len(cfg.ExecutionClusters))
+	for _, ec := range cfg.ExecutionClusters {
+		execClusterConfigs = append(execClusterConfigs, cluster.ExecutionClusterConfig{
+			Name:                ec.Name,
+			KubeconfigPath:      ec.KubeconfigPath,
+			Namespace:           ec.Namespace,
+			RunnerImage:         ec.RunnerImage,
+			ImagePullPolicy:     ec.ImagePullPolicy,
+			Timeout:             ec.Timeout,
+			MemoryLimit:         ec.MemoryLimit,
+			CPULimit:            ec.CPULimit,
+			CleanupTTL:          ec.CleanupTTL,
+			MaxConcurrentAgents: ec.MaxConcurrentAgents,
+		})
+	}
+	execMgrConfig := &cluster.ExecutionManagerConfig{
+		Clusters: execClusterConfigs,
+		Defaults: &cluster.ExecutionDefaults{
+			Namespace:           cfg.ExecutionDefaults.Namespace,
+			RunnerImage:         cfg.ExecutionDefaults.RunnerImage,
+			ImagePullPolicy:     cfg.ExecutionDefaults.ImagePullPolicy,
+			Timeout:             cfg.ExecutionDefaults.Timeout,
+			MemoryLimit:         cfg.ExecutionDefaults.MemoryLimit,
+			CPULimit:            cfg.ExecutionDefaults.CPULimit,
+			CleanupTTL:          cfg.ExecutionDefaults.CleanupTTL,
+			MaxConcurrentAgents: cfg.ExecutionDefaults.MaxConcurrentAgents,
+		},
+	}
+	executionMgr, err := cluster.NewExecutionClusterManager(execMgrConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create execution cluster manager: %w", err)
 	}
 
-	// Handle shutdown signals
+	// Build execution clusters map for the K8s executor (temporary until K8sExecutor uses ExecutionClusterManager)
+	executionClustersMap := make(map[string]*config.ExecutionClusterConfig)
+	for i := range cfg.ExecutionClusters {
+		ec := &cfg.ExecutionClusters[i]
+		executionClustersMap[ec.Name] = ec
+	}
+	defaultExecutionCluster := executionMgr.DefaultClusterName()
+
+	// Create shared K8s executor config (agent-specific settings)
+	k8sExecCfg := agent.K8sExecutorConfig{
+		AgentCLI:         cfg.Agent.CLI,
+		Model:            cfg.Agent.Model,
+		SystemPromptFile: cfg.Agent.SystemPromptFile,
+		Debug:            cfg.LogLevel == "debug",
+		NATSEnabled:      cfg.NATS.Enabled,
+		NATSServer:       cfg.NATS.Server,
+		NATSToken:        cfg.NATS.Token,
+	}
+
+	// Create single K8s executor that handles all execution clusters
+	k8sExec := agent.NewK8sExecutor(
+		k8sExecCfg,
+		executionClustersMap,
+		defaultExecutionCluster,
+		k8sClient,
+		objectStore,
+		nil, // stateStore will be set later after it's initialized
+		storageBackend,
+		tuning,
+	)
+	slog.Info("K8s executor initialized",
+		"execution_clusters", len(executionClustersMap),
+		"default_cluster", defaultExecutionCluster)
+
+	// Create executors map for compatibility (all monitored clusters use the same executor)
+	executors := make(map[string]AgentExecutor)
+	for _, clusterCfg := range cfg.MonitoredClusters {
+		executors[clusterCfg.Name] = k8sExec
+	}
+
+	// Create configuration reloader for SIGHUP handling
+	reloader := reload.NewReloader(&reload.ReloaderConfig{
+		ConfigFile:    config.GetConfigFile(),
+		ConnectionMgr: connectionMgr,
+		ExecutionMgr:  executionMgr,
+		ClusterStore:  nil, // Will be set after stateStore is initialized if it implements ClusterStore
+		CurrentConfig: cfg,
+	})
+
+	// Handle signals: SIGHUP for config reload, SIGINT/SIGTERM for shutdown
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
-		sig := <-sigChan
-		slog.Info("received shutdown signal", "signal", sig)
-		cancel()
+		for sig := range sigChan {
+			switch sig {
+			case syscall.SIGHUP:
+				slog.Info("received SIGHUP, reloading configuration")
+				result := reloader.Reload(ctx)
+				if result.Error != nil {
+					slog.Error("failed to reload configuration", "error", result.Error)
+				} else {
+					slog.Info("configuration reloaded successfully",
+						"monitored_added", len(result.MonitoredAdded),
+						"monitored_removed", len(result.MonitoredRemoved),
+						"execution_added", len(result.ExecutionAdded),
+						"execution_removed", len(result.ExecutionRemoved))
+				}
+			case syscall.SIGINT, syscall.SIGTERM:
+				slog.Info("received shutdown signal", "signal", sig)
+				cancel()
+				return
+			}
+		}
 	}()
 
 	// Initialize state store (SQL persistence) based on configuration
@@ -389,11 +459,30 @@ func run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unknown state storage type: %s", storageType)
 	}
 
-	// Inject stateStore into K8s executors now that it's initialized
+	// Inject stateStore into K8s executor now that it's initialized
 	if stateStore != nil {
-		for clusterName, k8sExec := range k8sExecutorRefs {
-			k8sExec.SetStateStore(stateStore)
-			slog.Debug("stateStore injected into K8s executor", "cluster", clusterName)
+		k8sExec.SetStateStore(stateStore)
+		slog.Debug("stateStore injected into K8s executor")
+
+		// Check if stateStore implements ClusterStore interface for dynamic cluster loading
+		if clusterStore, ok := stateStore.(reload.ClusterStore); ok {
+			reloader.SetClusterStore(clusterStore)
+			slog.Debug("cluster store injected into reloader")
+
+			// Perform initial sync of YAML clusters to database
+			// This ensures database is the single source of truth
+			result := reloader.Reload(ctx)
+			if result.Error != nil {
+				slog.Warn("initial cluster sync to database failed", "error", result.Error)
+			} else {
+				slog.Info("initial cluster sync complete",
+					"monitored_synced", len(result.MonitoredAdded),
+					"execution_synced", len(result.ExecutionAdded))
+			}
+
+			// Start database polling if no clusters are configured
+			// This allows the system to start with zero clusters and pick them up from the database
+			reloader.StartDatabasePolling(ctx)
 		}
 	}
 
@@ -451,7 +540,7 @@ func run(cmd *cobra.Command, args []string) error {
 	// These are static per-cluster and are used by the dispatcher's event handler
 	kubeconfigMap := make(map[string]string)
 	permissionsMap := make(map[string]*cluster.ClusterPermissions)
-	for _, clusterCfg := range cfg.Clusters {
+	for _, clusterCfg := range cfg.MonitoredClusters {
 		kubeconfigMap[clusterCfg.Name] = clusterCfg.Triage.Kubeconfig
 		// Permissions will be looked up from the event since they're set during Initialize
 	}
@@ -500,7 +589,7 @@ func run(cmd *cobra.Command, args []string) error {
 	defer connectionMgr.Stop()
 
 	slog.Info("connection manager started, processing events",
-		"cluster_count", len(cfg.Clusters))
+		"cluster_count", len(cfg.MonitoredClusters))
 
 	// Track if we've processed an event in single-run mode
 	singleRunProcessed := false
@@ -518,6 +607,9 @@ func run(cmd *cobra.Command, args []string) error {
 			if err := eventDispatcher.Shutdown(shutdownCtx); err != nil {
 				slog.Warn("dispatcher shutdown timed out", "error", err)
 			}
+
+			// Stop database polling
+			reloader.StopDatabasePolling()
 
 			// Shutdown NATS listener and client
 			if natsListener != nil {
@@ -916,7 +1008,7 @@ func printStartupBanner(cfg *config.Config, configFile string) {
 	fmt.Println("╠═══════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║  Config File:    %-45s ║\n", truncateString(configSource, 45))
 	fmt.Println("╠═══════════════════════════════════════════════════════════════╣")
-	fmt.Printf("║  Clusters:       %-45s ║\n", fmt.Sprintf("%d configured", len(cfg.Clusters)))
+	fmt.Printf("║  Clusters:       %-45s ║\n", fmt.Sprintf("%d configured", len(cfg.MonitoredClusters)))
 	fmt.Printf("║  Subscribe Mode: %-45s ║\n", cfg.SubscribeMode)
 	fmt.Println("╠═══════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║  Agent CLI:      %-45s ║\n", cfg.Agent.CLI)

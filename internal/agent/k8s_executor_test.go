@@ -16,6 +16,241 @@ import (
 )
 
 // ================================================================================
+// Unit Tests for K8sExecutor SelectExecutionCluster
+// ================================================================================
+
+func TestSelectExecutionCluster_PreferredName(t *testing.T) {
+	// Test selecting a specific execution cluster by name
+	executionClusters := map[string]*config.ExecutionClusterConfig{
+		"cluster-a": {
+			Name:        "cluster-a",
+			Namespace:   "ns-a",
+			RunnerImage: "runner:a",
+		},
+		"cluster-b": {
+			Name:        "cluster-b",
+			Namespace:   "ns-b",
+			RunnerImage: "runner:b",
+		},
+	}
+
+	executor := &K8sExecutor{
+		executionClusters: executionClusters,
+		defaultCluster:    "cluster-a",
+	}
+
+	// Select specific cluster by name
+	selected, err := executor.SelectExecutionCluster("cluster-b")
+	if err != nil {
+		t.Fatalf("SelectExecutionCluster() error = %v", err)
+	}
+	if selected.Name != "cluster-b" {
+		t.Errorf("Selected cluster name = %v, want cluster-b", selected.Name)
+	}
+	if selected.Namespace != "ns-b" {
+		t.Errorf("Selected cluster namespace = %v, want ns-b", selected.Namespace)
+	}
+}
+
+func TestSelectExecutionCluster_PreferredNameNotFound(t *testing.T) {
+	// Test error when requested cluster doesn't exist
+	executionClusters := map[string]*config.ExecutionClusterConfig{
+		"cluster-a": {
+			Name:      "cluster-a",
+			Namespace: "ns-a",
+		},
+	}
+
+	executor := &K8sExecutor{
+		executionClusters: executionClusters,
+		defaultCluster:    "cluster-a",
+	}
+
+	_, err := executor.SelectExecutionCluster("nonexistent-cluster")
+	if err == nil {
+		t.Fatal("Expected error when cluster not found")
+	}
+	if err.Error() != `execution cluster "nonexistent-cluster" not found` {
+		t.Errorf("Unexpected error message: %v", err)
+	}
+}
+
+func TestSelectExecutionCluster_DefaultCluster(t *testing.T) {
+	// Test that empty name returns the default cluster
+	executionClusters := map[string]*config.ExecutionClusterConfig{
+		"cluster-a": {
+			Name:      "cluster-a",
+			Namespace: "ns-a",
+		},
+		"cluster-b": {
+			Name:      "cluster-b",
+			Namespace: "ns-b",
+		},
+	}
+
+	executor := &K8sExecutor{
+		executionClusters: executionClusters,
+		defaultCluster:    "cluster-b",
+	}
+
+	// Empty name should return default cluster
+	selected, err := executor.SelectExecutionCluster("")
+	if err != nil {
+		t.Fatalf("SelectExecutionCluster() error = %v", err)
+	}
+	if selected.Name != "cluster-b" {
+		t.Errorf("Selected cluster name = %v, want cluster-b (default)", selected.Name)
+	}
+}
+
+func TestSelectExecutionCluster_NoClusters(t *testing.T) {
+	// Test error when no clusters are configured
+	executor := &K8sExecutor{
+		executionClusters: map[string]*config.ExecutionClusterConfig{},
+		defaultCluster:    "",
+	}
+
+	_, err := executor.SelectExecutionCluster("")
+	if err == nil {
+		t.Fatal("Expected error when no clusters configured")
+	}
+	if err.Error() != "no execution clusters configured" {
+		t.Errorf("Unexpected error message: %v", err)
+	}
+}
+
+func TestSelectExecutionCluster_DefaultNotFound(t *testing.T) {
+	// Test error when default cluster is set but doesn't exist in map
+	executionClusters := map[string]*config.ExecutionClusterConfig{
+		"cluster-a": {
+			Name:      "cluster-a",
+			Namespace: "ns-a",
+		},
+	}
+
+	executor := &K8sExecutor{
+		executionClusters: executionClusters,
+		defaultCluster:    "missing-default",
+	}
+
+	_, err := executor.SelectExecutionCluster("")
+	if err == nil {
+		t.Fatal("Expected error when default cluster not found")
+	}
+	if err.Error() != `default execution cluster "missing-default" not found` {
+		t.Errorf("Unexpected error message: %v", err)
+	}
+}
+
+func TestSelectExecutionCluster_FallbackToFirst(t *testing.T) {
+	// Test that when default is empty, first available cluster is returned
+	// Note: Go maps don't have consistent ordering, so we use a single-entry map
+	executionClusters := map[string]*config.ExecutionClusterConfig{
+		"only-cluster": {
+			Name:      "only-cluster",
+			Namespace: "ns-only",
+		},
+	}
+
+	executor := &K8sExecutor{
+		executionClusters: executionClusters,
+		defaultCluster:    "", // Empty default
+	}
+
+	selected, err := executor.SelectExecutionCluster("")
+	if err != nil {
+		t.Fatalf("SelectExecutionCluster() error = %v", err)
+	}
+	if selected.Name != "only-cluster" {
+		t.Errorf("Selected cluster name = %v, want only-cluster", selected.Name)
+	}
+}
+
+func TestNewK8sExecutor(t *testing.T) {
+	// Test that NewK8sExecutor properly initializes all fields
+	ctx := context.Background()
+	objStore, err := storage.NewObjectStore(ctx, "mem://", 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create object store: %v", err)
+	}
+
+	executionClusters := map[string]*config.ExecutionClusterConfig{
+		"test-cluster": {
+			Name:      "test-cluster",
+			Namespace: "nightcrier",
+		},
+	}
+
+	cfg := K8sExecutorConfig{
+		AgentCLI:         "claude",
+		Model:            "sonnet",
+		SystemPromptFile: "/path/to/prompt.md",
+		Debug:            true,
+		NATSEnabled:      true,
+		NATSServer:       "nats://localhost:4222",
+		NATSToken:        "token",
+	}
+
+	tuning := &config.TuningConfig{
+		Agent: config.AgentTuning{
+			TimeoutBufferSeconds: 60,
+		},
+	}
+
+	executor := NewK8sExecutor(cfg, executionClusters, "test-cluster", nil, objStore, nil, nil, tuning)
+
+	if executor == nil {
+		t.Fatal("NewK8sExecutor returned nil")
+	}
+	if executor.config.AgentCLI != "claude" {
+		t.Errorf("AgentCLI = %v, want claude", executor.config.AgentCLI)
+	}
+	if executor.config.Debug != true {
+		t.Error("Debug should be true")
+	}
+	if executor.defaultCluster != "test-cluster" {
+		t.Errorf("defaultCluster = %v, want test-cluster", executor.defaultCluster)
+	}
+	if len(executor.executionClusters) != 1 {
+		t.Errorf("Expected 1 execution cluster, got %d", len(executor.executionClusters))
+	}
+}
+
+func TestSetStateStore(t *testing.T) {
+	// Test that SetStateStore updates both executor and processor
+	ctx := context.Background()
+	objStore, err := storage.NewObjectStore(ctx, "mem://", 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create object store: %v", err)
+	}
+
+	executor := NewK8sExecutor(
+		K8sExecutorConfig{},
+		nil,
+		"",
+		nil,
+		objStore,
+		nil, // Initially nil stateStore
+		nil,
+		&config.TuningConfig{},
+	)
+
+	if executor.stateStore != nil {
+		t.Error("stateStore should be nil initially")
+	}
+
+	// Create a mock StateStore (we just need any implementation)
+	// For this test, we'll use nil and just verify the method doesn't panic
+	// In reality you'd use a mock implementation
+	executor.SetStateStore(nil)
+
+	// Verify processor was recreated (it should still work even with nil stateStore)
+	if executor.processor == nil {
+		t.Error("processor should not be nil after SetStateStore")
+	}
+}
+
+// ================================================================================
 // Unit Tests for K8sExecutor helper methods
 // ================================================================================
 
@@ -169,14 +404,11 @@ func TestK8sExecutor_ConfigAndCreation(t *testing.T) {
 	}
 
 	cfg := K8sExecutorConfig{
-		Namespace:   "nightcrier",
-		Image:       "nc-agent-runner:test",
-		Timeout:     300,
-		AgentCLI:    "claude",
-		Model:       "claude-opus-4-5-20251101",
-		MemoryLimit: "2Gi",
-		CPULimit:    "1",
-		CleanupTTL:  3600,
+		AgentCLI:         "claude",
+		Model:            "claude-opus-4-5-20251101",
+		SystemPromptFile: "/path/to/prompt.md",
+		Debug:            false,
+		NATSEnabled:      false,
 	}
 
 	tuning := &config.TuningConfig{

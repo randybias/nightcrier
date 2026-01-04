@@ -16,18 +16,22 @@ type Config struct {
 	// GeminiAPIKey is the API key for Google Gemini models.
 	GeminiAPIKey string
 
-	// Clusters is the list of clusters to create kubeconfig secrets for.
-	Clusters []ClusterConfig
+	// MonitoredClusters is the list of monitored clusters to create triage kubeconfig secrets for.
+	// These kubeconfigs are mounted into agent pods for triage access to target clusters.
+	MonitoredClusters []MonitoredClusterConfig
 }
 
-// ClusterConfig holds configuration for a single cluster's kubeconfig secret.
-type ClusterConfig struct {
-	// Name is the cluster name, used in the secret name: kubeconfig-{name}
+// MonitoredClusterConfig holds configuration for a monitored cluster's triage kubeconfig secret.
+// This is separate from execution clusters - execution cluster kubeconfigs are used directly
+// by Nightcrier to create Jobs, not mounted into agent pods.
+type MonitoredClusterConfig struct {
+	// Name is the cluster name, used in the secret name: triage-kubeconfig-{name}
 	Name string
 
-	// TriageKubeconfig is the path to the kubeconfig file for triage agent access.
-	// This file will be read and stored in a Kubernetes Secret.
-	TriageKubeconfig string
+	// TargetKubeconfigPath is the path to the kubeconfig file for triage agent access
+	// to the monitored cluster. This file will be read and stored in a Kubernetes Secret
+	// that gets mounted into agent pods.
+	TargetKubeconfigPath string
 }
 
 // Result tracks the outcome of the bootstrap process.
@@ -47,8 +51,8 @@ type Result struct {
 	// APIKeysSecretCreated indicates whether the ai-api-keys Secret was created.
 	APIKeysSecretCreated bool
 
-	// KubeconfigSecretsCreated is a map of cluster name to whether the Secret was created.
-	KubeconfigSecretsCreated map[string]bool
+	// TriageKubeconfigSecretsCreated is a map of cluster name to whether the Secret was created.
+	TriageKubeconfigSecretsCreated map[string]bool
 }
 
 // CreatedCount returns the total number of resources created during bootstrap.
@@ -69,7 +73,7 @@ func (r *Result) CreatedCount() int {
 	if r.APIKeysSecretCreated {
 		count++
 	}
-	for _, created := range r.KubeconfigSecretsCreated {
+	for _, created := range r.TriageKubeconfigSecretsCreated {
 		if created {
 			count++
 		}
@@ -79,7 +83,7 @@ func (r *Result) CreatedCount() int {
 
 // ExistingCount returns the total number of resources that already existed.
 func (r *Result) ExistingCount() int {
-	// Total possible resources: namespace, SA, role, rolebinding, api-keys secret, + N kubeconfig secrets
-	total := 5 + len(r.KubeconfigSecretsCreated)
+	// Total possible resources: namespace, SA, role, rolebinding, api-keys secret, + N triage kubeconfig secrets
+	total := 5 + len(r.TriageKubeconfigSecretsCreated)
 	return total - r.CreatedCount()
 }

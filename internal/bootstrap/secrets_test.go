@@ -211,8 +211,8 @@ func TestEnsureAPIKeysSecret_CreateError(t *testing.T) {
 	}
 }
 
-// TestEnsureKubeconfigSecret_Success tests successful creation of kubeconfig Secret
-func TestEnsureKubeconfigSecret_Success(t *testing.T) {
+// TestEnsureTriageKubeconfigSecret_Success tests successful creation of triage kubeconfig Secret
+func TestEnsureTriageKubeconfigSecret_Success(t *testing.T) {
 	// Create a temporary kubeconfig file
 	tmpDir := t.TempDir()
 	kubeconfigPath := filepath.Join(tmpDir, "kubeconfig.yaml")
@@ -228,13 +228,13 @@ func TestEnsureKubeconfigSecret_Success(t *testing.T) {
 	namespace := "nightcrier"
 	clusterName := "test-cluster"
 
-	err = ensureKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
+	err = ensureTriageKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
 	if err != nil {
-		t.Fatalf("ensureKubeconfigSecret() failed: %v", err)
+		t.Fatalf("ensureTriageKubeconfigSecret() failed: %v", err)
 	}
 
-	// Verify Secret was created
-	expectedSecretName := "kubeconfig-test-cluster"
+	// Verify Secret was created with triage-kubeconfig- prefix
+	expectedSecretName := "triage-kubeconfig-test-cluster"
 	secret, err := fakeClient.CoreV1().Secrets(namespace).Get(ctx, expectedSecretName, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Failed to get created Secret: %v", err)
@@ -250,10 +250,11 @@ func TestEnsureKubeconfigSecret_Success(t *testing.T) {
 		t.Errorf("Secret type = %s, want %s", secret.Type, corev1.SecretTypeOpaque)
 	}
 
-	// Verify labels
+	// Verify labels including purpose=triage
 	expectedLabels := map[string]string{
 		"app":        "nightcrier",
 		"cluster":    clusterName,
+		"purpose":    "triage",
 		"managed-by": "nightcrier-bootstrap",
 	}
 	for k, expectedValue := range expectedLabels {
@@ -270,27 +271,27 @@ func TestEnsureKubeconfigSecret_Success(t *testing.T) {
 	}
 }
 
-// TestEnsureKubeconfigSecret_FileNotFound tests error when file doesn't exist
-func TestEnsureKubeconfigSecret_FileNotFound(t *testing.T) {
+// TestEnsureTriageKubeconfigSecret_FileNotFound tests error when file doesn't exist
+func TestEnsureTriageKubeconfigSecret_FileNotFound(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset()
 	ctx := context.Background()
 	namespace := "nightcrier"
 	clusterName := "test-cluster"
 	kubeconfigPath := "/nonexistent/path/kubeconfig.yaml"
 
-	err := ensureKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
+	err := ensureTriageKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
 	if err == nil {
-		t.Fatal("ensureKubeconfigSecret() should fail when file doesn't exist")
+		t.Fatal("ensureTriageKubeconfigSecret() should fail when file doesn't exist")
 	}
 
-	expectedErrorSubstring := "kubeconfig file not found at path"
+	expectedErrorSubstring := "target kubeconfig file not found at path"
 	if !contains(err.Error(), expectedErrorSubstring) {
-		t.Errorf("ensureKubeconfigSecret() error = %v, should contain %s", err, expectedErrorSubstring)
+		t.Errorf("ensureTriageKubeconfigSecret() error = %v, should contain %s", err, expectedErrorSubstring)
 	}
 }
 
-// TestEnsureKubeconfigSecret_DirectoryPath tests error when path is a directory
-func TestEnsureKubeconfigSecret_DirectoryPath(t *testing.T) {
+// TestEnsureTriageKubeconfigSecret_DirectoryPath tests error when path is a directory
+func TestEnsureTriageKubeconfigSecret_DirectoryPath(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	fakeClient := fake.NewSimpleClientset()
@@ -298,19 +299,19 @@ func TestEnsureKubeconfigSecret_DirectoryPath(t *testing.T) {
 	namespace := "nightcrier"
 	clusterName := "test-cluster"
 
-	err := ensureKubeconfigSecret(ctx, fakeClient, namespace, clusterName, tmpDir)
+	err := ensureTriageKubeconfigSecret(ctx, fakeClient, namespace, clusterName, tmpDir)
 	if err == nil {
-		t.Fatal("ensureKubeconfigSecret() should fail when path is a directory")
+		t.Fatal("ensureTriageKubeconfigSecret() should fail when path is a directory")
 	}
 
-	expectedErrorSubstring := "kubeconfig path is a directory"
+	expectedErrorSubstring := "target kubeconfig path is a directory"
 	if !contains(err.Error(), expectedErrorSubstring) {
-		t.Errorf("ensureKubeconfigSecret() error = %v, should contain %s", err, expectedErrorSubstring)
+		t.Errorf("ensureTriageKubeconfigSecret() error = %v, should contain %s", err, expectedErrorSubstring)
 	}
 }
 
-// TestEnsureKubeconfigSecret_EmptyFile tests error when file is empty
-func TestEnsureKubeconfigSecret_EmptyFile(t *testing.T) {
+// TestEnsureTriageKubeconfigSecret_EmptyFile tests error when file is empty
+func TestEnsureTriageKubeconfigSecret_EmptyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	kubeconfigPath := filepath.Join(tmpDir, "empty-kubeconfig.yaml")
 
@@ -325,19 +326,19 @@ func TestEnsureKubeconfigSecret_EmptyFile(t *testing.T) {
 	namespace := "nightcrier"
 	clusterName := "test-cluster"
 
-	err = ensureKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
+	err = ensureTriageKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
 	if err == nil {
-		t.Fatal("ensureKubeconfigSecret() should fail when file is empty")
+		t.Fatal("ensureTriageKubeconfigSecret() should fail when file is empty")
 	}
 
-	expectedErrorSubstring := "kubeconfig file is empty"
+	expectedErrorSubstring := "target kubeconfig file is empty"
 	if !contains(err.Error(), expectedErrorSubstring) {
-		t.Errorf("ensureKubeconfigSecret() error = %v, should contain %s", err, expectedErrorSubstring)
+		t.Errorf("ensureTriageKubeconfigSecret() error = %v, should contain %s", err, expectedErrorSubstring)
 	}
 }
 
-// TestEnsureKubeconfigSecret_UnreadableFile tests error when file is not readable
-func TestEnsureKubeconfigSecret_UnreadableFile(t *testing.T) {
+// TestEnsureTriageKubeconfigSecret_UnreadableFile tests error when file is not readable
+func TestEnsureTriageKubeconfigSecret_UnreadableFile(t *testing.T) {
 	// Skip this test on systems where we can't control file permissions
 	if os.Getuid() == 0 {
 		t.Skip("Skipping test when running as root (file permission tests don't work)")
@@ -357,27 +358,28 @@ func TestEnsureKubeconfigSecret_UnreadableFile(t *testing.T) {
 	namespace := "nightcrier"
 	clusterName := "test-cluster"
 
-	err = ensureKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
+	err = ensureTriageKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
 	if err == nil {
-		t.Fatal("ensureKubeconfigSecret() should fail when file is not readable")
+		t.Fatal("ensureTriageKubeconfigSecret() should fail when file is not readable")
 	}
 
-	expectedErrorSubstring := "failed to read kubeconfig file"
+	expectedErrorSubstring := "failed to read target kubeconfig file"
 	if !contains(err.Error(), expectedErrorSubstring) {
-		t.Errorf("ensureKubeconfigSecret() error = %v, should contain %s", err, expectedErrorSubstring)
+		t.Errorf("ensureTriageKubeconfigSecret() error = %v, should contain %s", err, expectedErrorSubstring)
 	}
 }
 
-// TestEnsureKubeconfigSecret_UpdatesOnContentChange tests that Secret is updated when file content changes
-func TestEnsureKubeconfigSecret_UpdatesOnContentChange(t *testing.T) {
-	// Pre-create a Secret with old content
+// TestEnsureTriageKubeconfigSecret_UpdatesOnContentChange tests that Secret is updated when file content changes
+func TestEnsureTriageKubeconfigSecret_UpdatesOnContentChange(t *testing.T) {
+	// Pre-create a Secret with old content (using new naming convention)
 	existingSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "kubeconfig-test-cluster",
+			Name:      "triage-kubeconfig-test-cluster",
 			Namespace: "nightcrier",
 			Labels: map[string]string{
 				"app":     "nightcrier",
 				"cluster": "test-cluster",
+				"purpose": "triage",
 			},
 		},
 		Type: corev1.SecretTypeOpaque,
@@ -402,14 +404,14 @@ func TestEnsureKubeconfigSecret_UpdatesOnContentChange(t *testing.T) {
 	namespace := "nightcrier"
 	clusterName := "test-cluster"
 
-	// Call ensureKubeconfigSecret with new file content
-	err = ensureKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
+	// Call ensureTriageKubeconfigSecret with new file content
+	err = ensureTriageKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
 	if err != nil {
-		t.Fatalf("ensureKubeconfigSecret() should not fail: %v", err)
+		t.Fatalf("ensureTriageKubeconfigSecret() should not fail: %v", err)
 	}
 
 	// Verify Secret was updated with new content
-	secret, err := fakeClient.CoreV1().Secrets(namespace).Get(ctx, "kubeconfig-test-cluster", metav1.GetOptions{})
+	secret, err := fakeClient.CoreV1().Secrets(namespace).Get(ctx, "triage-kubeconfig-test-cluster", metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Failed to get Secret: %v", err)
 	}
@@ -420,18 +422,19 @@ func TestEnsureKubeconfigSecret_UpdatesOnContentChange(t *testing.T) {
 	}
 }
 
-// TestEnsureKubeconfigSecret_Idempotent tests that Secret is not modified when content is unchanged
-func TestEnsureKubeconfigSecret_Idempotent(t *testing.T) {
+// TestEnsureTriageKubeconfigSecret_Idempotent tests that Secret is not modified when content is unchanged
+func TestEnsureTriageKubeconfigSecret_Idempotent(t *testing.T) {
 	sameContent := []byte("same-kubeconfig-content")
 
-	// Pre-create a Secret
+	// Pre-create a Secret (using new naming convention)
 	existingSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "kubeconfig-test-cluster",
+			Name:      "triage-kubeconfig-test-cluster",
 			Namespace: "nightcrier",
 			Labels: map[string]string{
 				"app":     "nightcrier",
 				"cluster": "test-cluster",
+				"purpose": "triage",
 			},
 		},
 		Type: corev1.SecretTypeOpaque,
@@ -455,14 +458,14 @@ func TestEnsureKubeconfigSecret_Idempotent(t *testing.T) {
 	namespace := "nightcrier"
 	clusterName := "test-cluster"
 
-	// Call ensureKubeconfigSecret with same content
-	err = ensureKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
+	// Call ensureTriageKubeconfigSecret with same content
+	err = ensureTriageKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
 	if err != nil {
-		t.Fatalf("ensureKubeconfigSecret() should not fail when Secret exists: %v", err)
+		t.Fatalf("ensureTriageKubeconfigSecret() should not fail when Secret exists: %v", err)
 	}
 
 	// Verify Secret still exists with same content (no unnecessary update)
-	secret, err := fakeClient.CoreV1().Secrets(namespace).Get(ctx, "kubeconfig-test-cluster", metav1.GetOptions{})
+	secret, err := fakeClient.CoreV1().Secrets(namespace).Get(ctx, "triage-kubeconfig-test-cluster", metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Failed to get Secret: %v", err)
 	}
@@ -472,8 +475,8 @@ func TestEnsureKubeconfigSecret_Idempotent(t *testing.T) {
 	}
 }
 
-// TestEnsureKubeconfigSecret_GetError tests error handling when Get fails
-func TestEnsureKubeconfigSecret_GetError(t *testing.T) {
+// TestEnsureTriageKubeconfigSecret_GetError tests error handling when Get fails
+func TestEnsureTriageKubeconfigSecret_GetError(t *testing.T) {
 	// Create a valid kubeconfig file
 	tmpDir := t.TempDir()
 	kubeconfigPath := filepath.Join(tmpDir, "kubeconfig.yaml")
@@ -493,19 +496,19 @@ func TestEnsureKubeconfigSecret_GetError(t *testing.T) {
 	namespace := "nightcrier"
 	clusterName := "test-cluster"
 
-	err = ensureKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
+	err = ensureTriageKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
 	if err == nil {
-		t.Fatal("ensureKubeconfigSecret() should fail when Get fails")
+		t.Fatal("ensureTriageKubeconfigSecret() should fail when Get fails")
 	}
 
-	expectedErrorSubstring := "failed to check if Secret kubeconfig-test-cluster exists"
+	expectedErrorSubstring := "failed to check if Secret triage-kubeconfig-test-cluster exists"
 	if !contains(err.Error(), expectedErrorSubstring) {
-		t.Errorf("ensureKubeconfigSecret() error = %v, should contain %s", err, expectedErrorSubstring)
+		t.Errorf("ensureTriageKubeconfigSecret() error = %v, should contain %s", err, expectedErrorSubstring)
 	}
 }
 
-// TestEnsureKubeconfigSecret_CreateError tests error handling when Create fails
-func TestEnsureKubeconfigSecret_CreateError(t *testing.T) {
+// TestEnsureTriageKubeconfigSecret_CreateError tests error handling when Create fails
+func TestEnsureTriageKubeconfigSecret_CreateError(t *testing.T) {
 	// Create a valid kubeconfig file
 	tmpDir := t.TempDir()
 	kubeconfigPath := filepath.Join(tmpDir, "kubeconfig.yaml")
@@ -525,14 +528,14 @@ func TestEnsureKubeconfigSecret_CreateError(t *testing.T) {
 	namespace := "nightcrier"
 	clusterName := "test-cluster"
 
-	err = ensureKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
+	err = ensureTriageKubeconfigSecret(ctx, fakeClient, namespace, clusterName, kubeconfigPath)
 	if err == nil {
-		t.Fatal("ensureKubeconfigSecret() should fail when Create fails")
+		t.Fatal("ensureTriageKubeconfigSecret() should fail when Create fails")
 	}
 
-	expectedErrorSubstring := "failed to create Secret kubeconfig-test-cluster"
+	expectedErrorSubstring := "failed to create Secret triage-kubeconfig-test-cluster"
 	if !contains(err.Error(), expectedErrorSubstring) {
-		t.Errorf("ensureKubeconfigSecret() error = %v, should contain %s", err, expectedErrorSubstring)
+		t.Errorf("ensureTriageKubeconfigSecret() error = %v, should contain %s", err, expectedErrorSubstring)
 	}
 }
 

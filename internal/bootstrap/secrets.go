@@ -9,8 +9,8 @@ import (
 	"os"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -82,24 +82,28 @@ func ensureAPIKeysSecret(ctx context.Context, client kubernetes.Interface, names
 	return nil
 }
 
-// ensureKubeconfigSecret creates or updates a Secret containing kubeconfig file contents.
-// The Secret is named "kubeconfig-{clusterName}" and contains a single key "config" with file contents.
+// ensureTriageKubeconfigSecret creates or updates a Secret containing kubeconfig file contents
+// for triage agent access to a monitored cluster. The Secret is named "triage-kubeconfig-{clusterName}"
+// and contains a single key "config" with file contents.
+//
+// This function is specifically for monitored cluster target kubeconfigs that get mounted into
+// agent pods. Execution cluster kubeconfigs are used directly by Nightcrier and are not handled here.
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeouts
 //   - client: Kubernetes clientset for API operations
 //   - namespace: Target namespace for the Secret
-//   - clusterName: Name of the cluster (used in Secret name and labels)
-//   - kubeconfigPath: File path to the kubeconfig file
+//   - clusterName: Name of the monitored cluster (used in Secret name and labels)
+//   - targetKubeconfigPath: File path to the kubeconfig file for triage access
 //
 // Validation:
-//   - File must exist at kubeconfigPath
+//   - File must exist at targetKubeconfigPath
 //   - File must be readable
 //   - Returns clear error message if file is missing or unreadable
 //
 // Behavior:
 //   - Validates file exists and reads contents into memory
-//   - Checks if Secret "kubeconfig-{clusterName}" exists
+//   - Checks if Secret "triage-kubeconfig-{clusterName}" exists
 //   - If exists and content differs, updates Secret with new file contents
 //   - If exists and content is same, skips update (idempotent)
 //   - If not exists, creates Secret with file contents
@@ -108,36 +112,37 @@ func ensureAPIKeysSecret(ctx context.Context, client kubernetes.Interface, names
 //
 // Labels applied:
 //   - app=nightcrier: Identifies resource ownership
-//   - cluster={clusterName}: Links to specific cluster
+//   - cluster={clusterName}: Links to specific monitored cluster
+//   - purpose=triage: Identifies this as a triage kubeconfig (used by agents)
 //
 // Returns error if file validation fails, Secret GET fails (except NotFound), or creation fails.
-func ensureKubeconfigSecret(ctx context.Context, client kubernetes.Interface, namespace, clusterName, kubeconfigPath string) error {
+func ensureTriageKubeconfigSecret(ctx context.Context, client kubernetes.Interface, namespace, clusterName, targetKubeconfigPath string) error {
 	// Validate file exists
-	fileInfo, err := os.Stat(kubeconfigPath)
+	fileInfo, err := os.Stat(targetKubeconfigPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("kubeconfig file not found at path: %s", kubeconfigPath)
+			return fmt.Errorf("target kubeconfig file not found at path: %s", targetKubeconfigPath)
 		}
-		return fmt.Errorf("failed to access kubeconfig file at %s: %w", kubeconfigPath, err)
+		return fmt.Errorf("failed to access target kubeconfig file at %s: %w", targetKubeconfigPath, err)
 	}
 
 	// Check if file is readable
 	if fileInfo.IsDir() {
-		return fmt.Errorf("kubeconfig path is a directory, expected a file: %s", kubeconfigPath)
+		return fmt.Errorf("target kubeconfig path is a directory, expected a file: %s", targetKubeconfigPath)
 	}
 
 	// Read file contents
-	fileContents, err := os.ReadFile(kubeconfigPath)
+	fileContents, err := os.ReadFile(targetKubeconfigPath)
 	if err != nil {
-		return fmt.Errorf("failed to read kubeconfig file at %s: %w", kubeconfigPath, err)
+		return fmt.Errorf("failed to read target kubeconfig file at %s: %w", targetKubeconfigPath, err)
 	}
 
 	// Validate file is not empty
 	if len(fileContents) == 0 {
-		return fmt.Errorf("kubeconfig file is empty: %s", kubeconfigPath)
+		return fmt.Errorf("target kubeconfig file is empty: %s", targetKubeconfigPath)
 	}
 
-	secretName := fmt.Sprintf("kubeconfig-%s", clusterName)
+	secretName := fmt.Sprintf("triage-kubeconfig-%s", clusterName)
 
 	// Check if Secret already exists
 	existingSecret, err := client.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
@@ -153,7 +158,7 @@ func ensureKubeconfigSecret(ctx context.Context, client kubernetes.Interface, na
 		existingSecret.Data["config"] = fileContents
 		_, err = client.CoreV1().Secrets(namespace).Update(ctx, existingSecret, metav1.UpdateOptions{})
 		if err != nil {
-			return fmt.Errorf("failed to update Secret %s with new kubeconfig: %w", secretName, err)
+			return fmt.Errorf("failed to update Secret %s with new target kubeconfig: %w", secretName, err)
 		}
 		return nil
 	}
@@ -171,6 +176,7 @@ func ensureKubeconfigSecret(ctx context.Context, client kubernetes.Interface, na
 			Labels: map[string]string{
 				"app":        "nightcrier",
 				"cluster":    clusterName,
+				"purpose":    "triage",
 				"managed-by": "nightcrier-bootstrap",
 			},
 		},

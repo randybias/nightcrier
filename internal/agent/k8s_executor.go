@@ -29,21 +29,8 @@ type LogPaths struct {
 }
 
 // K8sExecutorConfig holds configuration for the Kubernetes-native executor.
+// This includes agent settings that are not cluster-specific.
 type K8sExecutorConfig struct {
-	// Kubernetes namespace where Jobs and ConfigMaps will be created
-	Namespace string
-	// Container image for the agent runner
-	Image string
-	// Image pull policy (Always, Never, IfNotPresent)
-	ImagePullPolicy string
-	// Job timeout in seconds
-	Timeout int
-	// Memory limit (e.g., "2Gi")
-	MemoryLimit string
-	// CPU limit (e.g., "1")
-	CPULimit string
-	// TTL for cleanup after Job completion (seconds)
-	CleanupTTL int32
 	// Agent CLI to use (claude/codex/gemini/goose)
 	AgentCLI string
 	// LLM model to use
@@ -65,18 +52,24 @@ type K8sExecutorConfig struct {
 //   - Phase 4: Process artifacts and update database
 //   - Phase 5: Complete incident and cleanup
 type K8sExecutor struct {
-	config          K8sExecutorConfig
-	k8sClient       *k8s.Client
-	objectStore     *storage.ObjectStore
-	stateStore      storage.StateStore
-	storage         storage.Storage
-	processor       *k8s.ArtifactProcessor
-	tuning          *config.TuningConfig
+	config            K8sExecutorConfig
+	executionClusters map[string]*config.ExecutionClusterConfig
+	defaultCluster    string // Name of the default execution cluster
+	k8sClient         *k8s.Client
+	objectStore       *storage.ObjectStore
+	stateStore        storage.StateStore
+	storage           storage.Storage
+	processor         *k8s.ArtifactProcessor
+	tuning            *config.TuningConfig
 }
 
 // NewK8sExecutor creates a new Kubernetes-native executor.
+// executionClusters is a map of cluster name to ExecutionClusterConfig.
+// defaultClusterName specifies which cluster to use when no specific cluster is requested.
 func NewK8sExecutor(
 	cfg K8sExecutorConfig,
+	executionClusters map[string]*config.ExecutionClusterConfig,
+	defaultClusterName string,
 	k8sClient *k8s.Client,
 	objectStore *storage.ObjectStore,
 	stateStore storage.StateStore,
@@ -84,14 +77,47 @@ func NewK8sExecutor(
 	tuning *config.TuningConfig,
 ) *K8sExecutor {
 	return &K8sExecutor{
-		config:      cfg,
-		k8sClient:   k8sClient,
-		objectStore: objectStore,
-		stateStore:  stateStore,
-		storage:     storageBackend,
-		processor:   k8s.NewArtifactProcessor(objectStore, stateStore, storageBackend),
-		tuning:      tuning,
+		config:            cfg,
+		executionClusters: executionClusters,
+		defaultCluster:    defaultClusterName,
+		k8sClient:         k8sClient,
+		objectStore:       objectStore,
+		stateStore:        stateStore,
+		storage:           storageBackend,
+		processor:         k8s.NewArtifactProcessor(objectStore, stateStore, storageBackend),
+		tuning:            tuning,
 	}
+}
+
+// SelectExecutionCluster returns the execution cluster configuration for the given name.
+// If preferredName is empty, returns the default execution cluster.
+// Returns an error if the cluster is not found or no clusters are configured.
+func (e *K8sExecutor) SelectExecutionCluster(preferredName string) (*config.ExecutionClusterConfig, error) {
+	if len(e.executionClusters) == 0 {
+		return nil, fmt.Errorf("no execution clusters configured")
+	}
+
+	if preferredName != "" {
+		if cluster, ok := e.executionClusters[preferredName]; ok {
+			return cluster, nil
+		}
+		return nil, fmt.Errorf("execution cluster %q not found", preferredName)
+	}
+
+	// Return default cluster
+	if e.defaultCluster != "" {
+		if cluster, ok := e.executionClusters[e.defaultCluster]; ok {
+			return cluster, nil
+		}
+		return nil, fmt.Errorf("default execution cluster %q not found", e.defaultCluster)
+	}
+
+	// Fallback: return first available cluster
+	for _, cluster := range e.executionClusters {
+		return cluster, nil
+	}
+
+	return nil, fmt.Errorf("no execution clusters configured")
 }
 
 // SetStateStore updates the stateStore reference in the executor and its processor.
@@ -104,25 +130,40 @@ func (e *K8sExecutor) SetStateStore(stateStore storage.StateStore) {
 
 // Execute runs the agent in a Kubernetes Job and processes the results.
 // This implements the full Phase 1-5 orchestration.
+// Uses the default execution cluster.
 func (e *K8sExecutor) Execute(ctx context.Context, workspacePath string, incidentID string) (int, LogPaths, error) {
-	return e.ExecuteWithPrompt(ctx, workspacePath, incidentID, "")
+	return e.ExecuteOnCluster(ctx, workspacePath, incidentID, "", "")
 }
 
 // ExecuteWithPrompt runs the agent with a custom prompt.
-// This is the main entry point that orchestrates all phases.
+// Uses the default execution cluster.
 func (e *K8sExecutor) ExecuteWithPrompt(ctx context.Context, workspacePath string, incidentID string, prompt string) (int, LogPaths, error) {
+	return e.ExecuteOnCluster(ctx, workspacePath, incidentID, prompt, "")
+}
+
+// ExecuteOnCluster runs the agent on a specific execution cluster.
+// If executionClusterName is empty, uses the default execution cluster.
+// This is the main entry point that orchestrates all phases.
+func (e *K8sExecutor) ExecuteOnCluster(ctx context.Context, workspacePath string, incidentID string, prompt string, executionClusterName string) (int, LogPaths, error) {
+	// Select execution cluster
+	execCluster, err := e.SelectExecutionCluster(executionClusterName)
+	if err != nil {
+		return -1, LogPaths{}, fmt.Errorf("failed to select execution cluster: %w", err)
+	}
+
 	slog.Info("executing agent in Kubernetes Job",
 		"incident_id", incidentID,
-		"namespace", e.config.Namespace,
-		"image", e.config.Image,
-		"timeout", e.config.Timeout)
+		"execution_cluster", execCluster.Name,
+		"namespace", execCluster.Namespace,
+		"image", execCluster.RunnerImage,
+		"timeout", execCluster.Timeout)
 
 	executionID := uuid.New().String()
 	startedAt := time.Now()
 
 	// Phase 1.1: Generate presigned PUT URLs for outputs
 	slog.Info("generating presigned URLs for outputs", "incident_id", incidentID)
-	jobTimeout := time.Duration(e.config.Timeout) * time.Second
+	jobTimeout := time.Duration(execCluster.Timeout) * time.Second
 	outputURLs, err := k8s.GenerateOutputURLs(ctx, e.objectStore, incidentID, jobTimeout)
 	if err != nil {
 		return -1, LogPaths{}, fmt.Errorf("failed to generate output URLs: %w", err)
@@ -137,7 +178,7 @@ func (e *K8sExecutor) ExecuteWithPrompt(ctx context.Context, workspacePath strin
 
 	// Phase 1.3: Create ConfigMap with incident data
 	slog.Info("creating ConfigMap with incident data", "incident_id", incidentID)
-	configMapName, err := e.createConfigMap(ctx, incidentID, incidentData)
+	configMapName, err := e.createConfigMap(ctx, execCluster, incidentID, incidentData)
 	if err != nil {
 		return -1, LogPaths{}, fmt.Errorf("failed to create ConfigMap: %w", err)
 	}
@@ -147,7 +188,7 @@ func (e *K8sExecutor) ExecuteWithPrompt(ctx context.Context, workspacePath strin
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := e.k8sClient.DeleteConfigMap(cleanupCtx, e.config.Namespace, configMapName); err != nil {
+		if err := e.k8sClient.DeleteConfigMap(cleanupCtx, execCluster.Namespace, configMapName); err != nil {
 			slog.Warn("failed to cleanup ConfigMap", "name", configMapName, "error", err)
 		} else {
 			slog.Debug("ConfigMap cleaned up", "name", configMapName)
@@ -157,7 +198,7 @@ func (e *K8sExecutor) ExecuteWithPrompt(ctx context.Context, workspacePath strin
 	// Phase 1.5: Create Job
 	slog.Info("creating Kubernetes Job", "incident_id", incidentID)
 	combinedPrompt := e.buildCombinedPrompt(prompt)
-	jobName, err := e.createJob(ctx, incidentID, incidentData.ClusterName, configMapName, outputURLs, combinedPrompt)
+	jobName, err := e.createJob(ctx, execCluster, incidentID, incidentData.ClusterName, configMapName, outputURLs, combinedPrompt)
 	if err != nil {
 		return -1, LogPaths{}, fmt.Errorf("failed to create Job: %w", err)
 	}
@@ -178,8 +219,8 @@ func (e *K8sExecutor) ExecuteWithPrompt(ctx context.Context, workspacePath strin
 	}
 
 	// Phase 3.1: Watch Job for completion
-	slog.Info("watching Job for completion", "job", jobName, "timeout", e.config.Timeout)
-	watchResult, err := e.watchJob(ctx, jobName)
+	slog.Info("watching Job for completion", "job", jobName, "timeout", execCluster.Timeout)
+	watchResult, err := e.watchJob(ctx, execCluster, jobName)
 	if err != nil {
 		return -1, LogPaths{}, fmt.Errorf("failed to watch Job: %w", err)
 	}
@@ -309,16 +350,17 @@ func (e *K8sExecutor) buildCombinedPrompt(additionalPrompt string) string {
 	return additionalPrompt
 }
 
-// createConfigMap creates a ConfigMap with incident data.
-func (e *K8sExecutor) createConfigMap(ctx context.Context, incidentID string, data *IncidentData) (string, error) {
+// createConfigMap creates a ConfigMap with incident data in the execution cluster's namespace.
+func (e *K8sExecutor) createConfigMap(ctx context.Context, execCluster *config.ExecutionClusterConfig, incidentID string, data *IncidentData) (string, error) {
 	cfg := k8s.ConfigMapConfig{
-		Namespace:   e.config.Namespace,
+		Namespace:   execCluster.Namespace,
 		IncidentID:  incidentID,
 		ClusterName: data.ClusterName,
 		Labels: map[string]string{
-			"app":         "nc-agent-runner",
-			"incident-id": incidentID,
-			"cluster":     data.ClusterName,
+			"app":               "nc-agent-runner",
+			"incident-id":       incidentID,
+			"cluster":           data.ClusterName,
+			"execution-cluster": execCluster.Name,
 		},
 	}
 
@@ -331,6 +373,7 @@ func (e *K8sExecutor) createConfigMap(ctx context.Context, incidentID string, da
 	// Debug: Log ConfigMap data sizes
 	slog.Debug("ConfigMap data prepared",
 		"incident_id", incidentID,
+		"execution_cluster", execCluster.Name,
 		"incident_json_size", len(cmData.IncidentJSON),
 		"permissions_json_size", len(cmData.PermissionsJSON),
 		"base_triage_prompt_size", len(cmData.BaseTriagePrompt))
@@ -338,9 +381,10 @@ func (e *K8sExecutor) createConfigMap(ctx context.Context, incidentID string, da
 	return e.k8sClient.CreateIncidentConfigMap(ctx, cfg, cmData)
 }
 
-// createJob creates a Kubernetes Job for agent execution.
+// createJob creates a Kubernetes Job for agent execution using the execution cluster's settings.
 func (e *K8sExecutor) createJob(
 	ctx context.Context,
+	execCluster *config.ExecutionClusterConfig,
 	incidentID string,
 	clusterName string,
 	configMapName string,
@@ -348,11 +392,11 @@ func (e *K8sExecutor) createJob(
 	prompt string,
 ) (string, error) {
 	cfg := k8s.JobConfig{
-		Namespace:       e.config.Namespace,
+		Namespace:       execCluster.Namespace,
 		IncidentID:      incidentID,
 		ClusterName:     clusterName,
-		Image:           e.config.Image,
-		ImagePullPolicy: e.config.ImagePullPolicy,
+		Image:           execCluster.RunnerImage,
+		ImagePullPolicy: execCluster.ImagePullPolicy,
 		AgentCLI:        e.config.AgentCLI,
 		LLMModel:        e.config.Model,
 		Prompt:          prompt,
@@ -360,18 +404,19 @@ func (e *K8sExecutor) createJob(
 		SecretName:      "kubeconfig-" + clusterName, // Convention: kubeconfig-{cluster-name}
 		PresignedURLs:   outputURLs.ToPresignedURLs(),
 		Resources: k8s.ResourceConfig{
-			MemoryLimit:   e.config.MemoryLimit,
-			CPULimit:      e.config.CPULimit,
+			MemoryLimit:   execCluster.MemoryLimit,
+			CPULimit:      execCluster.CPULimit,
 			MemoryRequest: "512Mi", // Fixed for now
 			CPURequest:    "250m",  // Fixed for now
 		},
-		TTLSecondsAfterFinished: e.config.CleanupTTL,
-		ActiveDeadlineSeconds:   int64(e.config.Timeout),
+		TTLSecondsAfterFinished: int32(execCluster.CleanupTTL),
+		ActiveDeadlineSeconds:   int64(execCluster.Timeout),
 		BackoffLimit:            0, // No retries for triage
 		Labels: map[string]string{
-			"app":         "nc-agent-runner",
-			"incident-id": incidentID,
-			"cluster":     clusterName,
+			"app":               "nc-agent-runner",
+			"incident-id":       incidentID,
+			"cluster":           clusterName,
+			"execution-cluster": execCluster.Name,
 		},
 		NATSEnabled: e.config.NATSEnabled,
 		NATSServer:  e.config.NATSServer,
@@ -381,13 +426,13 @@ func (e *K8sExecutor) createJob(
 	return e.k8sClient.CreateJob(ctx, cfg)
 }
 
-// watchJob watches a Job until completion.
-func (e *K8sExecutor) watchJob(ctx context.Context, jobName string) (*k8s.JobWatchResult, error) {
+// watchJob watches a Job until completion using the execution cluster's timeout.
+func (e *K8sExecutor) watchJob(ctx context.Context, execCluster *config.ExecutionClusterConfig, jobName string) (*k8s.JobWatchResult, error) {
 	// Add buffer to watch timeout (should be longer than Job timeout)
-	watchTimeout := time.Duration(e.config.Timeout+e.tuning.Agent.TimeoutBufferSeconds) * time.Second
+	watchTimeout := time.Duration(execCluster.Timeout+e.tuning.Agent.TimeoutBufferSeconds) * time.Second
 
 	cfg := k8s.WatchJobConfig{
-		Namespace: e.config.Namespace,
+		Namespace: execCluster.Namespace,
 		JobName:   jobName,
 		Timeout:   watchTimeout,
 		LogFunc: func(message string) {

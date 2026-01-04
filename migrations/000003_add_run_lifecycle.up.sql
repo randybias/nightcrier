@@ -14,11 +14,10 @@ ALTER TABLE agent_executions
 ALTER TABLE agent_executions
   RENAME COLUMN completed_at TO job_completed_at;
 
--- Add run lifecycle columns
-ALTER TABLE agent_executions
-  ADD COLUMN run_started_at TIMESTAMP,
-  ADD COLUMN run_completed_at TIMESTAMP,
-  ADD COLUMN run_exit_code INTEGER;
+-- Add run lifecycle columns (separate statements for SQLite compatibility)
+ALTER TABLE agent_executions ADD COLUMN run_started_at TIMESTAMP;
+ALTER TABLE agent_executions ADD COLUMN run_completed_at TIMESTAMP;
+ALTER TABLE agent_executions ADD COLUMN run_exit_code INTEGER;
 
 -- Create indexes for run lifecycle queries
 CREATE INDEX IF NOT EXISTS idx_agent_executions_run_started_at

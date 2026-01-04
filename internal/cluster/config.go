@@ -9,10 +9,12 @@ import (
 	"strings"
 )
 
-// ClusterConfig defines a single cluster's connection and triage configuration.
+// MonitoredClusterConfig defines a single cluster's connection and triage configuration.
 // Each cluster has its own MCP server endpoint for receiving fault events
 // and optional triage configuration for investigating incidents.
-type ClusterConfig struct {
+//
+// Note: This was renamed from ClusterConfig to distinguish from ExecutionClusterConfig.
+type MonitoredClusterConfig struct {
 	// Name is a unique identifier for this cluster (required).
 	Name string `mapstructure:"name" validate:"required"`
 
@@ -52,10 +54,11 @@ type TriageConfig struct {
 	// Default: false (triage disabled)
 	Enabled bool `mapstructure:"enabled"`
 
-	// Kubeconfig is the path to the kubeconfig file for cluster access.
+	// Kubeconfig is the path to the kubeconfig file for agent access to the target cluster.
 	// Required when Enabled=true. The kubeconfig must exist and be readable.
+	// This is the read-only kubeconfig that agents use to investigate incidents.
 	// Validation: required_if=Enabled true, file exists
-	Kubeconfig string `mapstructure:"kubeconfig" validate:"required_if=Enabled true,file"`
+	Kubeconfig string `mapstructure:"target_kubeconfig_path" validate:"required_if=Enabled true,file"`
 
 	// AllowSecretsAccess controls whether the triage agent can read secrets/configmaps.
 	// Default: false (disabled for security)
@@ -71,15 +74,20 @@ type TriageConfig struct {
 	// that expose Helm metadata without revealing secret values, or support
 	// dynamic permission escalation with operator approval.
 	AllowSecretsAccess bool `mapstructure:"allow_secrets_access"`
+
+	// ExecutionCluster is the name of the execution cluster where agent Jobs run.
+	// Optional: if omitted, uses the first configured execution cluster.
+	// Must reference a valid name from execution_clusters[] in the config.
+	ExecutionCluster string `mapstructure:"execution_cluster"`
 }
 
-// Validate checks the ClusterConfig for required fields and valid values.
+// Validate checks the MonitoredClusterConfig for required fields and valid values.
 // It performs comprehensive validation including:
 // - Name uniqueness (handled by caller)
 // - MCP endpoint presence
 // - Triage kubeconfig existence (if triage enabled)
 // - Label key/value validity
-func (c *ClusterConfig) Validate() error {
+func (c *MonitoredClusterConfig) Validate() error {
 	// Validate name
 	if c.Name == "" {
 		return fmt.Errorf("cluster name is required")
@@ -103,15 +111,15 @@ func (c *ClusterConfig) Validate() error {
 	// Validate triage configuration
 	if c.Triage.Enabled {
 		if c.Triage.Kubeconfig == "" {
-			return fmt.Errorf("cluster %s: triage.kubeconfig is required when triage.enabled=true", c.Name)
+			return fmt.Errorf("cluster %s: triage.target_kubeconfig_path is required when triage.enabled=true", c.Name)
 		}
 
 		// Check if kubeconfig file exists
 		if _, err := os.Stat(c.Triage.Kubeconfig); err != nil {
 			if os.IsNotExist(err) {
-				return fmt.Errorf("cluster %s: kubeconfig file not found at %q", c.Name, c.Triage.Kubeconfig)
+				return fmt.Errorf("cluster %s: target_kubeconfig_path file not found at %q", c.Name, c.Triage.Kubeconfig)
 			}
-			return fmt.Errorf("cluster %s: cannot access kubeconfig at %q: %w", c.Name, c.Triage.Kubeconfig, err)
+			return fmt.Errorf("cluster %s: cannot access target_kubeconfig_path at %q: %w", c.Name, c.Triage.Kubeconfig, err)
 		}
 	}
 

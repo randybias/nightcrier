@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -51,28 +52,66 @@ func (a *AgentConfig) Validate() error {
 	return nil
 }
 
-// K8sConfig holds Kubernetes executor configuration.
-type K8sConfig struct {
-	// Namespace where Jobs and ConfigMaps are created
+// ExecutionDefaults provides default values for all execution clusters.
+// Individual execution clusters can override any of these fields.
+type ExecutionDefaults struct {
+	// Namespace where Jobs and ConfigMaps are created (default: "nightcrier")
 	Namespace string `mapstructure:"namespace"`
 
-	// Image is the container image for the agent runner
-	Image string `mapstructure:"image"`
+	// RunnerImage is the container image for the agent runner (default: "nc-agent-runner:latest")
+	RunnerImage string `mapstructure:"runner_image"`
 
-	// ImagePullPolicy: Always, Never, IfNotPresent
+	// ImagePullPolicy: Always, Never, IfNotPresent (default: "IfNotPresent")
 	ImagePullPolicy string `mapstructure:"image_pull_policy"`
 
-	// Timeout is the Job timeout in seconds
+	// Timeout is the Job timeout in seconds (default: 600)
 	Timeout int `mapstructure:"timeout"`
 
-	// MemoryLimit for Job containers (e.g., "2Gi")
+	// MemoryLimit for Job containers (default: "2Gi")
 	MemoryLimit string `mapstructure:"memory_limit"`
 
-	// CPULimit for Job containers (e.g., "1")
+	// CPULimit for Job containers (default: "1")
 	CPULimit string `mapstructure:"cpu_limit"`
 
-	// CleanupTTL is the TTL for Job cleanup after completion (seconds)
+	// CleanupTTL is the TTL for Job cleanup after completion in seconds (default: 3600)
 	CleanupTTL int `mapstructure:"cleanup_ttl"`
+
+	// MaxConcurrentAgents is the maximum number of concurrent agent Jobs per cluster (default: 10)
+	MaxConcurrentAgents int `mapstructure:"max_concurrent_agents"`
+}
+
+// ExecutionClusterConfig defines a Kubernetes cluster where agent Jobs run.
+// Each execution cluster can override the global execution_defaults.
+type ExecutionClusterConfig struct {
+	// Name is a unique identifier for this execution cluster (required)
+	Name string `mapstructure:"name"`
+
+	// KubeconfigPath is the path to the kubeconfig file for this cluster (required)
+	KubeconfigPath string `mapstructure:"kubeconfig_path"`
+
+	// Namespace where Jobs and ConfigMaps are created (optional, uses execution_defaults)
+	Namespace string `mapstructure:"namespace"`
+
+	// RunnerImage is the container image for the agent runner (optional, uses execution_defaults)
+	RunnerImage string `mapstructure:"runner_image"`
+
+	// ImagePullPolicy: Always, Never, IfNotPresent (optional, uses execution_defaults)
+	ImagePullPolicy string `mapstructure:"image_pull_policy"`
+
+	// Timeout is the Job timeout in seconds (optional, uses execution_defaults)
+	Timeout int `mapstructure:"timeout"`
+
+	// MemoryLimit for Job containers (optional, uses execution_defaults)
+	MemoryLimit string `mapstructure:"memory_limit"`
+
+	// CPULimit for Job containers (optional, uses execution_defaults)
+	CPULimit string `mapstructure:"cpu_limit"`
+
+	// CleanupTTL is the TTL for Job cleanup after completion in seconds (optional, uses execution_defaults)
+	CleanupTTL int `mapstructure:"cleanup_ttl"`
+
+	// MaxConcurrentAgents is the maximum number of concurrent agent Jobs (optional, uses execution_defaults)
+	MaxConcurrentAgents int `mapstructure:"max_concurrent_agents"`
 }
 
 // NATSConfig holds NATS progress tracking configuration.
@@ -93,39 +132,94 @@ type NATSConfig struct {
 	ReconnectWait time.Duration `mapstructure:"reconnect_wait"`
 }
 
-// Validate validates the K8sConfig fields
-func (k *K8sConfig) Validate() error {
-	if k.ImagePullPolicy != "" {
+// Validate validates the ExecutionDefaults fields
+func (e *ExecutionDefaults) Validate() error {
+	if e.ImagePullPolicy != "" {
 		validPolicies := map[string]bool{"Always": true, "Never": true, "IfNotPresent": true}
-		if !validPolicies[k.ImagePullPolicy] {
-			return fmt.Errorf("invalid k8s.image_pull_policy '%s', must be one of: Always, Never, IfNotPresent", k.ImagePullPolicy)
+		if !validPolicies[e.ImagePullPolicy] {
+			return fmt.Errorf("invalid execution_defaults.image_pull_policy '%s', must be one of: Always, Never, IfNotPresent", e.ImagePullPolicy)
 		}
 	}
 	return nil
 }
 
-// ApplyDefaults sets default values for K8sConfig
-func (k *K8sConfig) ApplyDefaults() {
-	if k.Namespace == "" {
-		k.Namespace = "nightcrier"
+// ApplyDefaults sets default values for ExecutionDefaults
+func (e *ExecutionDefaults) ApplyDefaults() {
+	if e.Namespace == "" {
+		e.Namespace = "nightcrier"
 	}
-	if k.Image == "" {
-		k.Image = "nc-agent-runner:latest"
+	if e.RunnerImage == "" {
+		e.RunnerImage = "nc-agent-runner:latest"
 	}
-	if k.ImagePullPolicy == "" {
-		k.ImagePullPolicy = "IfNotPresent"
+	if e.ImagePullPolicy == "" {
+		e.ImagePullPolicy = "IfNotPresent"
 	}
-	if k.Timeout == 0 {
-		k.Timeout = 600
+	if e.Timeout == 0 {
+		e.Timeout = 600
 	}
-	if k.MemoryLimit == "" {
-		k.MemoryLimit = "2Gi"
+	if e.MemoryLimit == "" {
+		e.MemoryLimit = "2Gi"
 	}
-	if k.CPULimit == "" {
-		k.CPULimit = "1"
+	if e.CPULimit == "" {
+		e.CPULimit = "1"
 	}
-	if k.CleanupTTL == 0 {
-		k.CleanupTTL = 3600
+	if e.CleanupTTL == 0 {
+		e.CleanupTTL = 3600
+	}
+	if e.MaxConcurrentAgents == 0 {
+		e.MaxConcurrentAgents = 10
+	}
+}
+
+// Validate validates the ExecutionClusterConfig fields
+func (e *ExecutionClusterConfig) Validate() error {
+	if e.Name == "" {
+		return fmt.Errorf("execution cluster name is required")
+	}
+	if e.KubeconfigPath == "" {
+		return fmt.Errorf("execution cluster %s: kubeconfig_path is required", e.Name)
+	}
+	// Check if kubeconfig file exists
+	if _, err := os.Stat(e.KubeconfigPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("execution cluster %s: kubeconfig file not found at %q", e.Name, e.KubeconfigPath)
+		}
+		return fmt.Errorf("execution cluster %s: cannot access kubeconfig at %q: %w", e.Name, e.KubeconfigPath, err)
+	}
+	if e.ImagePullPolicy != "" {
+		validPolicies := map[string]bool{"Always": true, "Never": true, "IfNotPresent": true}
+		if !validPolicies[e.ImagePullPolicy] {
+			return fmt.Errorf("execution cluster %s: invalid image_pull_policy '%s', must be one of: Always, Never, IfNotPresent", e.Name, e.ImagePullPolicy)
+		}
+	}
+	return nil
+}
+
+// ApplyDefaults applies defaults from ExecutionDefaults to this ExecutionClusterConfig
+func (e *ExecutionClusterConfig) ApplyDefaults(defaults *ExecutionDefaults) {
+	if e.Namespace == "" {
+		e.Namespace = defaults.Namespace
+	}
+	if e.RunnerImage == "" {
+		e.RunnerImage = defaults.RunnerImage
+	}
+	if e.ImagePullPolicy == "" {
+		e.ImagePullPolicy = defaults.ImagePullPolicy
+	}
+	if e.Timeout == 0 {
+		e.Timeout = defaults.Timeout
+	}
+	if e.MemoryLimit == "" {
+		e.MemoryLimit = defaults.MemoryLimit
+	}
+	if e.CPULimit == "" {
+		e.CPULimit = defaults.CPULimit
+	}
+	if e.CleanupTTL == 0 {
+		e.CleanupTTL = defaults.CleanupTTL
+	}
+	if e.MaxConcurrentAgents == 0 {
+		e.MaxConcurrentAgents = defaults.MaxConcurrentAgents
 	}
 }
 
@@ -168,9 +262,15 @@ func (n *NATSConfig) ApplyDefaults() {
 
 // Config holds the application configuration.
 type Config struct {
-	// Cluster Configuration
-	Clusters      []cluster.ClusterConfig `mapstructure:"clusters"`
-	SubscribeMode string                  `mapstructure:"subscribe_mode"` // events, faults
+	// Monitored Clusters - clusters where fault events are received from MCP servers
+	MonitoredClusters []cluster.MonitoredClusterConfig `mapstructure:"monitored_clusters"`
+	SubscribeMode     string                           `mapstructure:"subscribe_mode"` // events, faults
+
+	// Execution Clusters - Kubernetes clusters where agent Jobs run
+	ExecutionClusters []ExecutionClusterConfig `mapstructure:"execution_clusters"`
+
+	// Execution Defaults - default values for execution clusters
+	ExecutionDefaults ExecutionDefaults `mapstructure:"execution_defaults"`
 
 	// Workspace
 	WorkspaceRoot string `mapstructure:"workspace_root"`
@@ -189,12 +289,9 @@ type Config struct {
 	OpenAIAPIKey    string `mapstructure:"openai_api_key"`
 	GeminiAPIKey    string `mapstructure:"gemini_api_key"`
 
-	// Kubernetes Configuration
+	// Kubernetes Configuration (deprecated - use ExecutionClusters instead)
 	KubeconfigPath    string `mapstructure:"kubeconfig_path"`
 	KubernetesContext string `mapstructure:"kubernetes_context"`
-
-	// K8s Executor Configuration (nested)
-	K8s K8sConfig `mapstructure:"k8s"`
 
 	// NATS Configuration (optional progress tracking)
 	NATS NATSConfig `mapstructure:"nats"`
@@ -346,14 +443,15 @@ func bindEnvVars() {
 		"gemini_api_key":           "GEMINI_API_KEY",
 		"kubeconfig_path":          "KUBECONFIG_PATH",
 		"kubernetes_context":       "KUBERNETES_CONTEXT",
-		// K8s configuration (nested)
-		"k8s.namespace":         "K8S_NAMESPACE",
-		"k8s.image":             "K8S_IMAGE",
-		"k8s.image_pull_policy": "K8S_IMAGE_PULL_POLICY",
-		"k8s.timeout":           "K8S_TIMEOUT",
-		"k8s.memory_limit":      "K8S_MEMORY_LIMIT",
-		"k8s.cpu_limit":         "K8S_CPU_LIMIT",
-		"k8s.cleanup_ttl":       "K8S_CLEANUP_TTL",
+		// Execution defaults configuration (nested)
+		"execution_defaults.namespace":            "EXECUTION_DEFAULTS_NAMESPACE",
+		"execution_defaults.runner_image":         "EXECUTION_DEFAULTS_RUNNER_IMAGE",
+		"execution_defaults.image_pull_policy":    "EXECUTION_DEFAULTS_IMAGE_PULL_POLICY",
+		"execution_defaults.timeout":              "EXECUTION_DEFAULTS_TIMEOUT",
+		"execution_defaults.memory_limit":         "EXECUTION_DEFAULTS_MEMORY_LIMIT",
+		"execution_defaults.cpu_limit":            "EXECUTION_DEFAULTS_CPU_LIMIT",
+		"execution_defaults.cleanup_ttl":          "EXECUTION_DEFAULTS_CLEANUP_TTL",
+		"execution_defaults.max_concurrent_agents": "EXECUTION_DEFAULTS_MAX_CONCURRENT_AGENTS",
 		// NATS configuration (nested)
 		"nats.enabled":                             "NATS_ENABLED",
 		"nats.server":                              "NATS_SERVER",
@@ -476,27 +574,75 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("required field %q is missing (environment variable: %s). Please set it via environment variable, config file, or command-line flag. See configs/config.example.yaml for details", fieldName, envVar)
 	}
 
-	// Required: Clusters
-	if len(c.Clusters) == 0 {
-		return fmt.Errorf("at least one cluster must be configured in the 'clusters' array")
+	// Monitored Clusters: zero clusters allowed at startup (warn only)
+	if len(c.MonitoredClusters) == 0 {
+		// Log warning - will be logged by caller since we don't have logger here
+		// System will poll database for new clusters
 	}
 
-	// Validate cluster name uniqueness and individual cluster configs
-	clusterNames := make(map[string]bool)
-	for i, cluster := range c.Clusters {
-		if cluster.Name == "" {
-			return fmt.Errorf("cluster[%d]: name is required", i)
+	// Validate monitored cluster name uniqueness and individual cluster configs
+	monitoredClusterNames := make(map[string]bool)
+	triageEnabledCount := 0
+	for i, mc := range c.MonitoredClusters {
+		if mc.Name == "" {
+			return fmt.Errorf("monitored_clusters[%d]: name is required", i)
 		}
 
-		if clusterNames[cluster.Name] {
-			return fmt.Errorf("duplicate cluster name: %s", cluster.Name)
+		if monitoredClusterNames[mc.Name] {
+			return fmt.Errorf("duplicate monitored cluster name: %s", mc.Name)
 		}
-		clusterNames[cluster.Name] = true
+		monitoredClusterNames[mc.Name] = true
 
-		// Validate individual cluster config
-		if err := cluster.Validate(); err != nil {
-			return fmt.Errorf("cluster[%d] (%s): %w", i, cluster.Name, err)
+		// Validate individual monitored cluster config
+		if err := mc.Validate(); err != nil {
+			return fmt.Errorf("monitored_clusters[%d] (%s): %w", i, mc.Name, err)
 		}
+
+		if mc.Triage.Enabled {
+			triageEnabledCount++
+		}
+	}
+
+	// Apply execution defaults first
+	c.ExecutionDefaults.ApplyDefaults()
+	if err := c.ExecutionDefaults.Validate(); err != nil {
+		return fmt.Errorf("execution_defaults configuration invalid: %w", err)
+	}
+
+	// Validate execution clusters
+	executionClusterNames := make(map[string]bool)
+	for i := range c.ExecutionClusters {
+		ec := &c.ExecutionClusters[i]
+		if ec.Name == "" {
+			return fmt.Errorf("execution_clusters[%d]: name is required", i)
+		}
+
+		if executionClusterNames[ec.Name] {
+			return fmt.Errorf("duplicate execution cluster name: %s", ec.Name)
+		}
+		executionClusterNames[ec.Name] = true
+
+		// Apply defaults from ExecutionDefaults to this cluster
+		ec.ApplyDefaults(&c.ExecutionDefaults)
+
+		// Validate individual execution cluster config
+		if err := ec.Validate(); err != nil {
+			return fmt.Errorf("execution_clusters[%d] (%s): %w", i, ec.Name, err)
+		}
+	}
+
+	// Validate execution cluster references in monitored clusters
+	for i, mc := range c.MonitoredClusters {
+		if mc.Triage.Enabled && mc.Triage.ExecutionCluster != "" {
+			if !executionClusterNames[mc.Triage.ExecutionCluster] {
+				return fmt.Errorf("monitored_clusters[%d] (%s): triage.execution_cluster references non-existent execution cluster %q", i, mc.Name, mc.Triage.ExecutionCluster)
+			}
+		}
+	}
+
+	// If any monitored cluster has triage enabled but no execution clusters exist, return error
+	if triageEnabledCount > 0 && len(c.ExecutionClusters) == 0 {
+		return fmt.Errorf("triage is enabled for %d monitored cluster(s) but no execution_clusters are configured - agent Jobs cannot be created", triageEnabledCount)
 	}
 
 	if c.SubscribeMode == "" {
@@ -638,12 +784,6 @@ func (c *Config) Validate() error {
 	// Validate state storage configuration
 	if err := c.ValidateStateStorage(); err != nil {
 		return err
-	}
-
-	// Apply K8s executor defaults and validate
-	c.K8s.ApplyDefaults()
-	if err := c.K8s.Validate(); err != nil {
-		return fmt.Errorf("k8s configuration invalid: %w", err)
 	}
 
 	// Apply NATS defaults and validate (NATS is optional)

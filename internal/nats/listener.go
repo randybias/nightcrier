@@ -97,6 +97,14 @@ func (l *Listener) handleProgressEvent(msg *nats.Msg) {
 		"activity", event.Activity,
 		"subject", msg.Subject)
 
+	// If no store is configured, just log events without persisting
+	if l.store == nil {
+		slog.Debug("no state store configured, skipping persistence",
+			"incident_id", event.IncidentID,
+			"event_type", event.EventType)
+		return
+	}
+
 	// Only update StateStore for "executing" events that have activity
 	// The StateStore.UpdateExecutionActivity method will be added in Phase 1.2
 	if event.EventType == string(EventTypeExecuting) && event.Activity != "" {

@@ -64,7 +64,7 @@ func (p *ClusterPermissions) HelmAccessAvailable() bool {
 //   - cfg: Cluster configuration containing kubeconfig path
 //
 // Returns ClusterPermissions struct with validation results, or error if kubectl fails.
-func validateClusterPermissions(ctx context.Context, cfg *ClusterConfig) (*ClusterPermissions, error) {
+func validateClusterPermissions(ctx context.Context, cfg *MonitoredClusterConfig) (*ClusterPermissions, error) {
 	perms := &ClusterPermissions{
 		ClusterName:          cfg.Name,
 		ValidatedAt:          time.Now(),

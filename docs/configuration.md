@@ -71,17 +71,23 @@ The following parameters **must** be provided. The application will fail fast on
 
 ## Multi-Cluster Configuration
 
-Nightcrier supports monitoring multiple Kubernetes clusters simultaneously through a single instance. Each cluster requires two credential sets:
+Nightcrier supports monitoring multiple Kubernetes clusters simultaneously through a single instance. The configuration separates **monitored clusters** (where faults are detected) from **execution clusters** (where triage agent Jobs run).
 
-1. **MCP Endpoint** - Connection to kubernetes-mcp-server for receiving fault events
-2. **Kubeconfig** - Direct cluster API access for triage agents (optional, for investigation)
+### Configuration Structure
 
-### Clusters Array Structure
-
-Define all clusters in `configs/config.yaml`:
+Define clusters in `configs/config.yaml`:
 
 ```yaml
-clusters:
+# Execution clusters - where triage agent Jobs run
+execution_clusters:
+  - name: triage-west
+    kubeconfig_path: "./kubeconfigs/triage-executor.yaml"
+    namespace: "nightcrier"
+    runner_image: "nc-agent-runner:latest"
+    max_concurrent_agents: 10
+
+# Monitored clusters - where faults are detected
+monitored_clusters:
   - name: prod-us-east-1
     environment: production
     labels:
@@ -94,8 +100,9 @@ clusters:
 
     triage:
       enabled: true
-      kubeconfig: ./kubeconfigs/prod-us-east-1-readonly.yaml
+      target_kubeconfig_path: ./kubeconfigs/prod-us-east-1-readonly.yaml
       allow_secrets_access: false
+      execution_cluster: "triage-west"  # optional, uses default if omitted
 
   - name: staging-eu-west-1
     environment: staging
@@ -109,7 +116,7 @@ clusters:
 
     triage:
       enabled: true
-      kubeconfig: ./kubeconfigs/staging-eu-west-1-readonly.yaml
+      target_kubeconfig_path: ./kubeconfigs/staging-eu-west-1-readonly.yaml
       allow_secrets_access: false
 
   - name: dev-local
@@ -124,7 +131,20 @@ clusters:
       # No kubeconfig - events received but not investigated
 ```
 
-### Configuration Fields
+### Execution Cluster Fields
+
+- `name` (required) - Unique identifier for the execution cluster
+- `kubeconfig_path` (required) - Path to kubeconfig for this execution cluster
+- `namespace` (optional, default: "nightcrier") - Namespace for Jobs
+- `runner_image` (optional, default: "nc-agent-runner:latest") - Container image
+- `image_pull_policy` (optional, default: "IfNotPresent") - Image pull policy
+- `timeout` (optional, default: 600) - Job timeout in seconds
+- `memory_limit` (optional, default: "2Gi") - Container memory limit
+- `cpu_limit` (optional, default: "1") - Container CPU limit
+- `cleanup_ttl` (optional, default: 3600) - Job cleanup TTL in seconds
+- `max_concurrent_agents` (optional, default: 10) - Max concurrent agents
+
+### Monitored Cluster Fields
 
 **Cluster-level**:
 - `name` (required) - Unique cluster identifier, used in logs and incident metadata
@@ -137,8 +157,9 @@ clusters:
 
 **Triage Configuration**:
 - `triage.enabled` (required) - Enable/disable AI triage for this cluster
-- `triage.kubeconfig` (required if enabled) - Path to cluster kubeconfig file
+- `triage.target_kubeconfig_path` (required if enabled) - Path to read-only kubeconfig for agent access to the target cluster
 - `triage.allow_secrets_access` (optional, default: false) - Allow agent to read secrets/configmaps
+- `triage.execution_cluster` (optional) - Pin triage to a specific execution cluster; uses first configured if omitted
 
 ### Triage Enable/Disable Behavior
 

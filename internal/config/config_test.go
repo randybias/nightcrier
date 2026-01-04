@@ -32,7 +32,7 @@ func testConfigWithAPIKey(baseConfig string) string {
 // completeTestConfig returns a complete config with all required fields for testing
 func completeTestConfig() string {
 	return `
-clusters:
+monitored_clusters:
   - name: test-cluster
     mcp:
       endpoint: "http://localhost:8080/mcp"
@@ -44,9 +44,9 @@ agent:
   timeout: 300
   system_prompt_file: "./prompts/system.md"
   allowed_tools: "all"
-k8s:
+execution_defaults:
   namespace: "nightcrier"
-  image: "nc-agent-runner:latest"
+  runner_image: "nc-agent-runner:latest"
   image_pull_policy: "IfNotPresent"
   timeout: 600
   memory_limit: "2Gi"
@@ -75,7 +75,7 @@ func completeTestConfigWith(overrides string) string {
 // completeTestConfigWithoutAPIKey returns a complete config without any API key for validation testing
 func completeTestConfigWithoutAPIKey() string {
 	return `
-clusters:
+monitored_clusters:
   - name: test-cluster
     mcp:
       endpoint: "http://localhost:8080/mcp"
@@ -87,9 +87,9 @@ agent:
   timeout: 300
   system_prompt_file: "./prompts/system.md"
   allowed_tools: "all"
-k8s:
+execution_defaults:
   namespace: "nightcrier"
-  image: "nc-agent-runner:latest"
+  runner_image: "nc-agent-runner:latest"
   image_pull_policy: "IfNotPresent"
   timeout: 600
   memory_limit: "2Gi"
@@ -140,7 +140,7 @@ func buildTestConfig(overrides map[string]interface{}) string {
 
 	// Build YAML string - start with clusters section
 	config := `
-clusters:
+monitored_clusters:
   - name: test-cluster
     mcp:
       endpoint: "http://localhost:8080/mcp"
@@ -152,9 +152,9 @@ agent:
   timeout: 300
   system_prompt_file: "./prompts/system.md"
   allowed_tools: "all"
-k8s:
+execution_defaults:
   namespace: "nightcrier"
-  image: "nc-agent-runner:latest"
+  runner_image: "nc-agent-runner:latest"
   image_pull_policy: "IfNotPresent"
   timeout: 600
   memory_limit: "2Gi"
@@ -285,7 +285,7 @@ func TestLoadFromConfigFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	configContent := `
-clusters:
+monitored_clusters:
   - name: config-file-cluster
     mcp:
       endpoint: "http://config-file-server:8080/mcp"
@@ -298,9 +298,9 @@ agent:
   timeout: 120
   system_prompt_file: "./prompts/system.md"
   allowed_tools: "all"
-k8s:
+execution_defaults:
   namespace: "nightcrier"
-  image: "nc-agent-runner:latest"
+  runner_image: "nc-agent-runner:latest"
   image_pull_policy: "IfNotPresent"
   timeout: 600
   memory_limit: "2Gi"
@@ -328,8 +328,8 @@ anthropic_api_key: "test-key"
 		t.Fatalf("LoadWithConfigFile() failed: %v", err)
 	}
 
-	if len(cfg.Clusters) != 1 || cfg.Clusters[0].MCP.Endpoint != "http://config-file-server:8080/mcp" {
-		t.Errorf("Clusters[0].MCP.Endpoint = %q, want %q", cfg.Clusters[0].MCP.Endpoint, "http://config-file-server:8080/mcp")
+	if len(cfg.MonitoredClusters) != 1 || cfg.MonitoredClusters[0].MCP.Endpoint != "http://config-file-server:8080/mcp" {
+		t.Errorf("Clusters[0].MCP.Endpoint = %q, want %q", cfg.MonitoredClusters[0].MCP.Endpoint, "http://config-file-server:8080/mcp")
 	}
 	if cfg.WorkspaceRoot != "/config/incidents" {
 		t.Errorf("WorkspaceRoot = %q, want %q", cfg.WorkspaceRoot, "/config/incidents")
@@ -370,7 +370,7 @@ func TestEnvVarsOverrideConfigFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	configContent := `
-clusters:
+monitored_clusters:
   - name: config-file-cluster
     mcp:
       endpoint: "http://config-file-server:8080/mcp"
@@ -383,9 +383,9 @@ agent:
   timeout: 120
   system_prompt_file: "./prompts/system.md"
   allowed_tools: "all"
-k8s:
+execution_defaults:
   namespace: "nightcrier"
-  image: "nc-agent-runner:latest"
+  runner_image: "nc-agent-runner:latest"
   image_pull_policy: "IfNotPresent"
   timeout: 600
   memory_limit: "2Gi"
@@ -434,10 +434,10 @@ anthropic_api_key: "test-key"
 	}
 }
 
-func TestValidation_MissingClusters(t *testing.T) {
+func TestValidation_ZeroClustersAllowed(t *testing.T) {
 	resetViper()
 
-	// Config without clusters should fail
+	// Config without monitored_clusters should now be valid (zero clusters at startup allowed)
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	configContent := `
@@ -449,9 +449,9 @@ agent:
   timeout: 300
   system_prompt_file: "./prompts/system.md"
   allowed_tools: "all"
-k8s:
+execution_defaults:
   namespace: "nightcrier"
-  image: "nc-agent-runner:latest"
+  runner_image: "nc-agent-runner:latest"
   image_pull_policy: "IfNotPresent"
   timeout: 600
   memory_limit: "2Gi"
@@ -474,9 +474,12 @@ anthropic_api_key: "test-key"
 		t.Fatalf("failed to write config file: %v", err)
 	}
 
-	_, err := LoadWithConfigFile(configPath)
-	if err == nil {
-		t.Error("LoadWithConfigFile() should fail when clusters is missing")
+	cfg, err := LoadWithConfigFile(configPath)
+	if err != nil {
+		t.Errorf("LoadWithConfigFile() should succeed with zero monitored_clusters, got error: %v", err)
+	}
+	if len(cfg.MonitoredClusters) != 0 {
+		t.Errorf("MonitoredClusters should be empty, got %d clusters", len(cfg.MonitoredClusters))
 	}
 }
 
@@ -486,7 +489,7 @@ func TestValidation_InvalidSeverityThreshold(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	configContent := `
-clusters:
+monitored_clusters:
   - name: test-cluster
     mcp:
       endpoint: "http://localhost:8080/mcp"
@@ -507,7 +510,7 @@ func TestValidation_InvalidNumericRanges(t *testing.T) {
 	resetViper()
 
 	clusterPrefix := `
-clusters:
+monitored_clusters:
   - name: test-cluster
     mcp:
       endpoint: "http://localhost:8080/mcp"
@@ -569,7 +572,7 @@ func TestValidation_InvalidQueueOverflowPolicy(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	configContent := `
-clusters:
+monitored_clusters:
   - name: test-cluster
     mcp:
       endpoint: "http://localhost:8080/mcp"
@@ -590,7 +593,7 @@ func TestValidation_SSEReconnectSettings(t *testing.T) {
 	resetViper()
 
 	clusterPrefix := `
-clusters:
+monitored_clusters:
   - name: test-cluster
     mcp:
       endpoint: "http://localhost:8080/mcp"
@@ -1029,8 +1032,8 @@ object_storage:
 	}
 
 	// Verify other settings still work
-	if len(cfg.Clusters) != 1 || cfg.Clusters[0].MCP.Endpoint != "http://localhost:8080/mcp" {
-		t.Errorf("Clusters[0].MCP.Endpoint = %q, want %q", cfg.Clusters[0].MCP.Endpoint, "http://localhost:8080/mcp")
+	if len(cfg.MonitoredClusters) != 1 || cfg.MonitoredClusters[0].MCP.Endpoint != "http://localhost:8080/mcp" {
+		t.Errorf("Clusters[0].MCP.Endpoint = %q, want %q", cfg.MonitoredClusters[0].MCP.Endpoint, "http://localhost:8080/mcp")
 	}
 	if cfg.MaxConcurrentAgents != 10 {
 		t.Errorf("MaxConcurrentAgents = %d, want 10", cfg.MaxConcurrentAgents)
@@ -1046,7 +1049,7 @@ object_storage:
 func TestValidation_MissingRequiredFields(t *testing.T) {
 	// Cluster config prefix for tests that need clusters defined
 	clusterPrefix := `
-clusters:
+monitored_clusters:
   - name: test-cluster
     mcp:
       endpoint: "http://localhost:8080/mcp"
@@ -1061,10 +1064,10 @@ clusters:
   allowed_tools: "all"
 `
 
-	// Base k8s config (nested structure)
-	baseK8sConfig := `k8s:
+	// Base execution defaults config (nested structure)
+	baseExecutionConfig := `execution_defaults:
   namespace: "nightcrier"
-  image: "nc-agent-runner:latest"
+  runner_image: "nc-agent-runner:latest"
   image_pull_policy: "IfNotPresent"
   timeout: 600
   memory_limit: "2Gi"
@@ -1079,12 +1082,7 @@ clusters:
 		expectedEnvVar    string
 		skipDetailedCheck bool // Skip env var and config.example.yaml check for nested configs
 	}{
-		{
-			name:              "missing clusters",
-			config:            `anthropic_api_key: "test-key"`,
-			expectedFieldName: "clusters",
-			expectedEnvVar:    "",
-		},
+		// NOTE: "missing clusters" test removed - monitored_clusters is now optional (zero clusters allowed at startup)
 		{
 			name:              "missing subscribe_mode",
 			config:            clusterPrefix + `anthropic_api_key: "test-key"`,
@@ -1138,7 +1136,7 @@ anthropic_api_key: "test-key"`,
 			name: "missing severity_threshold",
 			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
-` + baseAgentConfig + baseK8sConfig + `anthropic_api_key: "test-key"`,
+` + baseAgentConfig + baseExecutionConfig + `anthropic_api_key: "test-key"`,
 			expectedFieldName: "severity_threshold",
 			expectedEnvVar:    "SEVERITY_THRESHOLD",
 		},
@@ -1146,7 +1144,7 @@ workspace_root: "./incidents"
 			name: "missing max_concurrent_agents",
 			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
-` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
+` + baseAgentConfig + baseExecutionConfig + `severity_threshold: "ERROR"
 anthropic_api_key: "test-key"`,
 			expectedFieldName: "max_concurrent_agents",
 			expectedEnvVar:    "MAX_CONCURRENT_AGENTS",
@@ -1155,7 +1153,7 @@ anthropic_api_key: "test-key"`,
 			name: "missing global_queue_size",
 			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
-` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
+` + baseAgentConfig + baseExecutionConfig + `severity_threshold: "ERROR"
 max_concurrent_agents: 5
 anthropic_api_key: "test-key"`,
 			expectedFieldName: "global_queue_size",
@@ -1165,7 +1163,7 @@ anthropic_api_key: "test-key"`,
 			name: "missing queue_overflow_policy",
 			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
-` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
+` + baseAgentConfig + baseExecutionConfig + `severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
 cluster_failure_event_queue_size: 3
@@ -1178,7 +1176,7 @@ anthropic_api_key: "test-key"`,
 			name: "missing shutdown_timeout",
 			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
-` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
+` + baseAgentConfig + baseExecutionConfig + `severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
 cluster_failure_event_queue_size: 3
@@ -1192,7 +1190,7 @@ anthropic_api_key: "test-key"`,
 			name: "missing sse_reconnect_initial_backoff",
 			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
-` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
+` + baseAgentConfig + baseExecutionConfig + `severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
 cluster_failure_event_queue_size: 3
@@ -1207,7 +1205,7 @@ anthropic_api_key: "test-key"`,
 			name: "missing sse_reconnect_max_backoff",
 			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
-` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
+` + baseAgentConfig + baseExecutionConfig + `severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
 cluster_failure_event_queue_size: 3
@@ -1223,7 +1221,7 @@ anthropic_api_key: "test-key"`,
 			name: "missing sse_read_timeout",
 			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
-` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
+` + baseAgentConfig + baseExecutionConfig + `severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
 cluster_failure_event_queue_size: 3
@@ -1240,7 +1238,7 @@ anthropic_api_key: "test-key"`,
 			name: "missing failure_threshold_for_alert",
 			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
-` + baseAgentConfig + baseK8sConfig + `severity_threshold: "ERROR"
+` + baseAgentConfig + baseExecutionConfig + `severity_threshold: "ERROR"
 max_concurrent_agents: 5
 global_queue_size: 100
 cluster_failure_event_queue_size: 3
@@ -1287,8 +1285,8 @@ anthropic_api_key: "test-key"`,
 				t.Errorf("error message should contain environment variable %q, got: %v", tt.expectedEnvVar, err)
 			}
 
-			// Verify error message references config.example.yaml (skip for clusters which has different error)
-			if tt.expectedFieldName != "clusters" && !contains(err.Error(), "config.example.yaml") {
+			// Verify error message references config.example.yaml
+			if !contains(err.Error(), "config.example.yaml") {
 				t.Errorf("error message should reference config.example.yaml, got: %v", err)
 			}
 		})
@@ -1876,19 +1874,19 @@ func TestAgentConfig_Validate(t *testing.T) {
 	}
 }
 
-// TestK8sConfig_Validate tests validation of K8sConfig
-func TestK8sConfig_Validate(t *testing.T) {
+// TestExecutionDefaults_Validate tests validation of ExecutionDefaults
+func TestExecutionDefaults_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
-		config  K8sConfig
+		config  ExecutionDefaults
 		wantErr bool
 		errMsg  string
 	}{
 		{
 			name: "valid config",
-			config: K8sConfig{
+			config: ExecutionDefaults{
 				Namespace:       "nightcrier",
-				Image:           "nc-agent-runner:latest",
+				RunnerImage:     "nc-agent-runner:latest",
 				ImagePullPolicy: "IfNotPresent",
 				Timeout:         600,
 				MemoryLimit:     "2Gi",
@@ -1899,9 +1897,9 @@ func TestK8sConfig_Validate(t *testing.T) {
 		},
 		{
 			name: "valid with Always pull policy",
-			config: K8sConfig{
+			config: ExecutionDefaults{
 				Namespace:       "nightcrier",
-				Image:           "nc-agent-runner:latest",
+				RunnerImage:     "nc-agent-runner:latest",
 				ImagePullPolicy: "Always",
 				Timeout:         600,
 			},
@@ -1909,9 +1907,9 @@ func TestK8sConfig_Validate(t *testing.T) {
 		},
 		{
 			name: "valid with Never pull policy",
-			config: K8sConfig{
+			config: ExecutionDefaults{
 				Namespace:       "nightcrier",
-				Image:           "nc-agent-runner:latest",
+				RunnerImage:     "nc-agent-runner:latest",
 				ImagePullPolicy: "Never",
 				Timeout:         600,
 			},
@@ -1919,20 +1917,20 @@ func TestK8sConfig_Validate(t *testing.T) {
 		},
 		{
 			name: "invalid ImagePullPolicy",
-			config: K8sConfig{
+			config: ExecutionDefaults{
 				Namespace:       "nightcrier",
-				Image:           "nc-agent-runner:latest",
+				RunnerImage:     "nc-agent-runner:latest",
 				ImagePullPolicy: "Sometimes",
 				Timeout:         600,
 			},
 			wantErr: true,
-			errMsg:  "invalid k8s.image_pull_policy",
+			errMsg:  "invalid execution_defaults.image_pull_policy",
 		},
 		{
 			name: "empty ImagePullPolicy (valid - will use default)",
-			config: K8sConfig{
+			config: ExecutionDefaults{
 				Namespace:       "nightcrier",
-				Image:           "nc-agent-runner:latest",
+				RunnerImage:     "nc-agent-runner:latest",
 				ImagePullPolicy: "",
 				Timeout:         600,
 			},
@@ -1944,19 +1942,19 @@ func TestK8sConfig_Validate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.config.Validate()
 			if (err != nil) != tt.wantErr {
-				t.Errorf("K8sConfig.Validate() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("ExecutionDefaults.Validate() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if err != nil && !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("K8sConfig.Validate() error = %v, want error containing %q", err, tt.errMsg)
+				t.Errorf("ExecutionDefaults.Validate() error = %v, want error containing %q", err, tt.errMsg)
 			}
 		})
 	}
 }
 
-// TestK8sConfig_ApplyDefaults tests that ApplyDefaults sets all default values correctly
-func TestK8sConfig_ApplyDefaults(t *testing.T) {
-	config := K8sConfig{}
+// TestExecutionDefaults_ApplyDefaults tests that ApplyDefaults sets all default values correctly
+func TestExecutionDefaults_ApplyDefaults(t *testing.T) {
+	config := ExecutionDefaults{}
 	config.ApplyDefaults()
 
 	tests := []struct {
@@ -1965,18 +1963,19 @@ func TestK8sConfig_ApplyDefaults(t *testing.T) {
 		want  interface{}
 	}{
 		{"Namespace", config.Namespace, "nightcrier"},
-		{"Image", config.Image, "nc-agent-runner:latest"},
+		{"RunnerImage", config.RunnerImage, "nc-agent-runner:latest"},
 		{"ImagePullPolicy", config.ImagePullPolicy, "IfNotPresent"},
 		{"Timeout", config.Timeout, 600},
 		{"MemoryLimit", config.MemoryLimit, "2Gi"},
 		{"CPULimit", config.CPULimit, "1"},
 		{"CleanupTTL", config.CleanupTTL, 3600},
+		{"MaxConcurrentAgents", config.MaxConcurrentAgents, 10},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.field, func(t *testing.T) {
 			if tt.got != tt.want {
-				t.Errorf("K8sConfig.%s = %v, want %v", tt.field, tt.got, tt.want)
+				t.Errorf("ExecutionDefaults.%s = %v, want %v", tt.field, tt.got, tt.want)
 			}
 		})
 	}
@@ -1989,7 +1988,7 @@ func TestNestedConfigLoadFromYAML(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	configContent := `
-clusters:
+monitored_clusters:
   - name: test-cluster
     mcp:
       endpoint: "http://localhost:8080/mcp"
@@ -2002,9 +2001,9 @@ agent:
   system_prompt_file: "./custom.md"
   allowed_tools: "restricted"
   additional_prompt: "Be helpful"
-k8s:
+execution_defaults:
   namespace: "custom-ns"
-  image: "custom-image:v1"
+  runner_image: "custom-image:v1"
   image_pull_policy: "Always"
   timeout: 999
   memory_limit: "4Gi"
@@ -2052,27 +2051,27 @@ anthropic_api_key: "test-key"
 		t.Errorf("Agent.AdditionalPrompt = %q, want %q", cfg.Agent.AdditionalPrompt, "Be helpful")
 	}
 
-	// Test K8s config
-	if cfg.K8s.Namespace != "custom-ns" {
-		t.Errorf("K8s.Namespace = %q, want %q", cfg.K8s.Namespace, "custom-ns")
+	// Test ExecutionDefaults config
+	if cfg.ExecutionDefaults.Namespace != "custom-ns" {
+		t.Errorf("ExecutionDefaults.Namespace = %q, want %q", cfg.ExecutionDefaults.Namespace, "custom-ns")
 	}
-	if cfg.K8s.Image != "custom-image:v1" {
-		t.Errorf("K8s.Image = %q, want %q", cfg.K8s.Image, "custom-image:v1")
+	if cfg.ExecutionDefaults.RunnerImage != "custom-image:v1" {
+		t.Errorf("ExecutionDefaults.RunnerImage = %q, want %q", cfg.ExecutionDefaults.RunnerImage, "custom-image:v1")
 	}
-	if cfg.K8s.ImagePullPolicy != "Always" {
-		t.Errorf("K8s.ImagePullPolicy = %q, want %q", cfg.K8s.ImagePullPolicy, "Always")
+	if cfg.ExecutionDefaults.ImagePullPolicy != "Always" {
+		t.Errorf("ExecutionDefaults.ImagePullPolicy = %q, want %q", cfg.ExecutionDefaults.ImagePullPolicy, "Always")
 	}
-	if cfg.K8s.Timeout != 999 {
-		t.Errorf("K8s.Timeout = %d, want %d", cfg.K8s.Timeout, 999)
+	if cfg.ExecutionDefaults.Timeout != 999 {
+		t.Errorf("ExecutionDefaults.Timeout = %d, want %d", cfg.ExecutionDefaults.Timeout, 999)
 	}
-	if cfg.K8s.MemoryLimit != "4Gi" {
-		t.Errorf("K8s.MemoryLimit = %q, want %q", cfg.K8s.MemoryLimit, "4Gi")
+	if cfg.ExecutionDefaults.MemoryLimit != "4Gi" {
+		t.Errorf("ExecutionDefaults.MemoryLimit = %q, want %q", cfg.ExecutionDefaults.MemoryLimit, "4Gi")
 	}
-	if cfg.K8s.CPULimit != "2" {
-		t.Errorf("K8s.CPULimit = %q, want %q", cfg.K8s.CPULimit, "2")
+	if cfg.ExecutionDefaults.CPULimit != "2" {
+		t.Errorf("ExecutionDefaults.CPULimit = %q, want %q", cfg.ExecutionDefaults.CPULimit, "2")
 	}
-	if cfg.K8s.CleanupTTL != 7200 {
-		t.Errorf("K8s.CleanupTTL = %d, want %d", cfg.K8s.CleanupTTL, 7200)
+	if cfg.ExecutionDefaults.CleanupTTL != 7200 {
+		t.Errorf("ExecutionDefaults.CleanupTTL = %d, want %d", cfg.ExecutionDefaults.CleanupTTL, 7200)
 	}
 }
 
@@ -2404,7 +2403,7 @@ func TestNestedConfigEnvVarOverride(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	configContent := `
-clusters:
+monitored_clusters:
   - name: test-cluster
     mcp:
       endpoint: "http://localhost:8080/mcp"
@@ -2416,9 +2415,9 @@ agent:
   timeout: 300
   system_prompt_file: "./prompts/system.md"
   allowed_tools: "all"
-k8s:
+execution_defaults:
   namespace: "nightcrier"
-  image: "nc-agent-runner:latest"
+  runner_image: "nc-agent-runner:latest"
   image_pull_policy: "IfNotPresent"
   timeout: 600
   memory_limit: "2Gi"
@@ -2448,13 +2447,13 @@ anthropic_api_key: "test-key"
 	os.Setenv("AGENT_SYSTEM_PROMPT_FILE", "/env/prompt.md")
 	os.Setenv("AGENT_ALLOWED_TOOLS", "restricted")
 	os.Setenv("ADDITIONAL_AGENT_PROMPT", "Env prompt")
-	os.Setenv("K8S_NAMESPACE", "env-namespace")
-	os.Setenv("K8S_IMAGE", "env-image:latest")
-	os.Setenv("K8S_IMAGE_PULL_POLICY", "Never")
-	os.Setenv("K8S_TIMEOUT", "888")
-	os.Setenv("K8S_MEMORY_LIMIT", "8Gi")
-	os.Setenv("K8S_CPU_LIMIT", "4")
-	os.Setenv("K8S_CLEANUP_TTL", "9999")
+	os.Setenv("EXECUTION_DEFAULTS_NAMESPACE", "env-namespace")
+	os.Setenv("EXECUTION_DEFAULTS_RUNNER_IMAGE", "env-image:latest")
+	os.Setenv("EXECUTION_DEFAULTS_IMAGE_PULL_POLICY", "Never")
+	os.Setenv("EXECUTION_DEFAULTS_TIMEOUT", "888")
+	os.Setenv("EXECUTION_DEFAULTS_MEMORY_LIMIT", "8Gi")
+	os.Setenv("EXECUTION_DEFAULTS_CPU_LIMIT", "4")
+	os.Setenv("EXECUTION_DEFAULTS_CLEANUP_TTL", "9999")
 
 	defer func() {
 		os.Unsetenv("AGENT_CLI")
@@ -2463,13 +2462,13 @@ anthropic_api_key: "test-key"
 		os.Unsetenv("AGENT_SYSTEM_PROMPT_FILE")
 		os.Unsetenv("AGENT_ALLOWED_TOOLS")
 		os.Unsetenv("ADDITIONAL_AGENT_PROMPT")
-		os.Unsetenv("K8S_NAMESPACE")
-		os.Unsetenv("K8S_IMAGE")
-		os.Unsetenv("K8S_IMAGE_PULL_POLICY")
-		os.Unsetenv("K8S_TIMEOUT")
-		os.Unsetenv("K8S_MEMORY_LIMIT")
-		os.Unsetenv("K8S_CPU_LIMIT")
-		os.Unsetenv("K8S_CLEANUP_TTL")
+		os.Unsetenv("EXECUTION_DEFAULTS_NAMESPACE")
+		os.Unsetenv("EXECUTION_DEFAULTS_RUNNER_IMAGE")
+		os.Unsetenv("EXECUTION_DEFAULTS_IMAGE_PULL_POLICY")
+		os.Unsetenv("EXECUTION_DEFAULTS_TIMEOUT")
+		os.Unsetenv("EXECUTION_DEFAULTS_MEMORY_LIMIT")
+		os.Unsetenv("EXECUTION_DEFAULTS_CPU_LIMIT")
+		os.Unsetenv("EXECUTION_DEFAULTS_CLEANUP_TTL")
 	}()
 
 	cfg, err := LoadWithConfigFile(configPath)
@@ -2497,26 +2496,26 @@ anthropic_api_key: "test-key"
 		t.Errorf("Agent.AdditionalPrompt = %q, want %q (env var override)", cfg.Agent.AdditionalPrompt, "Env prompt")
 	}
 
-	// Verify K8s config overrides
-	if cfg.K8s.Namespace != "env-namespace" {
-		t.Errorf("K8s.Namespace = %q, want %q (env var override)", cfg.K8s.Namespace, "env-namespace")
+	// Verify ExecutionDefaults config overrides
+	if cfg.ExecutionDefaults.Namespace != "env-namespace" {
+		t.Errorf("ExecutionDefaults.Namespace = %q, want %q (env var override)", cfg.ExecutionDefaults.Namespace, "env-namespace")
 	}
-	if cfg.K8s.Image != "env-image:latest" {
-		t.Errorf("K8s.Image = %q, want %q (env var override)", cfg.K8s.Image, "env-image:latest")
+	if cfg.ExecutionDefaults.RunnerImage != "env-image:latest" {
+		t.Errorf("ExecutionDefaults.RunnerImage = %q, want %q (env var override)", cfg.ExecutionDefaults.RunnerImage, "env-image:latest")
 	}
-	if cfg.K8s.ImagePullPolicy != "Never" {
-		t.Errorf("K8s.ImagePullPolicy = %q, want %q (env var override)", cfg.K8s.ImagePullPolicy, "Never")
+	if cfg.ExecutionDefaults.ImagePullPolicy != "Never" {
+		t.Errorf("ExecutionDefaults.ImagePullPolicy = %q, want %q (env var override)", cfg.ExecutionDefaults.ImagePullPolicy, "Never")
 	}
-	if cfg.K8s.Timeout != 888 {
-		t.Errorf("K8s.Timeout = %d, want %d (env var override)", cfg.K8s.Timeout, 888)
+	if cfg.ExecutionDefaults.Timeout != 888 {
+		t.Errorf("ExecutionDefaults.Timeout = %d, want %d (env var override)", cfg.ExecutionDefaults.Timeout, 888)
 	}
-	if cfg.K8s.MemoryLimit != "8Gi" {
-		t.Errorf("K8s.MemoryLimit = %q, want %q (env var override)", cfg.K8s.MemoryLimit, "8Gi")
+	if cfg.ExecutionDefaults.MemoryLimit != "8Gi" {
+		t.Errorf("ExecutionDefaults.MemoryLimit = %q, want %q (env var override)", cfg.ExecutionDefaults.MemoryLimit, "8Gi")
 	}
-	if cfg.K8s.CPULimit != "4" {
-		t.Errorf("K8s.CPULimit = %q, want %q (env var override)", cfg.K8s.CPULimit, "4")
+	if cfg.ExecutionDefaults.CPULimit != "4" {
+		t.Errorf("ExecutionDefaults.CPULimit = %q, want %q (env var override)", cfg.ExecutionDefaults.CPULimit, "4")
 	}
-	if cfg.K8s.CleanupTTL != 9999 {
-		t.Errorf("K8s.CleanupTTL = %d, want %d (env var override)", cfg.K8s.CleanupTTL, 9999)
+	if cfg.ExecutionDefaults.CleanupTTL != 9999 {
+		t.Errorf("ExecutionDefaults.CleanupTTL = %d, want %d (env var override)", cfg.ExecutionDefaults.CleanupTTL, 9999)
 	}
 }

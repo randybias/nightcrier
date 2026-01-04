@@ -1,8 +1,11 @@
 # Nightcrier Configuration - Codex Example
 # Copy to config.yaml and set your OPENAI_API_KEY
 
+# Execution clusters (for Kubernetes-native agent execution)
+execution_clusters: []
+
 # Single cluster configuration
-clusters:
+monitored_clusters:
   - name: my-cluster
     environment: production
 
@@ -12,7 +15,7 @@ clusters:
 
     triage:
       enabled: true
-      kubeconfig: "./kubeconfigs/my-cluster-readonly.yaml"
+      target_kubeconfig_path: "./kubeconfigs/my-cluster-readonly.yaml"
       allow_secrets_access: false
 
 # Event subscription mode
@@ -43,10 +46,10 @@ agent:
 # Set via environment variable: export OPENAI_API_KEY="sk-..."
 # openai_api_key: "sk-..."
 
-# K8s Executor Configuration (Kubernetes-native agent execution)
-k8s:
+# Execution Defaults (Kubernetes-native agent execution)
+execution_defaults:
   namespace: "nightcrier"
-  image: "nc-agent-runner:latest"
+  runner_image: "nc-agent-runner:latest"
   image_pull_policy: "IfNotPresent"  # Options: Always, Never, IfNotPresent
   timeout: 600
   memory_limit: "2Gi"

@@ -7,19 +7,19 @@ import (
 
 // Registry manages cluster configurations with thread-safe access.
 type Registry struct {
-	clusters map[string]*ClusterConfig
+	clusters map[string]*MonitoredClusterConfig
 	mu       sync.RWMutex
 }
 
 // NewRegistry creates a new cluster registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		clusters: make(map[string]*ClusterConfig),
+		clusters: make(map[string]*MonitoredClusterConfig),
 	}
 }
 
 // Load populates the registry with cluster configurations.
-func (r *Registry) Load(clusters []ClusterConfig) error {
+func (r *Registry) Load(clusters []MonitoredClusterConfig) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -35,18 +35,18 @@ func (r *Registry) Load(clusters []ClusterConfig) error {
 
 // Get retrieves a cluster configuration by name.
 // Returns nil if not found.
-func (r *Registry) Get(name string) *ClusterConfig {
+func (r *Registry) Get(name string) *MonitoredClusterConfig {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.clusters[name]
 }
 
 // List returns all cluster configurations.
-func (r *Registry) List() []*ClusterConfig {
+func (r *Registry) List() []*MonitoredClusterConfig {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	result := make([]*ClusterConfig, 0, len(r.clusters))
+	result := make([]*MonitoredClusterConfig, 0, len(r.clusters))
 	for _, cluster := range r.clusters {
 		result = append(result, cluster)
 	}

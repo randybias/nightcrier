@@ -37,7 +37,7 @@ const (
 // to avoid circular dependencies (events package imports config, which imports cluster).
 type ClusterConnection struct {
 	// config holds the cluster's configuration (endpoint, triage settings, labels).
-	config *ClusterConfig
+	config *MonitoredClusterConfig
 
 	// client is the MCP client instance for this cluster connection.
 	// Type is interface{} to avoid circular import (actual type is *events.Client).
@@ -79,7 +79,7 @@ type ClusterConnection struct {
 //   - config: The cluster configuration (must not be nil)
 //
 // Returns a new ClusterConnection ready to be started.
-func NewClusterConnection(config *ClusterConfig) *ClusterConnection {
+func NewClusterConnection(config *MonitoredClusterConfig) *ClusterConnection {
 	return &ClusterConnection{
 		config: config,
 		status: StatusDisconnected,

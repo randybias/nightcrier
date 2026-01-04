@@ -54,7 +54,7 @@ type ConnectionManager struct {
 // This struct exists to avoid directly passing *config.Config and creating
 // a circular dependency (config -> cluster -> events -> config).
 type ManagerConfig struct {
-	Clusters                   []ClusterConfig
+	Clusters                   []MonitoredClusterConfig
 	SubscribeMode              string
 	GlobalQueueSize            int
 	QueueOverflowPolicy        string
@@ -111,6 +111,12 @@ func NewConnectionManager(cfg *ManagerConfig) (*ConnectionManager, error) {
 		sseReconnectInitialBackoff: cfg.SSEReconnectInitialBackoff,
 		ctx:                        ctx,
 		cancel:                     cancel,
+	}
+
+	// Support zero clusters at startup - log warning but don't fail
+	if len(cfg.Clusters) == 0 {
+		slog.Warn("no clusters configured - manager started with zero clusters",
+			"hint", "clusters can be added later via Reload()")
 	}
 
 	// Create connections for each cluster
@@ -577,4 +583,170 @@ func (cm *ConnectionManager) GetHealth() interface{} {
 	}
 
 	return summary
+}
+
+// ReloadResult contains the outcome of a configuration reload operation.
+// It reports which clusters were added, removed, or updated during the reload.
+type ReloadResult struct {
+	// Added contains names of newly added clusters.
+	Added []string
+
+	// Removed contains names of clusters that were removed.
+	Removed []string
+
+	// Updated contains names of clusters whose configuration changed.
+	Updated []string
+}
+
+// Reload applies a new cluster configuration to the manager.
+// It compares the new configuration with the current state and:
+//   - Gracefully stops connections for removed clusters
+//   - Starts connections for newly added clusters
+//   - Updates configuration for modified clusters
+//
+// This method is thread-safe and can be called while the manager is running.
+// Connections for removed clusters are stopped gracefully before removal.
+//
+// Note: After reload, the caller must call SetClusterClient() for any newly
+// added clusters before they will start processing events.
+//
+// Parameters:
+//   - ctx: Context for the reload operation (used for stopping connections)
+//   - newClusters: The new list of cluster configurations
+//
+// Returns a ReloadResult describing what changed, or an error if reload failed.
+func (cm *ConnectionManager) Reload(ctx context.Context, newClusters []MonitoredClusterConfig) (*ReloadResult, error) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	result := &ReloadResult{
+		Added:   []string{},
+		Removed: []string{},
+		Updated: []string{},
+	}
+
+	// Build map of old cluster names
+	oldNames := make(map[string]bool)
+	for name := range cm.connections {
+		oldNames[name] = true
+	}
+
+	// Build map of new cluster configs by name
+	newNames := make(map[string]*MonitoredClusterConfig)
+	for i := range newClusters {
+		newNames[newClusters[i].Name] = &newClusters[i]
+	}
+
+	// Find and remove clusters that no longer exist
+	for name := range oldNames {
+		if _, exists := newNames[name]; !exists {
+			result.Removed = append(result.Removed, name)
+
+			// Stop connection for this cluster
+			if conn, ok := cm.connections[name]; ok {
+				slog.Info("stopping removed cluster connection",
+					"cluster", name)
+
+				// Clear the client to stop event processing
+				conn.mu.Lock()
+				conn.client = nil
+				conn.status = StatusDisconnected
+				conn.mu.Unlock()
+
+				delete(cm.connections, name)
+			}
+		}
+	}
+
+	// Find added and updated clusters
+	for name, cfg := range newNames {
+		if !oldNames[name] {
+			// New cluster - create connection
+			result.Added = append(result.Added, name)
+
+			conn := NewClusterConnection(cfg)
+			cm.connections[name] = conn
+
+			slog.Info("cluster connection created via reload",
+				"cluster", name,
+				"endpoint", cfg.MCP.Endpoint,
+				"triage_enabled", cfg.Triage.Enabled)
+		} else {
+			// Existing cluster - check if config changed
+			oldConn := cm.connections[name]
+			if configChanged(oldConn.config, cfg) {
+				result.Updated = append(result.Updated, name)
+
+				// Update the configuration
+				oldConn.mu.Lock()
+				oldConn.config = cfg
+				oldConn.mu.Unlock()
+
+				slog.Info("cluster configuration updated",
+					"cluster", name)
+			}
+		}
+	}
+
+	// Log reload summary
+	if len(result.Added) > 0 || len(result.Removed) > 0 || len(result.Updated) > 0 {
+		slog.Info("cluster configuration reloaded",
+			"added", len(result.Added),
+			"removed", len(result.Removed),
+			"updated", len(result.Updated),
+			"total", len(cm.connections))
+	} else {
+		slog.Info("cluster configuration unchanged after reload",
+			"total", len(cm.connections))
+	}
+
+	return result, nil
+}
+
+// configChanged compares two cluster configurations to determine if they differ.
+// It checks the MCP endpoint, triage settings, and labels.
+func configChanged(old, new *MonitoredClusterConfig) bool {
+	if old.MCP.Endpoint != new.MCP.Endpoint {
+		return true
+	}
+	if old.MCP.APIKey != new.MCP.APIKey {
+		return true
+	}
+	if old.Triage.Enabled != new.Triage.Enabled {
+		return true
+	}
+	if old.Triage.Kubeconfig != new.Triage.Kubeconfig {
+		return true
+	}
+	if old.Triage.AllowSecretsAccess != new.Triage.AllowSecretsAccess {
+		return true
+	}
+	if old.Environment != new.Environment {
+		return true
+	}
+
+	// Compare labels
+	if len(old.Labels) != len(new.Labels) {
+		return true
+	}
+	for k, v := range old.Labels {
+		if newV, ok := new.Labels[k]; !ok || newV != v {
+			return true
+		}
+	}
+
+	return false
+}
+
+// GetClusterNames returns a list of all currently configured cluster names.
+// This is useful for introspection and debugging.
+func (cm *ConnectionManager) GetClusterNames() []string {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	names := make([]string, 0, len(cm.connections))
+	for name := range cm.connections {
+		names = append(names, name)
+	}
+	return names
 }

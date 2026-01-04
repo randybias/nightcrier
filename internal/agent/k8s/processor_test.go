@@ -122,6 +122,18 @@ func (m *mockStateStore) ListIncidents(ctx context.Context, filters *storage.Inc
 	return nil, errors.New("not implemented")
 }
 
+func (m *mockStateStore) UpdateExecutionActivity(ctx context.Context, incidentID, activity string, activityTime time.Time) error {
+	return nil
+}
+
+func (m *mockStateStore) UpdateRunStarted(ctx context.Context, incidentID string, runStartedAt time.Time) error {
+	return nil
+}
+
+func (m *mockStateStore) UpdateRunCompleted(ctx context.Context, incidentID string, runCompletedAt time.Time, runExitCode int) error {
+	return nil
+}
+
 func (m *mockStateStore) Close() error {
 	return nil
 }

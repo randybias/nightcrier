@@ -35,12 +35,14 @@ func NewManager(kubeClient kubernetes.Interface, config Config) *Manager {
 //  1. Ensure namespace exists
 //  2. Ensure RBAC resources exist (ServiceAccount, Role, RoleBinding)
 //  3. Ensure API keys secret exists
-//  4. Ensure kubeconfig secrets exist for each configured cluster
+//  4. Ensure triage kubeconfig secrets exist for each monitored cluster
 //
 // All operations are idempotent - existing resources will not be modified.
+// Note: Execution cluster kubeconfigs are used directly by Nightcrier to create Jobs,
+// not mounted into agent pods, so they are not handled here.
 func (m *Manager) Bootstrap(ctx context.Context) (*Result, error) {
 	result := &Result{
-		KubeconfigSecretsCreated: make(map[string]bool),
+		TriageKubeconfigSecretsCreated: make(map[string]bool),
 	}
 
 	// Step 1: Ensure namespace exists
@@ -69,15 +71,16 @@ func (m *Manager) Bootstrap(ctx context.Context) (*Result, error) {
 		return nil, fmt.Errorf("failed to ensure API keys secret: %w", err)
 	}
 
-	// Step 4: Ensure kubeconfig secrets exist for each configured cluster
-	for _, cluster := range m.config.Clusters {
-		if cluster.TriageKubeconfig == "" {
-			continue // Skip clusters without triage kubeconfig
+	// Step 4: Ensure triage kubeconfig secrets exist for each monitored cluster
+	// These secrets are mounted into agent pods for triage access to target clusters
+	for _, cluster := range m.config.MonitoredClusters {
+		if cluster.TargetKubeconfigPath == "" {
+			continue // Skip clusters without target kubeconfig
 		}
 
-		if err := ensureKubeconfigSecret(ctx, m.kubeClient, m.config.Namespace,
-			cluster.Name, cluster.TriageKubeconfig); err != nil {
-			return nil, fmt.Errorf("failed to ensure kubeconfig secret for cluster %s: %w", cluster.Name, err)
+		if err := ensureTriageKubeconfigSecret(ctx, m.kubeClient, m.config.Namespace,
+			cluster.Name, cluster.TargetKubeconfigPath); err != nil {
+			return nil, fmt.Errorf("failed to ensure triage kubeconfig secret for cluster %s: %w", cluster.Name, err)
 		}
 	}
 
