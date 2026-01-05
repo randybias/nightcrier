@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -28,11 +29,13 @@ type Client struct {
 	subscriptionID string
 	mu             sync.Mutex
 	closeOnce      sync.Once
+	closed         atomic.Bool // Tracks if client is closed to prevent send on closed channel
 }
 
 // closeChannel closes the event channel once
 func (c *Client) closeChannel() {
 	c.closeOnce.Do(func() {
+		c.closed.Store(true) // Mark as closed before closing channel
 		close(c.eventChan)
 	})
 }
@@ -70,6 +73,12 @@ func NewClient(endpoint, subscribeMode string, tuningConfig *config.TuningConfig
 // handleLoggingMessage processes MCP log notifications
 // Fault events come as log messages with logger="kubernetes/{mode}" based on subscribe mode
 func (c *Client) handleLoggingMessage(ctx context.Context, req *mcp.LoggingMessageRequest) {
+	// Check if client is closed to prevent send on closed channel
+	if c.closed.Load() {
+		slog.Debug("ignoring message, client is closed")
+		return
+	}
+
 	params := req.Params
 
 	// Expected logger name is "kubernetes/{subscribeMode}"
@@ -102,7 +111,11 @@ func (c *Client) handleLoggingMessage(ctx context.Context, req *mcp.LoggingMessa
 		"reason", faultEvent.GetReason(),
 		"message", faultEvent.GetContext())
 
-	// Send to channel (non-blocking)
+	// Send to channel (non-blocking), with additional closed check for race safety
+	if c.closed.Load() {
+		slog.Debug("client closed during event processing, dropping event")
+		return
+	}
 	select {
 	case c.eventChan <- faultEvent:
 	default:
