@@ -26,9 +26,9 @@ cluster_queue_size: 10
 dedup_window_seconds: 300
 queue_overflow_policy: drop
 shutdown_timeout: 30
-sse_reconnect_initial_backoff: 1
-sse_reconnect_max_backoff: 60
-sse_read_timeout: 120
+mcp_reconnect_initial_backoff: 1
+mcp_reconnect_max_backoff: 60
+mcp_read_timeout: 120
 notify_on_agent_failure: true
 failure_threshold_for_alert: 3
 anthropic_api_key: test-key-for-unit-tests

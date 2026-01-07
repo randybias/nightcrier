@@ -303,10 +303,10 @@ type Config struct {
 	QueueOverflowPolicy          string `mapstructure:"queue_overflow_policy"`
 	ShutdownTimeout              int    `mapstructure:"shutdown_timeout"` // seconds
 
-	// SSE/MCP Reconnection
-	SSEReconnectInitialBackoff int `mapstructure:"sse_reconnect_initial_backoff"` // seconds
-	SSEReconnectMaxBackoff     int `mapstructure:"sse_reconnect_max_backoff"`     // seconds
-	SSEReadTimeout             int `mapstructure:"sse_read_timeout"`              // seconds
+	// MCP Transport Reconnection
+	MCPReconnectInitialBackoff int `mapstructure:"mcp_reconnect_initial_backoff"` // seconds
+	MCPReconnectMaxBackoff     int `mapstructure:"mcp_reconnect_max_backoff"`     // seconds
+	MCPReadTimeout             int `mapstructure:"mcp_read_timeout"`              // seconds
 
 	// Object Storage Configuration (optional - used when cloud storage is enabled)
 	ObjectStorage ObjectStorage `mapstructure:"object_storage"`
@@ -460,9 +460,9 @@ func bindEnvVars() {
 		"dedup_window_seconds":                     "DEDUP_WINDOW_SECONDS",
 		"queue_overflow_policy":                    "QUEUE_OVERFLOW_POLICY",
 		"shutdown_timeout":                         "SHUTDOWN_TIMEOUT_SECONDS",
-		"sse_reconnect_initial_backoff":            "SSE_RECONNECT_INITIAL_BACKOFF",
-		"sse_reconnect_max_backoff":                "SSE_RECONNECT_MAX_BACKOFF",
-		"sse_read_timeout":                         "SSE_READ_TIMEOUT_SECONDS",
+		"mcp_reconnect_initial_backoff":            "MCP_RECONNECT_INITIAL_BACKOFF",
+		"mcp_reconnect_max_backoff":                "MCP_RECONNECT_MAX_BACKOFF",
+		"mcp_read_timeout":                         "MCP_READ_TIMEOUT_SECONDS",
 		"object_storage.url":                       "OBJECT_STORAGE_URL",
 		"object_storage.signed_url_expiry":         "OBJECT_STORAGE_SIGNED_URL_EXPIRY",
 		"object_storage.aws_access_key_id":         "AWS_ACCESS_KEY_ID",
@@ -696,17 +696,17 @@ func (c *Config) Validate() error {
 		return missingFieldError("shutdown_timeout", "SHUTDOWN_TIMEOUT_SECONDS")
 	}
 
-	// Required: SSE/MCP Reconnection
-	if c.SSEReconnectInitialBackoff == 0 {
-		return missingFieldError("sse_reconnect_initial_backoff", "SSE_RECONNECT_INITIAL_BACKOFF")
+	// Required: MCP Transport Reconnection
+	if c.MCPReconnectInitialBackoff == 0 {
+		return missingFieldError("mcp_reconnect_initial_backoff", "MCP_RECONNECT_INITIAL_BACKOFF")
 	}
 
-	if c.SSEReconnectMaxBackoff == 0 {
-		return missingFieldError("sse_reconnect_max_backoff", "SSE_RECONNECT_MAX_BACKOFF")
+	if c.MCPReconnectMaxBackoff == 0 {
+		return missingFieldError("mcp_reconnect_max_backoff", "MCP_RECONNECT_MAX_BACKOFF")
 	}
 
-	if c.SSEReadTimeout == 0 {
-		return missingFieldError("sse_read_timeout", "SSE_READ_TIMEOUT_SECONDS")
+	if c.MCPReadTimeout == 0 {
+		return missingFieldError("mcp_read_timeout", "MCP_READ_TIMEOUT_SECONDS")
 	}
 
 	// Required: Circuit Breaker
@@ -748,16 +748,16 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid queue_overflow_policy '%s': must be 'drop' or 'reject'. Set via QUEUE_OVERFLOW_POLICY environment variable or config file", c.QueueOverflowPolicy)
 	}
 
-	// Validate SSE reconnection settings
-	if c.SSEReconnectInitialBackoff < 1 {
-		return fmt.Errorf("sse_reconnect_initial_backoff must be >= 1, got %d. Set via SSE_RECONNECT_INITIAL_BACKOFF environment variable or config file", c.SSEReconnectInitialBackoff)
+	// Validate MCP transport reconnection settings
+	if c.MCPReconnectInitialBackoff < 1 {
+		return fmt.Errorf("mcp_reconnect_initial_backoff must be >= 1, got %d. Set via MCP_RECONNECT_INITIAL_BACKOFF environment variable or config file", c.MCPReconnectInitialBackoff)
 	}
-	if c.SSEReconnectMaxBackoff < c.SSEReconnectInitialBackoff {
-		return fmt.Errorf("sse_reconnect_max_backoff (%d) must be >= sse_reconnect_initial_backoff (%d). Set via SSE_RECONNECT_MAX_BACKOFF environment variable or config file",
-			c.SSEReconnectMaxBackoff, c.SSEReconnectInitialBackoff)
+	if c.MCPReconnectMaxBackoff < c.MCPReconnectInitialBackoff {
+		return fmt.Errorf("mcp_reconnect_max_backoff (%d) must be >= mcp_reconnect_initial_backoff (%d). Set via MCP_RECONNECT_MAX_BACKOFF environment variable or config file",
+			c.MCPReconnectMaxBackoff, c.MCPReconnectInitialBackoff)
 	}
-	if c.SSEReadTimeout < 1 {
-		return fmt.Errorf("sse_read_timeout must be >= 1, got %d. Set via SSE_READ_TIMEOUT_SECONDS environment variable or config file", c.SSEReadTimeout)
+	if c.MCPReadTimeout < 1 {
+		return fmt.Errorf("mcp_read_timeout must be >= 1, got %d. Set via MCP_READ_TIMEOUT_SECONDS environment variable or config file", c.MCPReadTimeout)
 	}
 
 	// Validate circuit breaker settings

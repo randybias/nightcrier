@@ -35,7 +35,7 @@ type ConnectionManager struct {
 	subscribeMode              string
 	globalQueueSize            int
 	queueOverflowPolicy        string
-	sseReconnectInitialBackoff int // seconds
+	mcpReconnectInitialBackoff int // seconds
 
 	// mu protects access to the connections map
 	mu sync.RWMutex
@@ -58,7 +58,7 @@ type ManagerConfig struct {
 	SubscribeMode              string
 	GlobalQueueSize            int
 	QueueOverflowPolicy        string
-	SSEReconnectInitialBackoff int // seconds
+	MCPReconnectInitialBackoff int // seconds
 }
 
 // NewConnectionManager creates a new ConnectionManager with the given configuration.
@@ -108,7 +108,7 @@ func NewConnectionManager(cfg *ManagerConfig) (*ConnectionManager, error) {
 		subscribeMode:              cfg.SubscribeMode,
 		globalQueueSize:            cfg.GlobalQueueSize,
 		queueOverflowPolicy:        cfg.QueueOverflowPolicy,
-		sseReconnectInitialBackoff: cfg.SSEReconnectInitialBackoff,
+		mcpReconnectInitialBackoff: cfg.MCPReconnectInitialBackoff,
 		ctx:                        ctx,
 		cancel:                     cancel,
 	}
@@ -292,7 +292,7 @@ func (cm *ConnectionManager) runConnection(ctx context.Context, clusterName stri
 				select {
 				case <-ctx.Done():
 					return
-				case <-time.After(time.Duration(cm.sseReconnectInitialBackoff) * time.Second):
+				case <-time.After(time.Duration(cm.mcpReconnectInitialBackoff) * time.Second):
 					slog.Info("reconnecting to cluster",
 						"cluster", clusterName)
 				}

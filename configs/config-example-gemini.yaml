@@ -64,10 +64,10 @@ dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
 
-# SSE/MCP reconnection
-sse_reconnect_initial_backoff: 1
-sse_reconnect_max_backoff: 60
-sse_read_timeout: 120
+# MCP transport reconnection
+mcp_reconnect_initial_backoff: 1
+mcp_reconnect_max_backoff: 60
+mcp_read_timeout: 120
 
 # State storage (sqlite, postgres, or filesystem)
 state_storage:

@@ -312,19 +312,19 @@ queue_overflow_policy: "drop"
 shutdown_timeout: 30
 
 # =============================================================================
-# SSE/MCP Reconnection Settings (Required)
+# MCP Transport Reconnection Settings (Required)
 # =============================================================================
 # REQUIRED: Initial backoff delay for reconnection attempts (seconds)
-# Environment variable: SSE_RECONNECT_INITIAL_BACKOFF
-sse_reconnect_initial_backoff: 1
+# Environment variable: MCP_RECONNECT_INITIAL_BACKOFF
+mcp_reconnect_initial_backoff: 1
 
 # REQUIRED: Maximum backoff delay for reconnection attempts (seconds)
-# Environment variable: SSE_RECONNECT_MAX_BACKOFF
-sse_reconnect_max_backoff: 60
+# Environment variable: MCP_RECONNECT_MAX_BACKOFF
+mcp_reconnect_max_backoff: 60
 
-# REQUIRED: Read timeout for SSE/MCP connections (seconds)
-# Environment variable: SSE_READ_TIMEOUT_SECONDS
-sse_read_timeout: 120
+# REQUIRED: Read timeout for MCP connections (seconds)
+# Environment variable: MCP_READ_TIMEOUT_SECONDS
+mcp_read_timeout: 120
 
 # =============================================================================
 # Slack Integration (Optional)

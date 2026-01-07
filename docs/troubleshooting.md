@@ -157,7 +157,7 @@ level=INFO msg="cluster reconnection scheduled" cluster=prod-us-east-1 retry_in=
 1. Test MCP endpoint from Nightcrier host:
 ```bash
 curl -v http://kubernetes-mcp-server:8080/mcp
-# Should return: 405 Method Not Allowed (MCP server only accepts SSE connections)
+# Should return: 405 Method Not Allowed (MCP server requires POST for Streamable HTTP)
 ```
 
 2. Check kubernetes-mcp-server is running:

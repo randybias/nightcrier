@@ -48,10 +48,10 @@ Default values can be set via `execution_defaults`:
 - `DEDUP_WINDOW_SECONDS` - Event deduplication window (0 to disable)
 - `SHUTDOWN_TIMEOUT` - Graceful shutdown timeout in seconds
 
-### SSE Connection Settings
-- `SSE_RECONNECT_INITIAL_BACKOFF` - Initial SSE reconnect backoff in seconds
-- `SSE_RECONNECT_MAX_BACKOFF` - Maximum SSE reconnect backoff in seconds
-- `SSE_READ_TIMEOUT` - SSE read timeout in seconds
+### MCP Connection Settings
+- `MCP_RECONNECT_INITIAL_BACKOFF` - Initial MCP reconnect backoff in seconds
+- `MCP_RECONNECT_MAX_BACKOFF` - Maximum MCP reconnect backoff in seconds
+- `MCP_READ_TIMEOUT_SECONDS` - MCP read timeout in seconds
 
 ### Circuit Breaker
 - `FAILURE_THRESHOLD_FOR_ALERT` - Failures before system degraded alert
@@ -245,7 +245,7 @@ The concurrency model provides these guarantees:
 
 1. **Cross-cluster parallelism**: Events from different clusters run in parallel (up to `max_concurrent_agents`)
 2. **Per-cluster serialization**: Events for the same cluster are strictly serialized (one at a time)
-3. **Non-blocking ingestion**: Event ingestion never blocks the SSE event loop
+3. **Non-blocking ingestion**: Event ingestion never blocks the MCP event loop
 4. **Stale event dropping**: Events older than `event_ttl_seconds` are dropped before execution
 5. **Queue overflow handling**: When a cluster queue is full, the oldest event is dropped to make room for newer (more relevant) events
 

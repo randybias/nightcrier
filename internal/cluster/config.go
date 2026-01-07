@@ -34,7 +34,7 @@ type MonitoredClusterConfig struct {
 }
 
 // MCPConfig defines the MCP server connection settings.
-// The MCP server sends fault events via Server-Sent Events (SSE).
+// The MCP server sends fault events via MCP Streamable HTTP transport.
 type MCPConfig struct {
 	// Endpoint is the MCP server URL (required, must be a valid URL).
 	// Example: "http://localhost:8080"

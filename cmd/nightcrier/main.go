@@ -146,7 +146,7 @@ func run(cmd *cobra.Command, args []string) error {
 		SubscribeMode:              cfg.SubscribeMode,
 		GlobalQueueSize:            cfg.GlobalQueueSize,
 		QueueOverflowPolicy:        cfg.QueueOverflowPolicy,
-		SSEReconnectInitialBackoff: cfg.SSEReconnectInitialBackoff,
+		MCPReconnectInitialBackoff: cfg.MCPReconnectInitialBackoff,
 	}
 	connectionMgr, err := cluster.NewConnectionManager(mgrConfig)
 	if err != nil {

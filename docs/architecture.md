@@ -35,7 +35,7 @@ Nightcrier implements a sophisticated concurrency model that balances parallelis
 
 1. **Cross-cluster parallelism** - Events from different clusters should be processed in parallel
 2. **Per-cluster serialization** - Events for the same cluster must be processed one at a time
-3. **Non-blocking ingestion** - Event arrival should never block the SSE event loop
+3. **Non-blocking ingestion** - Event arrival should never block the MCP event loop
 4. **Bounded memory** - Queue sizes must be bounded to prevent memory exhaustion
 5. **Relevance prioritization** - Newer events are more relevant than older ones
 
@@ -46,7 +46,7 @@ Nightcrier implements a sophisticated concurrency model that balances parallelis
                               │                    Agent Coordinator                     │
                               │                                                          │
 ┌──────────────┐              │  ┌─────────────────────────────────────────────────┐   │
-│ SSE Events   │──Enqueue()──>│  │         Per-Cluster Queues (bounded)            │   │
+│ MCP Events   │──Enqueue()──>│  │         Per-Cluster Queues (bounded)            │   │
 │ (non-blocking)│              │  │                                                 │   │
 └──────────────┘              │  │  cluster-a: [event3] [event2] [event1]         │   │
                               │  │  cluster-b: [event2] [event1]                   │   │
@@ -83,7 +83,7 @@ Nightcrier implements a sophisticated concurrency model that balances parallelis
 ### Event Lifecycle
 
 ```
-1. Event Received (SSE)
+1. Event Received (MCP)
         │
         v
 2. Enqueue() called (non-blocking)

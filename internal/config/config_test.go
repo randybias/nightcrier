@@ -59,9 +59,9 @@ cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
-sse_reconnect_initial_backoff: 1
-sse_reconnect_max_backoff: 60
-sse_read_timeout: 120
+mcp_reconnect_initial_backoff: 1
+mcp_reconnect_max_backoff: 60
+mcp_read_timeout: 120
 failure_threshold_for_alert: 3
 anthropic_api_key: "test-key"
 `
@@ -102,9 +102,9 @@ cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
-sse_reconnect_initial_backoff: 1
-sse_reconnect_max_backoff: 60
-sse_read_timeout: 120
+mcp_reconnect_initial_backoff: 1
+mcp_reconnect_max_backoff: 60
+mcp_read_timeout: 120
 failure_threshold_for_alert: 3
 `
 }
@@ -122,9 +122,9 @@ func buildTestConfig(overrides map[string]interface{}) string {
 		"dedup_window_seconds":          300,
 		"queue_overflow_policy":         "drop",
 		"shutdown_timeout":              30,
-		"sse_reconnect_initial_backoff": 1,
-		"sse_reconnect_max_backoff":     60,
-		"sse_read_timeout":              120,
+		"mcp_reconnect_initial_backoff": 1,
+		"mcp_reconnect_max_backoff":     60,
+		"mcp_read_timeout":              120,
 		"failure_threshold_for_alert":   3,
 		"anthropic_api_key":             "test-key",
 	}
@@ -313,9 +313,9 @@ cluster_failure_event_queue_size: 5
 dedup_window_seconds: 600
 queue_overflow_policy: "reject"
 shutdown_timeout: 30
-sse_reconnect_initial_backoff: 1
-sse_reconnect_max_backoff: 60
-sse_read_timeout: 120
+mcp_reconnect_initial_backoff: 1
+mcp_reconnect_max_backoff: 60
+mcp_read_timeout: 120
 failure_threshold_for_alert: 3
 anthropic_api_key: "test-key"
 `
@@ -398,9 +398,9 @@ cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
-sse_reconnect_initial_backoff: 1
-sse_reconnect_max_backoff: 60
-sse_read_timeout: 120
+mcp_reconnect_initial_backoff: 1
+mcp_reconnect_max_backoff: 60
+mcp_read_timeout: 120
 failure_threshold_for_alert: 3
 anthropic_api_key: "test-key"
 `
@@ -464,9 +464,9 @@ cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
-sse_reconnect_initial_backoff: 1
-sse_reconnect_max_backoff: 60
-sse_read_timeout: 120
+mcp_reconnect_initial_backoff: 1
+mcp_reconnect_max_backoff: 60
+mcp_read_timeout: 120
 failure_threshold_for_alert: 3
 anthropic_api_key: "test-key"
 `
@@ -589,7 +589,7 @@ anthropic_api_key: "test-key"
 	}
 }
 
-func TestValidation_SSEReconnectSettings(t *testing.T) {
+func TestValidation_MCPReconnectSettings(t *testing.T) {
 	resetViper()
 
 	clusterPrefix := `
@@ -606,17 +606,17 @@ monitored_clusters:
 	}{
 		{
 			name:    "initial backoff < 1",
-			config:  clusterPrefix + "sse_reconnect_initial_backoff: 0\nanthropic_api_key: \"test-key\"\n",
+			config:  clusterPrefix + "mcp_reconnect_initial_backoff: 0\nanthropic_api_key: \"test-key\"\n",
 			wantErr: true,
 		},
 		{
 			name:    "max backoff < initial backoff",
-			config:  clusterPrefix + "sse_reconnect_initial_backoff: 10\nsse_reconnect_max_backoff: 5\nanthropic_api_key: \"test-key\"\n",
+			config:  clusterPrefix + "mcp_reconnect_initial_backoff: 10\nmcp_reconnect_max_backoff: 5\nanthropic_api_key: \"test-key\"\n",
 			wantErr: true,
 		},
 		{
 			name:    "read timeout < 1",
-			config:  clusterPrefix + "sse_read_timeout: 0\nanthropic_api_key: \"test-key\"\n",
+			config:  clusterPrefix + "mcp_read_timeout: 0\nanthropic_api_key: \"test-key\"\n",
 			wantErr: true,
 		},
 	}
@@ -1187,7 +1187,7 @@ anthropic_api_key: "test-key"`,
 			expectedEnvVar:    "SHUTDOWN_TIMEOUT_SECONDS",
 		},
 		{
-			name: "missing sse_reconnect_initial_backoff",
+			name: "missing mcp_reconnect_initial_backoff",
 			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 ` + baseAgentConfig + baseExecutionConfig + `severity_threshold: "ERROR"
@@ -1198,11 +1198,11 @@ dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
 anthropic_api_key: "test-key"`,
-			expectedFieldName: "sse_reconnect_initial_backoff",
-			expectedEnvVar:    "SSE_RECONNECT_INITIAL_BACKOFF",
+			expectedFieldName: "mcp_reconnect_initial_backoff",
+			expectedEnvVar:    "MCP_RECONNECT_INITIAL_BACKOFF",
 		},
 		{
-			name: "missing sse_reconnect_max_backoff",
+			name: "missing mcp_reconnect_max_backoff",
 			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 ` + baseAgentConfig + baseExecutionConfig + `severity_threshold: "ERROR"
@@ -1212,13 +1212,13 @@ cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
-sse_reconnect_initial_backoff: 1
+mcp_reconnect_initial_backoff: 1
 anthropic_api_key: "test-key"`,
-			expectedFieldName: "sse_reconnect_max_backoff",
-			expectedEnvVar:    "SSE_RECONNECT_MAX_BACKOFF",
+			expectedFieldName: "mcp_reconnect_max_backoff",
+			expectedEnvVar:    "MCP_RECONNECT_MAX_BACKOFF",
 		},
 		{
-			name: "missing sse_read_timeout",
+			name: "missing mcp_read_timeout",
 			config: clusterPrefix + `subscribe_mode: "faults"
 workspace_root: "./incidents"
 ` + baseAgentConfig + baseExecutionConfig + `severity_threshold: "ERROR"
@@ -1228,11 +1228,11 @@ cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
-sse_reconnect_initial_backoff: 1
-sse_reconnect_max_backoff: 60
+mcp_reconnect_initial_backoff: 1
+mcp_reconnect_max_backoff: 60
 anthropic_api_key: "test-key"`,
-			expectedFieldName: "sse_read_timeout",
-			expectedEnvVar:    "SSE_READ_TIMEOUT_SECONDS",
+			expectedFieldName: "mcp_read_timeout",
+			expectedEnvVar:    "MCP_READ_TIMEOUT_SECONDS",
 		},
 		{
 			name: "missing failure_threshold_for_alert",
@@ -1245,9 +1245,9 @@ cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
-sse_reconnect_initial_backoff: 1
-sse_reconnect_max_backoff: 60
-sse_read_timeout: 120
+mcp_reconnect_initial_backoff: 1
+mcp_reconnect_max_backoff: 60
+mcp_read_timeout: 120
 anthropic_api_key: "test-key"`,
 			expectedFieldName: "failure_threshold_for_alert",
 			expectedEnvVar:    "FAILURE_THRESHOLD_FOR_ALERT",
@@ -2016,9 +2016,9 @@ cluster_failure_event_queue_size: 20
 dedup_window_seconds: 600
 queue_overflow_policy: "reject"
 shutdown_timeout: 60
-sse_reconnect_initial_backoff: 2
-sse_reconnect_max_backoff: 120
-sse_read_timeout: 240
+mcp_reconnect_initial_backoff: 2
+mcp_reconnect_max_backoff: 120
+mcp_read_timeout: 240
 failure_threshold_for_alert: 5
 anthropic_api_key: "test-key"
 `
@@ -2430,9 +2430,9 @@ cluster_failure_event_queue_size: 3
 dedup_window_seconds: 300
 queue_overflow_policy: "drop"
 shutdown_timeout: 30
-sse_reconnect_initial_backoff: 1
-sse_reconnect_max_backoff: 60
-sse_read_timeout: 120
+mcp_reconnect_initial_backoff: 1
+mcp_reconnect_max_backoff: 60
+mcp_read_timeout: 120
 failure_threshold_for_alert: 3
 anthropic_api_key: "test-key"
 `
