@@ -37,12 +37,13 @@ type MonitoredClusterConfig struct {
 // The MCP server sends fault events via MCP Streamable HTTP transport.
 type MCPConfig struct {
 	// Endpoint is the MCP server URL (required, must be a valid URL).
-	// Example: "http://localhost:8080"
+	// Example: "http://localhost:8080" or "https://agentgateway:8443/mcp"
 	Endpoint string `mapstructure:"endpoint" validate:"required,url"`
 
-	// APIKey is a placeholder for future MCP server authentication.
-	// Currently ignored but documented in config for forward compatibility.
-	// When MCP servers support authentication, this field will be used.
+	// APIKey is the API key for authenticating with the MCP server (optional).
+	// When configured, this key is sent as a Bearer token in the Authorization header.
+	// SECURITY: When APIKey is set, Endpoint MUST use HTTPS (TLS) to protect credentials.
+	// This is typically used when AgentGateway fronts the MCP server with API key authentication.
 	APIKey string `mapstructure:"api_key"`
 }
 
@@ -106,6 +107,11 @@ func (c *MonitoredClusterConfig) Validate() error {
 	// Basic URL format validation
 	if !strings.HasPrefix(c.MCP.Endpoint, "http://") && !strings.HasPrefix(c.MCP.Endpoint, "https://") {
 		return fmt.Errorf("cluster %s: mcp.endpoint must start with http:// or https://, got %q", c.Name, c.MCP.Endpoint)
+	}
+
+	// TLS enforcement: API key authentication requires HTTPS to protect credentials
+	if c.MCP.APIKey != "" && !strings.HasPrefix(c.MCP.Endpoint, "https://") {
+		return fmt.Errorf("cluster %s: mcp.api_key requires HTTPS endpoint (TLS) for security; got %q", c.Name, c.MCP.Endpoint)
 	}
 
 	// Validate triage configuration

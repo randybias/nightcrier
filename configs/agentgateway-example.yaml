@@ -1,0 +1,139 @@
+# AgentGateway Configuration Example for Nightcrier
+#
+# This example shows how to configure AgentGateway to front kubernetes-mcp-server
+# with API key authentication. AgentGateway acts as a secure gateway that:
+# - Terminates TLS connections
+# - Validates API keys using Bearer token authentication
+# - Proxies authenticated requests to the backend MCP server
+#
+# Documentation: https://agentgateway.dev/docs/configuration/security/apikey-authn/
+#
+# Architecture:
+#   Nightcrier ──HTTPS+Bearer──▶ AgentGateway ──HTTP──▶ kubernetes-mcp-server
+#                (api_key)      (validates key)        (no auth needed)
+
+# Global configuration
+config:
+  # Admin interface for metrics/health (optional)
+  # adminAddress: 0.0.0.0:9901
+
+# Port bindings and listeners
+binds:
+  # HTTPS listener with TLS termination
+  - port: 8443
+    listeners:
+      - tls:
+          # TLS certificate and key (required for HTTPS)
+          # Generate with: openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+          cert: /certs/server.crt
+          key: /certs/server.key
+
+        routes:
+          # MCP endpoint with API key authentication
+          - path: /mcp
+            policies:
+              # API key authentication policy
+              apiKey:
+                # strict: A valid API key MUST be present
+                # optional: Validate if present, allow if absent (default)
+                # permissive: Never reject (useful for logging only)
+                mode: strict
+
+                # List of valid API keys with optional metadata
+                keys:
+                  # Production key for Nightcrier
+                  # Recommend using environment variable: "${MCP_API_KEY}"
+                  - key: "${MCP_API_KEY}"
+                    metadata:
+                      client: nightcrier
+                      environment: production
+
+                  # Example: Additional key for development/testing
+                  # - key: "${MCP_API_KEY_DEV}"
+                  #   metadata:
+                  #     client: nightcrier-dev
+                  #     environment: development
+
+              # Optional: CORS policy for browser-based clients
+              cors:
+                allowOrigins:
+                  - "*"
+                allowHeaders:
+                  - content-type
+                  - mcp-protocol-version
+
+            # Backend MCP server target
+            backends:
+              - mcp:
+                  targets:
+                    - name: kubernetes-mcp
+                      http:
+                        # kubernetes-mcp-server running without authentication
+                        url: http://kubernetes-mcp-server:8080
+
+# =============================================================================
+# Deployment Notes
+# =============================================================================
+#
+# 1. TLS Certificates:
+#    - For production, use certificates from a trusted CA (Let's Encrypt, etc.)
+#    - For development, generate self-signed certs:
+#      openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+#
+# 2. API Key Management:
+#    - Store API keys in environment variables or secrets management (Vault, K8s Secrets)
+#    - Never commit API keys to version control
+#    - Rotate keys periodically
+#
+# 3. Kubernetes Deployment:
+#    - Deploy AgentGateway as a Deployment/Service
+#    - Mount TLS certs from Secrets
+#    - Inject API keys from Secrets as environment variables
+#
+# 4. Nightcrier Configuration:
+#    In your Nightcrier config.yaml:
+#    ```yaml
+#    monitored_clusters:
+#      - name: prod-cluster
+#        mcp:
+#          endpoint: "https://agentgateway:8443/mcp"
+#          api_key: "${MCP_API_KEY}"
+#    ```
+#
+# 5. Testing:
+#    # Test with curl (replace with your API key)
+#    curl -H "Authorization: Bearer $MCP_API_KEY" https://agentgateway:8443/mcp
+#
+# =============================================================================
+# Alternative: Multiple Clusters with Different Keys
+# =============================================================================
+#
+# If you have multiple kubernetes-mcp-server instances for different clusters,
+# you can configure multiple routes with different backends:
+#
+# routes:
+#   - path: /mcp/prod
+#     policies:
+#       apiKey:
+#         mode: strict
+#         keys:
+#           - key: "${MCP_API_KEY_PROD}"
+#     backends:
+#       - mcp:
+#           targets:
+#             - name: k8s-mcp-prod
+#               http:
+#                 url: http://kubernetes-mcp-server-prod:8080
+#
+#   - path: /mcp/staging
+#     policies:
+#       apiKey:
+#         mode: strict
+#         keys:
+#           - key: "${MCP_API_KEY_STAGING}"
+#     backends:
+#       - mcp:
+#           targets:
+#             - name: k8s-mcp-staging
+#               http:
+#                 url: http://kubernetes-mcp-server-staging:8080
