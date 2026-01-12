@@ -40,9 +40,9 @@ type MCPConfig struct {
 	// Example: "http://localhost:8080"
 	Endpoint string `mapstructure:"endpoint" validate:"required,url"`
 
-	// APIKey is a placeholder for future MCP server authentication.
-	// Currently ignored but documented in config for forward compatibility.
-	// When MCP servers support authentication, this field will be used.
+	// APIKey is the Bearer token for MCP server authentication (optional).
+	// When set, requests include "Authorization: Bearer <api_key>" header.
+	// Leave empty for unauthenticated connections (e.g., in-cluster access).
 	APIKey string `mapstructure:"api_key"`
 }
 

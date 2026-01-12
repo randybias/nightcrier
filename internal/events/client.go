@@ -22,6 +22,7 @@ const (
 // Client handles MCP connections to receive fault events from kubernetes-mcp-server
 type Client struct {
 	endpoint       string
+	apiKey         string // Bearer token for MCP server authentication (optional, empty = no auth)
 	subscribeMode  string // "events" or "faults"
 	mcpClient      *mcp.Client
 	session        *mcp.ClientSession
@@ -30,6 +31,25 @@ type Client struct {
 	mu             sync.Mutex
 	closeOnce      sync.Once
 	closed         atomic.Bool // Tracks if client is closed to prevent send on closed channel
+}
+
+// bearerAuthTransport wraps an http.RoundTripper to add Authorization header.
+// When token is empty, requests pass through without authentication.
+type bearerAuthTransport struct {
+	token string
+	base  http.RoundTripper
+}
+
+// RoundTrip implements http.RoundTripper, adding the Authorization header only if token is set
+func (t *bearerAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Skip auth if no token configured (e.g., in-cluster connections)
+	if t.token == "" {
+		return t.base.RoundTrip(req)
+	}
+	// Clone the request to avoid modifying the original
+	reqClone := req.Clone(req.Context())
+	reqClone.Header.Set("Authorization", "Bearer "+t.token)
+	return t.base.RoundTrip(reqClone)
 }
 
 // closeChannel closes the event channel once
@@ -42,9 +62,10 @@ func (c *Client) closeChannel() {
 
 // NewClient creates a new MCP client for the given endpoint
 // endpoint should be the full MCP endpoint URL (e.g., "http://localhost:8383/mcp")
+// apiKey is the optional Bearer token for authentication (empty string = no auth)
 // subscribeMode should be "events" or "faults" (default: "faults")
 // tuningConfig provides tunable operational parameters, including event channel buffer size
-func NewClient(endpoint, subscribeMode string, tuningConfig *config.TuningConfig) *Client {
+func NewClient(endpoint, apiKey, subscribeMode string, tuningConfig *config.TuningConfig) *Client {
 	if subscribeMode == "" {
 		subscribeMode = "faults"
 	}
@@ -52,6 +73,7 @@ func NewClient(endpoint, subscribeMode string, tuningConfig *config.TuningConfig
 
 	c := &Client{
 		endpoint:      endpoint,
+		apiKey:        apiKey,
 		subscribeMode: subscribeMode,
 		eventChan:     eventChan,
 	}
@@ -155,13 +177,21 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan *FaultEvent, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// Create HTTP client with optional Bearer token authentication
+	httpClient := &http.Client{
+		Transport: &bearerAuthTransport{
+			token: c.apiKey,
+			base:  http.DefaultTransport,
+		},
+	}
+
 	// Create Streamable HTTP transport using the configured endpoint as-is
 	transport := &mcp.StreamableClientTransport{
 		Endpoint:   c.endpoint,
-		HTTPClient: &http.Client{},
+		HTTPClient: httpClient,
 	}
 
-	slog.Info("connecting to MCP server", "endpoint", c.endpoint)
+	slog.Info("connecting to MCP server", "endpoint", c.endpoint, "authenticated", c.apiKey != "")
 
 	// Connect to server
 	session, err := c.mcpClient.Connect(ctx, transport, nil)

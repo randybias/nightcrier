@@ -47,8 +47,10 @@ monitored_clusters:
     # MCP server connection settings
     mcp:
       endpoint: "http://kubernetes-mcp-server:8080/mcp"
-      # API key placeholder for future MCP server authentication
-      api_key: "THIS_IS_A_PLACEHOLDER_TO_REMIND_US_TO_MAKE_AUTH_WORK_ON_THE_MCP_SERVER"
+      # Optional: Bearer token for MCP server authentication
+      # When set, requests include "Authorization: Bearer <api_key>" header
+      # Leave empty or omit for unauthenticated connections (e.g., in-cluster access)
+      # api_key: "sk-your-mcp-server-token-here"
 
     # Triage agent configuration
     triage:

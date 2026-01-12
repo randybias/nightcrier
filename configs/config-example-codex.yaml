@@ -11,7 +11,8 @@ monitored_clusters:
 
     mcp:
       endpoint: "http://kubernetes-mcp-server:8080/mcp"
-      api_key: "PLACEHOLDER"
+      # Optional: Bearer token for MCP server authentication (omit for unauthenticated)
+      # api_key: "sk-your-mcp-server-token-here"
 
     triage:
       enabled: true

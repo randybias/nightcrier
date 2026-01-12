@@ -39,7 +39,7 @@ func TestNewClient_UsesConfigurableBufferSize(t *testing.T) {
 				},
 			}
 
-			client := NewClient("http://localhost:8383/mcp", "faults", tuningConfig)
+			client := NewClient("http://localhost:8383/mcp", "", "faults", tuningConfig)
 
 			if client == nil {
 				t.Fatal("expected client to be non-nil")
@@ -69,7 +69,7 @@ func TestNewClient_RequiresTuningConfig(t *testing.T) {
 		},
 	}
 
-	client := NewClient("http://localhost:8383/mcp", "events", tuningConfig)
+	client := NewClient("http://localhost:8383/mcp", "", "events", tuningConfig)
 
 	if client == nil {
 		t.Fatal("expected client to be non-nil")
@@ -95,7 +95,7 @@ func TestNewClient_InitializesFields(t *testing.T) {
 		},
 	}
 
-	client := NewClient(endpoint, mode, tuningConfig)
+	client := NewClient(endpoint, "", mode, tuningConfig)
 
 	if client.endpoint != endpoint {
 		t.Errorf("expected endpoint %s, got %s", endpoint, client.endpoint)
@@ -129,7 +129,7 @@ func TestNewClient_DefaultSubscribeMode(t *testing.T) {
 		},
 	}
 
-	client := NewClient("http://localhost:8383/mcp", "", tuningConfig)
+	client := NewClient("http://localhost:8383/mcp", "", "", tuningConfig)
 
 	if client.subscribeMode != "faults" {
 		t.Errorf("expected default subscribe mode 'faults', got %s", client.subscribeMode)
@@ -137,5 +137,42 @@ func TestNewClient_DefaultSubscribeMode(t *testing.T) {
 
 	if cap(client.eventChan) != bufferSize {
 		t.Errorf("expected channel capacity %d, got %d", bufferSize, cap(client.eventChan))
+	}
+}
+
+// TestNewClient_WithAPIKey verifies that the API key is properly stored in the client.
+func TestNewClient_WithAPIKey(t *testing.T) {
+	tests := []struct {
+		name   string
+		apiKey string
+	}{
+		{
+			name:   "with API key",
+			apiKey: "sk-test-api-key-12345",
+		},
+		{
+			name:   "without API key",
+			apiKey: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tuningConfig := &config.TuningConfig{
+				Events: config.EventsTuning{
+					ChannelBufferSize: 100,
+				},
+			}
+
+			client := NewClient("http://localhost:8383/mcp", tt.apiKey, "faults", tuningConfig)
+
+			if client == nil {
+				t.Fatal("expected client to be non-nil")
+			}
+
+			if client.apiKey != tt.apiKey {
+				t.Errorf("expected apiKey %q, got %q", tt.apiKey, client.apiKey)
+			}
+		})
 	}
 }
