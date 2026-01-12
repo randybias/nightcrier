@@ -24,7 +24,6 @@ import (
 	"github.com/randybias/nightcrier/internal/config"
 	"github.com/randybias/nightcrier/internal/dispatcher"
 	"github.com/randybias/nightcrier/internal/events"
-	"github.com/randybias/nightcrier/internal/health"
 	"github.com/randybias/nightcrier/internal/incident"
 	"github.com/randybias/nightcrier/internal/nats"
 	"github.com/randybias/nightcrier/internal/reload"
@@ -54,7 +53,6 @@ var (
 	scriptPath    string
 	logLevel      string
 	agentTimeout  int
-	healthPort    int
 	adminListen   string
 )
 
@@ -85,9 +83,6 @@ func init() {
 	rootCmd.Flags().StringVar(&scriptPath, "script-path", "", "Path to agent script")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "", "Log level: debug, info, warn, error (overrides config file and LOG_LEVEL env var)")
 	rootCmd.Flags().IntVar(&agentTimeout, "agent-timeout", 0, "Agent execution timeout in seconds (overrides config file and AGENT_TIMEOUT env var)")
-
-	// Health monitoring flags
-	rootCmd.Flags().IntVar(&healthPort, "health-port", 8080, "Port for health monitoring HTTP endpoint (0 to disable)")
 
 	// Admin UI flags
 	rootCmd.Flags().StringVar(&adminListen, "admin-listen", "", "Address for admin UI server (e.g., 127.0.0.1:8847)")
@@ -579,21 +574,6 @@ func run(cmd *cobra.Command, args []string) error {
 		"drop_events_while_busy", *cfg.DropEventsWhileBusy,
 		"cluster_failure_event_queue_size", cfg.ClusterFailureEventQueueSize,
 		"event_ttl_seconds", cfg.EventTTLSeconds)
-
-	// Phase 4: Start health monitoring server if enabled
-	if healthPort > 0 {
-		healthServer := health.NewServer(connectionMgr, healthPort)
-		go func() {
-			slog.Info("starting health monitoring server",
-				"port", healthPort,
-				"endpoint", fmt.Sprintf("http://localhost:%d/health/clusters", healthPort))
-			if err := healthServer.Start(); err != nil && err != http.ErrServerClosed {
-				slog.Error("health server failed", "error", err)
-			}
-		}()
-	} else {
-		slog.Info("health monitoring server disabled", "reason", "health-port=0")
-	}
 
 	// Start admin UI server if enabled
 	if adminListen != "" && stateStore != nil {
