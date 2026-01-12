@@ -46,9 +46,18 @@ monitored_clusters:
 
     # MCP server connection settings
     mcp:
+      # MCP endpoint URL (required)
+      # For unauthenticated access: "http://kubernetes-mcp-server:8080/mcp"
+      # For authenticated access via AgentGateway: "https://agentgateway:8443/mcp"
       endpoint: "http://kubernetes-mcp-server:8080/mcp"
-      # API key placeholder for future MCP server authentication
-      api_key: "THIS_IS_A_PLACEHOLDER_TO_REMIND_US_TO_MAKE_AUTH_WORK_ON_THE_MCP_SERVER"
+
+      # API key for Bearer token authentication (optional)
+      # When configured, this key is sent as "Authorization: Bearer <api_key>" header.
+      # SECURITY: When api_key is set, endpoint MUST use HTTPS (TLS required).
+      # This is typically used when AgentGateway fronts the MCP server.
+      # See configs/agentgateway-example.yaml for AgentGateway configuration.
+      # Recommend using environment variable substitution: "${MCP_API_KEY}"
+      # api_key: "${MCP_API_KEY}"
 
     # Triage agent configuration
     triage:

@@ -23,6 +23,7 @@ const (
 type Client struct {
 	endpoint       string
 	subscribeMode  string // "events" or "faults"
+	apiKey         string // optional API key for Bearer token authentication
 	mcpClient      *mcp.Client
 	session        *mcp.ClientSession
 	eventChan      chan *FaultEvent
@@ -30,6 +31,20 @@ type Client struct {
 	mu             sync.Mutex
 	closeOnce      sync.Once
 	closed         atomic.Bool // Tracks if client is closed to prevent send on closed channel
+}
+
+// authTransport wraps an http.RoundTripper to add Authorization header
+type authTransport struct {
+	base   http.RoundTripper
+	apiKey string
+}
+
+// RoundTrip implements http.RoundTripper, adding the Authorization header
+func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Clone the request to avoid modifying the original
+	req = req.Clone(req.Context())
+	req.Header.Set("Authorization", "Bearer "+t.apiKey)
+	return t.base.RoundTrip(req)
 }
 
 // closeChannel closes the event channel once
@@ -43,8 +58,9 @@ func (c *Client) closeChannel() {
 // NewClient creates a new MCP client for the given endpoint
 // endpoint should be the full MCP endpoint URL (e.g., "http://localhost:8383/mcp")
 // subscribeMode should be "events" or "faults" (default: "faults")
+// apiKey is an optional API key for Bearer token authentication (empty string = no auth)
 // tuningConfig provides tunable operational parameters, including event channel buffer size
-func NewClient(endpoint, subscribeMode string, tuningConfig *config.TuningConfig) *Client {
+func NewClient(endpoint, subscribeMode, apiKey string, tuningConfig *config.TuningConfig) *Client {
 	if subscribeMode == "" {
 		subscribeMode = "faults"
 	}
@@ -53,6 +69,7 @@ func NewClient(endpoint, subscribeMode string, tuningConfig *config.TuningConfig
 	c := &Client{
 		endpoint:      endpoint,
 		subscribeMode: subscribeMode,
+		apiKey:        apiKey,
 		eventChan:     eventChan,
 	}
 
@@ -155,13 +172,25 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan *FaultEvent, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Create Streamable HTTP transport using the configured endpoint as-is
-	transport := &mcp.StreamableClientTransport{
-		Endpoint:   c.endpoint,
-		HTTPClient: &http.Client{},
+	// Create HTTP client, optionally with API key authentication
+	httpClient := &http.Client{}
+	if c.apiKey != "" {
+		httpClient = &http.Client{
+			Transport: &authTransport{
+				base:   http.DefaultTransport,
+				apiKey: c.apiKey,
+			},
+		}
+		slog.Info("connecting to MCP server with API key authentication", "endpoint", c.endpoint)
+	} else {
+		slog.Info("connecting to MCP server", "endpoint", c.endpoint)
 	}
 
-	slog.Info("connecting to MCP server", "endpoint", c.endpoint)
+	// Create Streamable HTTP transport using the configured endpoint
+	transport := &mcp.StreamableClientTransport{
+		Endpoint:   c.endpoint,
+		HTTPClient: httpClient,
+	}
 
 	// Connect to server
 	session, err := c.mcpClient.Connect(ctx, transport, nil)

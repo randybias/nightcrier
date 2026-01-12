@@ -401,7 +401,7 @@ func (e *K8sExecutor) createJob(
 		LLMModel:        e.config.Model,
 		Prompt:          prompt,
 		ConfigMapName:   configMapName,
-		SecretName:      "kubeconfig-" + clusterName, // Convention: kubeconfig-{cluster-name}
+		SecretName:      "triage-kubeconfig-" + clusterName, // Must match bootstrap: triage-kubeconfig-{cluster-name}
 		PresignedURLs:   outputURLs.ToPresignedURLs(),
 		Resources: k8s.ResourceConfig{
 			MemoryLimit:   execCluster.MemoryLimit,

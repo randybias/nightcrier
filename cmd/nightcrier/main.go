@@ -155,13 +155,20 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Create and inject MCP clients for each cluster
 	for _, clusterCfg := range cfg.MonitoredClusters {
-		mcpClient := events.NewClient(clusterCfg.MCP.Endpoint, cfg.SubscribeMode, tuning)
+		mcpClient := events.NewClient(clusterCfg.MCP.Endpoint, cfg.SubscribeMode, clusterCfg.MCP.APIKey, tuning)
 		if err := connectionMgr.SetClusterClient(clusterCfg.Name, mcpClient); err != nil {
 			return fmt.Errorf("failed to set client for cluster %s: %w", clusterCfg.Name, err)
 		}
-		slog.Info("mcp client created for cluster",
-			"cluster", clusterCfg.Name,
-			"endpoint", clusterCfg.MCP.Endpoint)
+		// Log client creation (don't log the API key value for security)
+		if clusterCfg.MCP.APIKey != "" {
+			slog.Info("mcp client created for cluster with API key auth",
+				"cluster", clusterCfg.Name,
+				"endpoint", clusterCfg.MCP.Endpoint)
+		} else {
+			slog.Info("mcp client created for cluster",
+				"cluster", clusterCfg.Name,
+				"endpoint", clusterCfg.MCP.Endpoint)
+		}
 	}
 
 	workspaceMgr := agent.NewWorkspaceManager(cfg.WorkspaceRoot)
