@@ -21,6 +21,7 @@
 vendor/
 
 # Credentials and sensitive files
+configs/config.yaml
 kubeconfigs/*
 !kubeconfigs/.gitkeep
 *.pem

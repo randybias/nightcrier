@@ -335,44 +335,21 @@ mcp_read_timeout: 120
 # slack_webhook_url: "https://hooks.slack.com/services/..."
 
 # =============================================================================
-# Object Storage (Optional)
+# Object Storage
 # =============================================================================
-# When configured, incident artifacts are uploaded to cloud object storage
-# and signed URLs are included in Slack notifications for direct access.
-# Supports Azure Blob Storage, S3-compatible storage (AWS S3, MinIO, RustFS),
-# and in-memory storage (for testing).
-#
-# object_storage:
-#   # REQUIRED: Storage URL specifying provider and bucket/container
-#   # Environment variable: OBJECT_STORAGE_URL
-#   #
-#   # Azure Blob Storage:
-#   # url: "azblob://mycontainer"
-#   #
-#   # AWS S3:
-#   # url: "s3://mybucket?region=us-east-1"
-#   #
-#   # S3-compatible (MinIO, RustFS):
-#   # url: "s3://mybucket?endpoint=http://minio:9000&disable_https=true&use_path_style=true&region=us-east-1"
-#   #
-#   # In-memory (testing only):
-#   # url: "mem://"
-#
-#   # Optional: Signed URL expiration duration (default: "168h" = 7 days)
-#   # Environment variable: OBJECT_STORAGE_SIGNED_URL_EXPIRY
-#   # signed_url_expiry: "168h"
-#
-#   # Azure credentials (required for azblob://)
-#   # Environment variable: AZURE_STORAGE_ACCOUNT
-#   # azure_storage_account: "mystorageaccount"
-#   # Environment variable: AZURE_STORAGE_KEY
-#   # azure_storage_key: "..."
-#
-#   # AWS/S3 credentials (required for s3://)
-#   # Environment variable: AWS_ACCESS_KEY_ID
-#   # aws_access_key_id: "..."
-#   # Environment variable: AWS_SECRET_ACCESS_KEY
-#   # aws_secret_access_key: "..."
+# URL formats:
+#   Azure:  azblob://container-name
+#   AWS S3: s3://bucket-name?region=us-east-1
+#   S3-compatible (MinIO, RustFS): s3://bucket-name?endpoint=http://localhost:9000&disable_https=true&use_path_style=true&region=us-east-1
+#   Memory: mem:// (for testing only)
+object_storage:
+  url: "mem://"
+#   url: "azblob://incident-reports"
+  signed_url_expiry: "168h"
+#   azure_storage_account: "mystorageaccount"
+#   azure_storage_key: "..."
+#   aws_access_key_id: "..."
+#   aws_secret_access_key: "..."
 
 # =============================================================================
 # State Storage Configuration (Optional)

@@ -150,6 +150,9 @@ cd nightcrier
 # Build the Nightcrier binary
 make build
 
+# Create kind cluster (for local development)
+make dev-cluster
+
 # Build and load the agent container image (for kind)
 cd nc-agent-runner
 make build
