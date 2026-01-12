@@ -209,3 +209,133 @@ The system SHALL support a single-run execution mode for test harness integratio
 - **AND** all fault events SHALL be processed
 - **AND** the application SHALL only exit on SIGINT/SIGTERM
 
+### Requirement: MCP Transport Connection Settings
+
+The system SHALL support configuration for MCP transport connection management.
+
+#### Scenario: MCP reconnect initial backoff required
+
+- **WHEN** the application starts
+- **AND** `mcp_reconnect_initial_backoff` is not configured
+- **THEN** the application SHALL exit with a non-zero status
+- **AND** the error message SHALL include the field name `mcp_reconnect_initial_backoff`
+- **AND** the error message SHALL include the environment variable `MCP_RECONNECT_INITIAL_BACKOFF`
+
+#### Scenario: MCP reconnect initial backoff validation
+
+- **WHEN** the application starts
+- **AND** `mcp_reconnect_initial_backoff` is less than 1
+- **THEN** the application SHALL exit with a non-zero status
+- **AND** the error message SHALL state "mcp_reconnect_initial_backoff must be >= 1"
+
+#### Scenario: MCP reconnect max backoff required
+
+- **WHEN** the application starts
+- **AND** `mcp_reconnect_max_backoff` is not configured
+- **THEN** the application SHALL exit with a non-zero status
+- **AND** the error message SHALL include the field name `mcp_reconnect_max_backoff`
+- **AND** the error message SHALL include the environment variable `MCP_RECONNECT_MAX_BACKOFF`
+
+#### Scenario: MCP reconnect max backoff validation
+
+- **WHEN** the application starts
+- **AND** `mcp_reconnect_max_backoff` is less than `mcp_reconnect_initial_backoff`
+- **THEN** the application SHALL exit with a non-zero status
+- **AND** the error message SHALL indicate max must be >= initial
+
+#### Scenario: MCP read timeout required
+
+- **WHEN** the application starts
+- **AND** `mcp_read_timeout` is not configured
+- **THEN** the application SHALL exit with a non-zero status
+- **AND** the error message SHALL include the field name `mcp_read_timeout`
+- **AND** the error message SHALL include the environment variable `MCP_READ_TIMEOUT_SECONDS`
+
+#### Scenario: MCP read timeout validation
+
+- **WHEN** the application starts
+- **AND** `mcp_read_timeout` is less than 1
+- **THEN** the application SHALL exit with a non-zero status
+- **AND** the error message SHALL state "mcp_read_timeout must be >= 1"
+
+#### Scenario: Environment variable mapping for MCP settings
+
+- **WHEN** the application starts
+- **THEN** the following environment variables SHALL be recognized:
+  - `MCP_RECONNECT_INITIAL_BACKOFF` maps to `mcp_reconnect_initial_backoff`
+  - `MCP_RECONNECT_MAX_BACKOFF` maps to `mcp_reconnect_max_backoff`
+  - `MCP_READ_TIMEOUT_SECONDS` maps to `mcp_read_timeout`
+
+#### Scenario: Config file support for MCP settings
+
+- **WHEN** a YAML config file is provided
+- **THEN** the following keys SHALL be recognized:
+  ```yaml
+  mcp_reconnect_initial_backoff: 1
+  mcp_reconnect_max_backoff: 60
+  mcp_read_timeout: 120
+  ```
+
+### Requirement: MCP API Key Authentication
+
+The system SHALL support API key authentication for MCP server connections when configured.
+
+#### Scenario: API key sent in Authorization header
+- **WHEN** a monitored cluster has `mcp.api_key` configured
+- **AND** the events client connects to the MCP endpoint
+- **THEN** the HTTP request SHALL include an `Authorization: Bearer <api_key>` header
+
+#### Scenario: No Authorization header when API key absent
+- **WHEN** a monitored cluster does not have `mcp.api_key` configured
+- **AND** the events client connects to the MCP endpoint
+- **THEN** the HTTP request SHALL NOT include an `Authorization` header
+
+#### Scenario: API key not logged
+- **WHEN** the application logs MCP connection information
+- **THEN** the API key value SHALL NOT appear in log output
+- **AND** the presence of authentication MAY be logged (e.g., "connecting with API key authentication")
+
+### Requirement: TLS Enforcement for Authenticated Connections
+
+The system SHALL require TLS (HTTPS) when API key authentication is configured to prevent credential exposure.
+
+#### Scenario: HTTPS required with API key
+- **WHEN** the application starts
+- **AND** a monitored cluster has `mcp.api_key` configured
+- **AND** the `mcp.endpoint` does not start with `https://`
+- **THEN** the application SHALL exit with a non-zero status
+- **AND** the error message SHALL state that HTTPS is required when API key is configured
+
+#### Scenario: HTTPS allowed without API key
+- **WHEN** the application starts
+- **AND** a monitored cluster does not have `mcp.api_key` configured
+- **AND** the `mcp.endpoint` starts with `https://`
+- **THEN** the application SHALL start successfully
+
+#### Scenario: HTTP allowed without API key
+- **WHEN** the application starts
+- **AND** a monitored cluster does not have `mcp.api_key` configured
+- **AND** the `mcp.endpoint` starts with `http://`
+- **THEN** the application SHALL start successfully
+
+#### Scenario: Valid HTTPS with API key
+- **WHEN** the application starts
+- **AND** a monitored cluster has `mcp.api_key` configured
+- **AND** the `mcp.endpoint` starts with `https://`
+- **THEN** the application SHALL start successfully
+- **AND** the events client SHALL connect with the Authorization header
+
+### Requirement: API Key Configuration
+
+The system SHALL support API key configuration via config file and environment variables.
+
+#### Scenario: API key from config file
+- **WHEN** a monitored cluster specifies `mcp.api_key` in the config file
+- **THEN** that value SHALL be used for authentication
+
+#### Scenario: API key environment variable documented
+- **WHEN** an operator configures API key authentication
+- **THEN** the config.example.yaml SHALL document the `mcp.api_key` field
+- **AND** the documentation SHALL note the TLS requirement
+- **AND** the documentation SHALL recommend using environment variable substitution for secrets
+
