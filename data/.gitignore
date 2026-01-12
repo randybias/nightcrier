@@ -1,0 +1,4 @@
+# Whitelist approach: ignore everything except specific files
+*
+!.gitignore
+!.gitkeep

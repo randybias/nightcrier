@@ -16,6 +16,9 @@ BUILD_CONTEXT = ..
 # Platforms for multi-arch builds
 PLATFORMS ?= linux/amd64,linux/arm64
 
+# Kind cluster name (must match scripts/dev-setup.sh)
+KIND_CLUSTER ?= nightcrier-dev
+
 # Git version information (for tagging)
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_TAG ?= $(shell git describe --tags --exact-match 2>/dev/null || echo "")
@@ -111,9 +114,9 @@ pull:
 .PHONY: load-kind
 load-kind:
 	@echo "Loading image into kind cluster"
-	@if ! kind get clusters | grep -q $(KIND_CLUSTER); then \
+	@if ! kind get clusters 2>/dev/null | grep -q "^$(KIND_CLUSTER)$$"; then \
 		echo "Error: kind cluster '$(KIND_CLUSTER)' not found"; \
-		echo "Run 'make -C ../scripts dev-cluster' first"; \
+		echo "Run 'make dev-cluster' from project root, or 'make -C .. dev-cluster' from here"; \
 		exit 1; \
 	fi
 	kind load docker-image $(FULL_IMAGE) --name $(KIND_CLUSTER)

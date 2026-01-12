@@ -112,6 +112,27 @@ create_cluster() {
 }
 
 #######################################
+# Export kubeconfig for execution cluster
+#######################################
+export_kubeconfig() {
+    local kubeconfig_dir="${REPO_ROOT}/kubeconfigs"
+    local kubeconfig_file="${kubeconfig_dir}/exec-cluster.yaml"
+
+    info "Exporting kubeconfig for execution cluster..."
+
+    # Create kubeconfigs directory if it doesn't exist
+    if [[ ! -d "${kubeconfig_dir}" ]]; then
+        info "Creating kubeconfigs directory..."
+        mkdir -p "${kubeconfig_dir}"
+    fi
+
+    # Export kubeconfig
+    kind export kubeconfig --name "${CLUSTER_NAME}" --kubeconfig "${kubeconfig_file}"
+
+    info "✓ Kubeconfig exported to ${kubeconfig_file}"
+}
+
+#######################################
 # Load image into kind
 #######################################
 load_image() {
@@ -173,12 +194,14 @@ print_summary() {
     echo ""
     echo "Cluster: ${CLUSTER_NAME}"
     echo "Image: ${IMAGE_NAME}"
+    echo "Kubeconfig: ./kubeconfigs/exec-cluster.yaml"
     echo ""
     echo "Next steps:"
-    echo "  1. Configure API keys in config.yaml or environment variables"
-    echo "  2. Run Nightcrier: ./nightcrier server"
+    echo "  1. Copy configs/config.example.yaml to configs/config.yaml"
+    echo "  2. Configure API keys in config.yaml or environment variables"
+    echo "  3. Run Nightcrier: ./bin/nightcrier --config configs/config.yaml"
     echo "     (This will automatically bootstrap namespace, RBAC, and secrets)"
-    echo "  3. Create test incident: see deploy/dev/test-incident.json"
+    echo "  4. Create test incident: see deploy/dev/test-incident.json"
     echo ""
     echo "Useful commands:"
     echo "  kubectl get all -n nightcrier"
@@ -198,6 +221,9 @@ main() {
     echo ""
 
     create_cluster
+    echo ""
+
+    export_kubeconfig
     echo ""
 
     load_image
