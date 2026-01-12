@@ -21,6 +21,12 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 These instructions apply to all AI assistants (Claude Code, Codex, Gemini, etc.). Both `CLAUDE.md` and `AGENTS.md` are becoming standard filenames for agent instructions across tools.
 
+## Committing Changes
+
+Always commit to a branch if possible so that we can push to GitHub and then do a PR for merge
+to main, which will trigger an automated code review.  Ask the user if the current work is not
+in a branch to confirm.
+
 ## File Organization
 
 ### Working Files and Temporary Output

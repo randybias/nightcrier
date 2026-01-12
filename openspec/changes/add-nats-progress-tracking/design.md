@@ -318,6 +318,12 @@ This gives operators both "what is it stuck on?" and "what did it just finish?"
 - nats-cli publish is non-blocking with timeout
 - Agent continues regardless of NATS publish success
 - Log warning on publish failure for debugging
+- **Connectivity check at startup:** The `nats-publish.sh` script runs a connectivity check when sourced
+  (via `check_nats_connectivity()`). This sets a global `NATS_AVAILABLE` flag that subsequent
+  `publish_event()` calls check. If NATS is unreachable, the flag is set to false and all publish
+  calls skip instantly (no repeated timeouts).
+- **Return code handling:** All publish functions return 0 regardless of success/failure to ensure
+  `set -euo pipefail` in the parent script doesn't cause premature exit
 
 ### Risk: High event volume overwhelming listener
 

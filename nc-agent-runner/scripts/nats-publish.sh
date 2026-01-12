@@ -18,6 +18,48 @@
 
 set -euo pipefail
 
+# Track NATS availability - checked once at script load time
+NATS_AVAILABLE=false
+
+#######################################
+# Check NATS connectivity at script load time
+# This runs once when the script is sourced, failing fast if NATS
+# is unreachable so we don't wait 3 seconds on every publish attempt
+#######################################
+check_nats_connectivity() {
+    # Skip if NATS is disabled
+    if [[ "${NATS_ENABLED:-false}" != "true" ]]; then
+        echo "NATS publishing disabled"
+        return
+    fi
+
+    # Skip if required config is missing
+    if [[ -z "${NATS_SERVER:-}" ]]; then
+        echo "WARNING: NATS_SERVER not set, disabling NATS publishing"
+        return
+    fi
+
+    if [[ -z "${NATS_TOKEN:-}" ]]; then
+        echo "WARNING: NATS_TOKEN not set, disabling NATS publishing"
+        return
+    fi
+
+    # Quick connectivity check with 2-second timeout
+    echo "Checking NATS connectivity to ${NATS_SERVER}..."
+    if timeout 2s nats server check connection \
+        --server="${NATS_SERVER}" \
+        --token="${NATS_TOKEN}" 2>&1; then
+        echo "NATS connectivity check passed"
+        NATS_AVAILABLE=true
+    else
+        echo "WARNING: NATS server unreachable, disabling NATS publishing for this run"
+        NATS_AVAILABLE=false
+    fi
+}
+
+# Run connectivity check when script is sourced
+check_nats_connectivity
+
 #######################################
 # Build JSON payload for run.started event
 # Globals:
@@ -93,27 +135,17 @@ build_run_completed_event() {
 #   $1 - NATS subject (e.g., triage.incident-123.run.started)
 #   $2 - JSON payload
 # Returns:
-#   0 on success or if NATS is disabled
-#   1 on failure (logs warning but doesn't exit)
+#   0 always (NATS is optional, failures are logged as warnings)
+# Globals:
+#   NATS_AVAILABLE - checked at script load time
 #######################################
 publish_event() {
     local subject="$1"
     local payload="$2"
 
-    # Check if NATS is enabled
-    if [[ "${NATS_ENABLED:-false}" != "true" ]]; then
-        echo "NATS publishing disabled, skipping event: ${subject}"
-        return 0
-    fi
-
-    # Validate required NATS configuration
-    if [[ -z "${NATS_SERVER:-}" ]]; then
-        echo "WARNING: NATS_SERVER not set, cannot publish event: ${subject}"
-        return 0
-    fi
-
-    if [[ -z "${NATS_TOKEN:-}" ]]; then
-        echo "WARNING: NATS_TOKEN not set, cannot publish event: ${subject}"
+    # Skip if NATS connectivity check failed at startup
+    if [[ "${NATS_AVAILABLE}" != "true" ]]; then
+        echo "NATS unavailable (skipping): ${subject}"
         return 0
     fi
 
@@ -130,7 +162,8 @@ publish_event() {
         return 0
     else
         echo "WARNING: Failed to publish NATS event to ${subject} (continuing anyway)"
-        return 1
+        # Return 0 to allow script to continue - NATS is optional
+        return 0
     fi
 }
 

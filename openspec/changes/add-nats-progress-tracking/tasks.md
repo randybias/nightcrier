@@ -150,12 +150,24 @@
 
 ## Phase 3: Documentation and Cleanup
 
-### 3.1 Observability
-- [ ] 3.1.1 Add structured logging for NATS events in listener
-- [ ] 3.1.2 Log last_activity updates at debug level
+### 3.1 NATS Graceful Fallback Fix ✅
+- [x] 3.1.1 Fix `publish_event()` to return 0 on failure (was returning 1, causing script exit with `set -e`)
+- [x] 3.1.2 Add `check_nats_connectivity()` function that runs once at script source time
+- [x] 3.1.3 Add `NATS_AVAILABLE` global flag set by connectivity check (prevents repeated 3s timeouts)
+- [x] 3.1.4 Update `publish_event()` to check `NATS_AVAILABLE` flag and skip instantly if unavailable
+- [x] 3.1.5 Run shellcheck validation on updated script
+- [x] 3.1.6 Rebuild container image with fix
 
-### 3.2 Documentation
-- [ ] 3.2.1 Add NATS deployment guide to docs/ (Helm chart or manifests)
-- [ ] 3.2.2 Document NATS configuration options in config.example.yaml comments
-- [ ] 3.2.3 Add troubleshooting section for NATS connectivity issues
-- [ ] 3.2.4 Document event schema and subscription patterns
+**Bug context:** Agent Jobs were failing immediately after NATS timeout because `publish_event()` returned 1
+on failure, which caused the script to exit due to `set -euo pipefail` in both entrypoint.sh and nats-publish.sh,
+despite the "continuing anyway" message. The fix ensures NATS failures don't affect agent execution.
+
+### 3.2 Observability
+- [ ] 3.2.1 Add structured logging for NATS events in listener
+- [ ] 3.2.2 Log last_activity updates at debug level
+
+### 3.3 Documentation
+- [ ] 3.3.1 Add NATS deployment guide to docs/ (Helm chart or manifests)
+- [ ] 3.3.2 Document NATS configuration options in config.example.yaml comments
+- [ ] 3.3.3 Add troubleshooting section for NATS connectivity issues
+- [ ] 3.3.4 Document event schema and subscription patterns
