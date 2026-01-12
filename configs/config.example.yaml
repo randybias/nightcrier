@@ -52,12 +52,13 @@ monitored_clusters:
       endpoint: "http://kubernetes-mcp-server:8080/mcp"
 
       # API key for Bearer token authentication (optional)
-      # When configured, this key is sent as "Authorization: Bearer <api_key>" header.
+      # Leave empty or omit entirely for unauthenticated connections (e.g., in-cluster access).
+      # When set, this key is sent as "Authorization: Bearer <api_key>" header.
       # SECURITY: When api_key is set, endpoint MUST use HTTPS (TLS required).
       # This is typically used when AgentGateway fronts the MCP server.
       # See configs/agentgateway-example.yaml for AgentGateway configuration.
-      # Recommend using environment variable substitution: "${MCP_API_KEY}"
-      # api_key: "${MCP_API_KEY}"
+      # api_key: ""
+      # Or use environment variable: api_key: "${MCP_API_KEY}"
 
     # Triage agent configuration
     triage:
