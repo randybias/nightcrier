@@ -1,4 +1,5 @@
-.PHONY: build clean help build-agent-image dev-cluster dev-teardown dev-secrets
+.PHONY: build clean help build-agent-image dev-cluster dev-teardown dev-secrets \
+        docker-build docker-push docker-release
 
 # Version information
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -45,6 +46,16 @@ dev-secrets: ## Update API key secrets in kind cluster
 		--from-literal=OPENAI_API_KEY="$${OPENAI_API_KEY:-}" \
 		--from-literal=GEMINI_API_KEY="$${GEMINI_API_KEY:-}"
 	@echo "Secret updated. Set env vars before running: ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY"
+
+# Docker targets for nightcrier controller image
+docker-build: ## Build nightcrier Docker image (single-arch)
+	$(MAKE) -C docker/nightcrier build
+
+docker-push: ## Build and push nightcrier multi-arch image to registry
+	$(MAKE) -C docker/nightcrier buildx-push
+
+docker-release: ## Full release: setup buildx, build multi-arch, push
+	$(MAKE) -C docker/nightcrier release
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
