@@ -800,6 +800,11 @@ func TestGetObjectStorageType(t *testing.T) {
 			expected: "gcs",
 		},
 		{
+			name:     "file storage",
+			url:      "file:///var/data/incidents",
+			expected: "local_filesystem",
+		},
+		{
 			name:     "unknown scheme",
 			url:      "custom://something",
 			expected: "custom",

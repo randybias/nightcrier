@@ -854,6 +854,8 @@ func (c *Config) GetObjectStorageType() string {
 		return "s3"
 	case "gs":
 		return "gcs"
+	case "file":
+		return "local_filesystem"
 	default:
 		return parts[0]
 	}
