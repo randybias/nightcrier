@@ -835,6 +835,30 @@ func (c *Config) GetObjectStorageExpiry() time.Duration {
 	return duration
 }
 
+// GetObjectStorageType returns a human-readable storage type derived from the URL scheme.
+// Returns "not_configured" if the URL is empty.
+func (c *Config) GetObjectStorageType() string {
+	if c.ObjectStorage.URL == "" {
+		return "not_configured"
+	}
+	parts := strings.SplitN(c.ObjectStorage.URL, "://", 2)
+	if len(parts) < 2 {
+		return "unknown"
+	}
+	switch parts[0] {
+	case "mem":
+		return "memory"
+	case "azblob":
+		return "azure_blob"
+	case "s3":
+		return "s3"
+	case "gs":
+		return "gcs"
+	default:
+		return parts[0]
+	}
+}
+
 // GetAzureStorageAccount returns the Azure storage account name (for Azure provider).
 // This method is part of the StorageConfig interface.
 func (c *Config) GetAzureStorageAccount() string {

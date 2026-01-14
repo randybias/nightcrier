@@ -768,6 +768,65 @@ object_storage:
 	}
 }
 
+func TestGetObjectStorageType(t *testing.T) {
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+	}{
+		{
+			name:     "empty URL",
+			url:      "",
+			expected: "not_configured",
+		},
+		{
+			name:     "memory storage",
+			url:      "mem://",
+			expected: "memory",
+		},
+		{
+			name:     "azure blob storage",
+			url:      "azblob://incidents",
+			expected: "azure_blob",
+		},
+		{
+			name:     "s3 storage",
+			url:      "s3://my-bucket/path",
+			expected: "s3",
+		},
+		{
+			name:     "gcs storage",
+			url:      "gs://my-bucket",
+			expected: "gcs",
+		},
+		{
+			name:     "unknown scheme",
+			url:      "custom://something",
+			expected: "custom",
+		},
+		{
+			name:     "malformed URL without scheme",
+			url:      "no-scheme-here",
+			expected: "unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				ObjectStorage: ObjectStorage{
+					URL: tt.url,
+				},
+			}
+
+			result := cfg.GetObjectStorageType()
+			if result != tt.expected {
+				t.Errorf("GetObjectStorageType() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
 // TestGetAzureSASExpiry has been removed as the GetAzureSASExpiry method
 // is deprecated and will be removed when the storage layer is refactored.
 // Signed URL expiry is now configured via ObjectStorage.SignedURLExpiry
