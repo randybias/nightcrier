@@ -1019,10 +1019,7 @@ func setupLogging(level string) {
 // printStartupBanner displays configuration summary at startup
 func printStartupBanner(cfg *config.Config, configFile string) {
 	// Determine artifact storage mode (for reports/logs)
-	artifactStorage := "local_filesystem"
-	if cfg.IsAzureStorageEnabled() {
-		artifactStorage = "azure_blob"
-	}
+	artifactStorage := cfg.GetObjectStorageType()
 
 	// Determine state storage mode (for incident metadata)
 	stateStorage := cfg.GetStateStorageType()
