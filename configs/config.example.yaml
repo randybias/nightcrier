@@ -330,7 +330,7 @@ mcp_reconnect_initial_backoff: 1
 
 # REQUIRED: Maximum backoff delay for reconnection attempts (seconds)
 # Environment variable: MCP_RECONNECT_MAX_BACKOFF
-mcp_reconnect_max_backoff: 60
+mcp_reconnect_max_backoff: 300
 
 # REQUIRED: Read timeout for MCP connections (seconds)
 # Environment variable: MCP_READ_TIMEOUT_SECONDS

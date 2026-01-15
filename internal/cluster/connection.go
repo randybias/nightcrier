@@ -52,6 +52,13 @@ type ClusterConnection struct {
 	// status tracks the current connection state.
 	status ConnectionStatus
 
+	// unreachable indicates Nightcrier cannot reach the cluster.
+	// When true, triage operations will be skipped for this cluster.
+	unreachable bool
+
+	// unreachableReason explains why the cluster is unreachable.
+	unreachableReason string
+
 	// lastEvent records when the most recent event was received.
 	lastEvent time.Time
 
@@ -114,4 +121,29 @@ func (c *ClusterConnection) GetPermissions() *ClusterPermissions {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.permissions
+}
+
+// SetUnreachable marks the cluster as unreachable or reachable.
+// When unreachable is true, reason should explain why (e.g., "connection timeout").
+// When unreachable is false, the cluster is considered reachable.
+func (c *ClusterConnection) SetUnreachable(unreachable bool, reason string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.unreachable = unreachable
+	c.unreachableReason = reason
+}
+
+// IsUnreachable returns true if Nightcrier cannot reach the cluster.
+func (c *ClusterConnection) IsUnreachable() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.unreachable
+}
+
+// UnreachableReason returns the reason the cluster is unreachable.
+// Returns empty string if reachable.
+func (c *ClusterConnection) UnreachableReason() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.unreachableReason
 }

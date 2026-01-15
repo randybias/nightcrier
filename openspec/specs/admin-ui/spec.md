@@ -86,3 +86,20 @@ The dashboard SHALL auto-refresh to show updated data.
 - **WHEN** the dashboard is displayed
 - **THEN** the page auto-refreshes every 5-10 seconds
 
+### Requirement: Early Startup
+
+The admin UI SHALL start as early as possible during Nightcrier initialization.
+
+#### Scenario: Available before permission validation
+
+- **WHEN** Nightcrier starts with `--admin-listen` configured
+- **THEN** the admin UI SHALL be available before cluster permission validation completes
+- **AND** operators can view status while clusters are being validated
+
+#### Scenario: Requires only database connection
+
+- **GIVEN** the admin UI is starting
+- **WHEN** the database connection is available
+- **THEN** the admin UI SHALL start serving requests
+- **AND** the admin UI SHALL NOT wait for MCP connections or permission validation
+

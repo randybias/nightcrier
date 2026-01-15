@@ -40,6 +40,22 @@ type AgentExecutor interface {
 	ExecuteWithPrompt(ctx context.Context, workspacePath string, incidentID string, prompt string) (int, agent.LogPaths, error)
 }
 
+// clusterStatusAdapter adapts storage.ClusterStorage to cluster.ClusterStatusPersister.
+// This allows the ConnectionManager to persist status without directly importing storage.
+type clusterStatusAdapter struct {
+	store storage.ClusterStorage
+}
+
+func (a *clusterStatusAdapter) UpdateClusterStatus(ctx context.Context, name, connectionStatus string, unreachable bool, unreachableReason, lastError string) error {
+	return a.store.UpdateMonitoredClusterStatus(ctx, &storage.ClusterStatusUpdate{
+		Name:              name,
+		ConnectionStatus:  connectionStatus,
+		Unreachable:       unreachable,
+		UnreachableReason: unreachableReason,
+		LastError:         lastError,
+	})
+}
+
 var (
 	// Version information (set via ldflags at build time)
 	Version   = "dev"
@@ -228,10 +244,8 @@ func run(cmd *cobra.Command, args []string) error {
 		"context", "",
 		"namespace", cfg.ExecutionDefaults.Namespace)
 
-	// Bootstrap Kubernetes resources (namespace, RBAC, secrets)
-	slog.Info("bootstrapping kubernetes resources...")
-	bootstrapCtx, bootstrapCancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer bootstrapCancel()
+	// Bootstrap Kubernetes resources (namespace, RBAC, secrets) - non-blocking
+	slog.Info("bootstrapping kubernetes resources (non-blocking)...")
 
 	bootstrapClusters := make([]bootstrap.MonitoredClusterConfig, 0, len(cfg.MonitoredClusters))
 	for _, c := range cfg.MonitoredClusters {
@@ -252,25 +266,29 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	bootstrapMgr := bootstrap.NewManager(k8sClient.Clientset(), bootstrapConfig)
-	bootstrapResult, err := bootstrapMgr.Bootstrap(bootstrapCtx)
-	if err != nil {
-		slog.Error("kubernetes bootstrap failed",
-			"error", err,
-			"remediation", "check permissions: ensure kubeconfig user can create namespaces, RBAC, and secrets")
-		return fmt.Errorf("kubernetes bootstrap failed: %w", err)
-	}
 
-	// Log bootstrap results
-	createdCount := bootstrapResult.CreatedCount()
-	existingCount := bootstrapResult.ExistingCount()
-	if createdCount > 0 {
-		slog.Info("kubernetes bootstrap complete",
-			"created", createdCount,
-			"existing", existingCount,
-			"namespace_created", bootstrapResult.NamespaceCreated)
+	// Use non-blocking bootstrap - failures are logged but don't block startup
+	bootstrapStatus := bootstrapMgr.BootstrapNonBlocking(ctx)
+
+	// Start background retry for any failed components
+	retryConfig := bootstrap.RetryConfig{
+		InitialBackoff: cfg.Startup.CredentialRetryInitial,
+		MaxBackoff:     cfg.Startup.CredentialRetryMax,
+		Multiplier:     cfg.Startup.CredentialRetryMultiplier,
+	}
+	backgroundRetry := bootstrap.StartBackgroundRetry(ctx, bootstrapMgr, retryConfig)
+	defer backgroundRetry.Stop()
+
+	// Log bootstrap status
+	if bootstrapStatus.IsReady() {
+		slog.Info("kubernetes bootstrap complete - all resources ready")
 	} else {
-		slog.Debug("kubernetes resources already exist, skipping creation",
-			"resources", existingCount)
+		slog.Warn("kubernetes bootstrap incomplete - running in degraded mode",
+			"state", bootstrapStatus.State,
+			"global_ready", bootstrapStatus.GlobalReady,
+			"api_keys_ready", bootstrapStatus.APIKeysReady,
+			"clusters_ready", fmt.Sprintf("%d/%d", bootstrapStatus.ReadyClusters(), bootstrapStatus.TotalClusters()),
+			"hint", "bootstrap will retry in background")
 	}
 
 	// Create ExecutionClusterManager for managing execution clusters
@@ -491,6 +509,13 @@ func run(cmd *cobra.Command, args []string) error {
 			// This allows the system to start with zero clusters and pick them up from the database
 			reloader.StartDatabasePolling(ctx)
 		}
+
+		// Inject cluster status persister into connection manager
+		// This allows status to be persisted to the database
+		if clusterStorage, ok := stateStore.(storage.ClusterStorage); ok {
+			connectionMgr.SetStatusPersister(&clusterStatusAdapter{store: clusterStorage})
+			slog.Debug("cluster status persister injected into connection manager")
+		}
 	}
 
 	// Initialize NATS client and listener if enabled
@@ -534,49 +559,8 @@ func run(cmd *cobra.Command, args []string) error {
 		slog.Info("NATS progress tracking disabled")
 	}
 
-	// Phase 3: Initialize connection manager (validates cluster permissions)
-	// This runs kubectl auth can-i checks for all clusters with triage enabled
-	slog.Info("initializing connection manager - validating permissions")
-	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer initCancel()
-	if err := connectionMgr.Initialize(initCtx); err != nil {
-		return fmt.Errorf("failed to initialize connection manager: %w", err)
-	}
-
-	// Build kubeconfig and permissions maps for the event handler
-	// These are static per-cluster and are used by the dispatcher's event handler
-	kubeconfigMap := make(map[string]string)
-	permissionsMap := make(map[string]*cluster.ClusterPermissions)
-	for _, clusterCfg := range cfg.MonitoredClusters {
-		kubeconfigMap[clusterCfg.Name] = clusterCfg.Triage.Kubeconfig
-		// Permissions will be looked up from the event since they're set during Initialize
-	}
-
-	// Create the event handler closure that captures all dependencies
-	eventHandler := func(ctx context.Context, event *events.FaultEvent, clusterName string) error {
-		// Look up cluster-specific data
-		kubeconfig := kubeconfigMap[clusterName]
-		permissions := permissionsMap[clusterName]
-
-		// Get executor for this cluster
-		executor, ok := executors[clusterName]
-		if !ok {
-			return fmt.Errorf("no executor found for cluster: %s", clusterName)
-		}
-
-		// Process the event
-		return processEvent(ctx, event, clusterName, kubeconfig, permissions, workspaceMgr, executor, slackNotifier, storageBackend, stateStore, circuitBreaker, cfg, tuning)
-	}
-
-	// Create dispatcher with the event handler
-	eventDispatcher := dispatcher.NewDispatcher(cfg, eventHandler)
-	slog.Info("dispatcher initialized",
-		"max_concurrent_agents", cfg.MaxConcurrentAgents,
-		"drop_events_while_busy", *cfg.DropEventsWhileBusy,
-		"cluster_failure_event_queue_size", cfg.ClusterFailureEventQueueSize,
-		"event_ttl_seconds", cfg.EventTTLSeconds)
-
-	// Start admin UI server if enabled
+	// Start admin UI server early (before permission validation which can block)
+	// This allows operators to view status even while clusters are being validated
 	if adminListen != "" && stateStore != nil {
 		// Get the underlying sql.DB from the state store
 		var adminDB *sql.DB
@@ -626,6 +610,55 @@ func run(cmd *cobra.Command, args []string) error {
 	} else if adminListen != "" {
 		slog.Warn("admin UI disabled: requires SQL state storage (sqlite or postgres)")
 	}
+
+	// Phase 3: Initialize connection manager (validates cluster permissions)
+	// This runs kubectl auth can-i checks for all clusters with triage enabled
+	// Unreachable clusters are marked as degraded but don't block startup
+	slog.Info("initializing connection manager - validating permissions")
+	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer initCancel()
+	if err := connectionMgr.Initialize(initCtx); err != nil {
+		// This shouldn't happen since Initialize is resilient, but log just in case
+		slog.Warn("connection manager initialization returned error", "error", err)
+	}
+
+	// Start background retry for unreachable clusters (uses same backoff as bootstrap)
+	connectionMgr.StartUnreachableClusterRetry(ctx,
+		cfg.Startup.CredentialRetryInitial,
+		cfg.Startup.CredentialRetryMax)
+
+	// Build kubeconfig and permissions maps for the event handler
+	// These are static per-cluster and are used by the dispatcher's event handler
+	kubeconfigMap := make(map[string]string)
+	permissionsMap := make(map[string]*cluster.ClusterPermissions)
+	for _, clusterCfg := range cfg.MonitoredClusters {
+		kubeconfigMap[clusterCfg.Name] = clusterCfg.Triage.Kubeconfig
+		// Permissions will be looked up from the event since they're set during Initialize
+	}
+
+	// Create the event handler closure that captures all dependencies
+	eventHandler := func(ctx context.Context, event *events.FaultEvent, clusterName string) error {
+		// Look up cluster-specific data
+		kubeconfig := kubeconfigMap[clusterName]
+		permissions := permissionsMap[clusterName]
+
+		// Get executor for this cluster
+		executor, ok := executors[clusterName]
+		if !ok {
+			return fmt.Errorf("no executor found for cluster: %s", clusterName)
+		}
+
+		// Process the event
+		return processEvent(ctx, event, clusterName, kubeconfig, permissions, workspaceMgr, executor, slackNotifier, storageBackend, stateStore, circuitBreaker, cfg, tuning)
+	}
+
+	// Create dispatcher with the event handler
+	eventDispatcher := dispatcher.NewDispatcher(cfg, eventHandler)
+	slog.Info("dispatcher initialized",
+		"max_concurrent_agents", cfg.MaxConcurrentAgents,
+		"drop_events_while_busy", *cfg.DropEventsWhileBusy,
+		"cluster_failure_event_queue_size", cfg.ClusterFailureEventQueueSize,
+		"event_ttl_seconds", cfg.EventTTLSeconds)
 
 	// Start the ConnectionManager and get event channel
 	eventChan := connectionMgr.Start(ctx)

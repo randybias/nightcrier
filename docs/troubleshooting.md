@@ -348,7 +348,7 @@ curl http://localhost:9090/health/clusters
 
 **Reconnection behavior**:
 - Initial backoff: 1 second
-- Maximum backoff: 60 seconds
+- Maximum backoff: 300 seconds (5 minutes)
 - Multiplier: 2.0 (exponential)
 - Jitter: 10% (randomization)
 - Continues indefinitely until successful

@@ -67,8 +67,15 @@ shutdown_timeout: 30
 
 # MCP transport reconnection
 mcp_reconnect_initial_backoff: 1
-mcp_reconnect_max_backoff: 60
+mcp_reconnect_max_backoff: 300
 mcp_read_timeout: 120
+
+# Startup configuration (resilient credential handling)
+# Nightcrier starts in degraded mode if credentials are unavailable and retries in background
+startup:
+  credential_retry_initial: 5s    # Initial retry backoff
+  credential_retry_max: 300s      # Max retry backoff (5 minutes)
+  credential_retry_multiplier: 2.0
 
 # State storage (sqlite, postgres, or filesystem)
 state_storage:

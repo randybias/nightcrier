@@ -165,7 +165,13 @@ CREATE TABLE IF NOT EXISTS monitored_clusters (
     execution_cluster TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    source TEXT NOT NULL DEFAULT 'database'
+    source TEXT NOT NULL DEFAULT 'database',
+    -- Runtime reachability fields
+    connection_status TEXT NOT NULL DEFAULT 'disconnected',
+    unreachable INTEGER NOT NULL DEFAULT 0,
+    unreachable_reason TEXT,
+    last_status_check TIMESTAMP,
+    last_error TEXT
 );
 
 -- Execution clusters: where agent Jobs run

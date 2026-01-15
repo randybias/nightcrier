@@ -34,10 +34,48 @@ type JobCanceller interface {
 
 // ClusterInfo holds display information about a monitored cluster.
 type ClusterInfo struct {
-	Name          string
-	Environment   string
-	MCPEndpoint   string
-	TriageEnabled bool
+	Name              string
+	Environment       string
+	MCPEndpoint       string
+	TriageEnabled     bool
+	ConnectionStatus  string // disconnected, connecting, connected, subscribing, active, failed
+	Unreachable       bool
+	UnreachableReason string
+	LastError         string
+}
+
+// ReachabilityIndicator returns the CSS class for the cluster reachability indicator.
+func (c ClusterInfo) ReachabilityIndicator() string {
+	if c.Unreachable {
+		return "red" // Cannot reach the cluster
+	}
+	switch c.ConnectionStatus {
+	case "active":
+		return "green"
+	case "connecting", "connected", "subscribing":
+		return "blue"
+	case "failed":
+		return "red"
+	default: // disconnected, empty
+		return "gray"
+	}
+}
+
+// ReachabilityText returns a human-readable reachability status for the cluster.
+func (c ClusterInfo) ReachabilityText() string {
+	if c.Unreachable {
+		return "unreachable"
+	}
+	if c.ConnectionStatus == "" {
+		return "unknown"
+	}
+	return c.ConnectionStatus
+}
+
+// TriageAvailable returns true if triage can actually be performed on this cluster.
+// This requires triage to be enabled AND the cluster to be reachable.
+func (c ClusterInfo) TriageAvailable() bool {
+	return c.TriageEnabled && !c.Unreachable && c.ConnectionStatus == "active"
 }
 
 // Server serves the admin UI.
@@ -199,6 +237,13 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load clusters from database (with status), fall back to static config if DB query fails
+	clusters, err := s.store.GetMonitoredClusters(ctx)
+	if err != nil {
+		slog.Debug("failed to load clusters from database, using static config", "error", err)
+		clusters = s.clusters
+	}
+
 	// Build incident views with signed URLs
 	incidentViews := make([]incidentView, len(incidents))
 	for i, inc := range incidents {
@@ -216,7 +261,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := adminData{
-		Clusters:       s.clusters,
+		Clusters:       clusters,
 		RunningTriages: triages,
 		Incidents:      incidentViews,
 		RefreshTime:    time.Now(),

@@ -117,6 +117,7 @@
         .indicator.gray { background: #666; }
         .indicator.blue { background: #3b82f6; }
         .indicator.green { background: #22c55e; }
+        .indicator.amber { background: #f59e0b; }
         .indicator.red { background: #ef4444; }
         .state-badge {
             display: inline-block;
@@ -253,6 +254,7 @@
                 <table>
                     <thead>
                         <tr>
+                            <th>Reachability</th>
                             <th>Name</th>
                             <th>Environment</th>
                             <th>MCP Endpoint</th>
@@ -262,10 +264,11 @@
                     <tbody>
                         {{range .Clusters}}
                         <tr>
+                            <td><span class="indicator {{.ReachabilityIndicator}}" title="{{.ReachabilityText}}{{if .UnreachableReason}}: {{.UnreachableReason}}{{else if .LastError}}: {{.LastError}}{{end}}"></span>{{.ReachabilityText}}</td>
                             <td>{{.Name}}</td>
                             <td>{{if .Environment}}{{.Environment}}{{else}}-{{end}}</td>
                             <td class="mono">{{.MCPEndpoint}}</td>
-                            <td class="{{if .TriageEnabled}}triage-enabled{{else}}triage-disabled{{end}}">{{if .TriageEnabled}}enabled{{else}}disabled{{end}}</td>
+                            <td class="{{if .TriageAvailable}}triage-enabled{{else if .TriageEnabled}}triage-disabled{{else}}triage-disabled{{end}}">{{if .TriageAvailable}}active{{else if .TriageEnabled}}enabled (unavailable){{else}}disabled{{end}}</td>
                         </tr>
                         {{end}}
                     </tbody>

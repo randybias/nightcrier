@@ -273,7 +273,7 @@ The system SHALL manage the lifecycle of each cluster connection independently.
 - **Given** a cluster connection that has failed
 - **When** reconnection is attempted
 - **Then** the system SHALL use exponential backoff starting at 1 second
-- **And** the backoff SHALL not exceed 60 seconds
+- **And** the backoff SHALL not exceed 300 seconds (5 minutes)
 
 #### Scenario: Connection status tracking
 - **Given** a cluster connection
