@@ -4,44 +4,44 @@
 
 ### Phase 1: Bootstrap Status Types
 
-- [ ] Create `internal/bootstrap/status.go` with status types
-- [ ] Add `ClusterBootstrapStatus` struct (Name, Ready, Error, LastRetry, Retries)
-- [ ] Add `BootstrapStatus` struct (GlobalReady, APIKeysReady, ClusterStatuses map)
-- [ ] Add `BootstrapState` enum: Ready, Degraded, Retrying
+- [x] Create `internal/bootstrap/status.go` with status types
+- [x] Add `ClusterBootstrapStatus` struct (Name, Ready, Error, LastRetry, Retries)
+- [x] Add `BootstrapStatus` struct (GlobalReady, APIKeysReady, ClusterStatuses map)
+- [x] Add `BootstrapState` enum: Ready, Degraded, Retrying
 
 ### Phase 2: Configuration
 
-- [ ] Add `startup` section to Config struct
-- [ ] Add `credential_retry_initial` (default: 5s)
-- [ ] Add `credential_retry_max` (default: 300s)
-- [ ] Add environment variable mappings
-- [ ] Update config-example files
+- [x] Add `startup` section to Config struct
+- [x] Add `credential_retry_initial` (default: 5s)
+- [x] Add `credential_retry_max` (default: 300s)
+- [x] Add environment variable mappings
+- [x] Update config-example files
 
 ### Phase 3: Non-Blocking Bootstrap
 
-- [ ] Create `internal/bootstrap/retry.go` with exponential backoff helper
-- [ ] Modify `Bootstrap()` to return `*BootstrapStatus` instead of `*Result`
-- [ ] Make `ensureAPIKeysSecret` non-fatal - return status, not error
-- [ ] Make `ensureTriageKubeconfigSecret` non-fatal - return status, not error
-- [ ] Bootstrap global resources first, then per-cluster in parallel
-- [ ] Use `errgroup` for parallel per-cluster bootstrap
-- [ ] Never block - always return status and start
+- [x] Create `internal/bootstrap/retry.go` with exponential backoff helper
+- [x] Modify `Bootstrap()` to return `*BootstrapStatus` instead of `*Result`
+- [x] Make `ensureAPIKeysSecret` non-fatal - return status, not error
+- [x] Make `ensureTriageKubeconfigSecret` non-fatal - return status, not error
+- [x] Bootstrap global resources first, then per-cluster in parallel
+- [x] Use `errgroup` for parallel per-cluster bootstrap
+- [x] Never block - always return status and start
 
 ### Phase 4: Background Retry
 
-- [ ] Create `internal/bootstrap/background.go` for retry goroutine
-- [ ] Add `StartBackgroundRetry(ctx, status, config)` function
-- [ ] Implement per-cluster independent retry loops
-- [ ] Implement global resource retry loop
-- [ ] Add recovery detection and status update
-- [ ] Add recovery logging
+- [x] Create `internal/bootstrap/background.go` for retry goroutine
+- [x] Add `StartBackgroundRetry(ctx, status, config)` function
+- [x] Implement per-cluster independent retry loops
+- [x] Implement global resource retry loop
+- [x] Add recovery detection and status update
+- [x] Add recovery logging
 
 ### Phase 5: Main Integration
 
-- [ ] Modify main.go to handle `BootstrapStatus` instead of error
-- [ ] Start background retry goroutine
+- [x] Modify main.go to handle `BootstrapStatus` instead of error
+- [x] Start background retry goroutine
 - [ ] Store bootstrap status for health/admin endpoints
-- [ ] Remove fatal exit on bootstrap failure
+- [x] Remove fatal exit on bootstrap failure
 
 ### Phase 6: Health Endpoint
 

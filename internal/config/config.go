@@ -132,6 +132,60 @@ type NATSConfig struct {
 	ReconnectWait time.Duration `mapstructure:"reconnect_wait"`
 }
 
+// StartupConfig holds configuration for resilient startup behavior.
+// This controls how nightcrier handles missing credentials or unavailable
+// resources at startup, allowing it to start in degraded mode and recover
+// automatically when resources become available.
+type StartupConfig struct {
+	// CredentialRetryInitial is the initial backoff duration for retrying
+	// failed credential/resource bootstrap operations.
+	// Default: 5s
+	// Environment variable: STARTUP_CREDENTIAL_RETRY_INITIAL
+	CredentialRetryInitial time.Duration `mapstructure:"credential_retry_initial"`
+
+	// CredentialRetryMax is the maximum backoff duration for retrying
+	// failed credential/resource bootstrap operations.
+	// Default: 300s (5 minutes)
+	// Environment variable: STARTUP_CREDENTIAL_RETRY_MAX
+	CredentialRetryMax time.Duration `mapstructure:"credential_retry_max"`
+
+	// CredentialRetryMultiplier is the multiplier for exponential backoff.
+	// Default: 2.0
+	// Environment variable: STARTUP_CREDENTIAL_RETRY_MULTIPLIER
+	CredentialRetryMultiplier float64 `mapstructure:"credential_retry_multiplier"`
+}
+
+// ApplyDefaults sets default values for StartupConfig
+func (s *StartupConfig) ApplyDefaults() {
+	if s.CredentialRetryInitial == 0 {
+		s.CredentialRetryInitial = 5 * time.Second
+	}
+	if s.CredentialRetryMax == 0 {
+		s.CredentialRetryMax = 300 * time.Second
+	}
+	if s.CredentialRetryMultiplier == 0 {
+		s.CredentialRetryMultiplier = 2.0
+	}
+}
+
+// Validate validates the StartupConfig fields
+func (s *StartupConfig) Validate() error {
+	if s.CredentialRetryInitial <= 0 {
+		return fmt.Errorf("startup.credential_retry_initial must be positive")
+	}
+	if s.CredentialRetryMax <= 0 {
+		return fmt.Errorf("startup.credential_retry_max must be positive")
+	}
+	if s.CredentialRetryMax < s.CredentialRetryInitial {
+		return fmt.Errorf("startup.credential_retry_max (%v) must be >= credential_retry_initial (%v)",
+			s.CredentialRetryMax, s.CredentialRetryInitial)
+	}
+	if s.CredentialRetryMultiplier < 1.0 {
+		return fmt.Errorf("startup.credential_retry_multiplier must be >= 1.0")
+	}
+	return nil
+}
+
 // Validate validates the ExecutionDefaults fields
 func (e *ExecutionDefaults) Validate() error {
 	if e.ImagePullPolicy != "" {
@@ -291,6 +345,9 @@ type Config struct {
 
 	// NATS Configuration (optional progress tracking)
 	NATS NATSConfig `mapstructure:"nats"`
+
+	// Startup Configuration (resilient credential handling)
+	Startup StartupConfig `mapstructure:"startup"`
 
 	// Event Processing (Phase 1 additions)
 	SeverityThreshold            string `mapstructure:"severity_threshold"`
@@ -481,6 +538,9 @@ func bindEnvVars() {
 		"state_storage.postgres_user":              "STATE_STORAGE_POSTGRES_USER",
 		"state_storage.postgres_password":          "STATE_STORAGE_POSTGRES_PASSWORD",
 		"state_storage.migrations_path":            "STATE_STORAGE_MIGRATIONS_PATH",
+		"startup.credential_retry_initial":         "STARTUP_CREDENTIAL_RETRY_INITIAL",
+		"startup.credential_retry_max":             "STARTUP_CREDENTIAL_RETRY_MAX",
+		"startup.credential_retry_multiplier":      "STARTUP_CREDENTIAL_RETRY_MULTIPLIER",
 	}
 
 	for key, envVar := range envBindings {
@@ -784,6 +844,12 @@ func (c *Config) Validate() error {
 	c.NATS.ApplyDefaults()
 	if err := c.NATS.Validate(); err != nil {
 		return fmt.Errorf("nats configuration invalid: %w", err)
+	}
+
+	// Apply startup defaults and validate
+	c.Startup.ApplyDefaults()
+	if err := c.Startup.Validate(); err != nil {
+		return fmt.Errorf("startup configuration invalid: %w", err)
 	}
 
 	return nil

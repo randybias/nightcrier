@@ -228,10 +228,8 @@ func run(cmd *cobra.Command, args []string) error {
 		"context", "",
 		"namespace", cfg.ExecutionDefaults.Namespace)
 
-	// Bootstrap Kubernetes resources (namespace, RBAC, secrets)
-	slog.Info("bootstrapping kubernetes resources...")
-	bootstrapCtx, bootstrapCancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer bootstrapCancel()
+	// Bootstrap Kubernetes resources (namespace, RBAC, secrets) - non-blocking
+	slog.Info("bootstrapping kubernetes resources (non-blocking)...")
 
 	bootstrapClusters := make([]bootstrap.MonitoredClusterConfig, 0, len(cfg.MonitoredClusters))
 	for _, c := range cfg.MonitoredClusters {
@@ -252,25 +250,29 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	bootstrapMgr := bootstrap.NewManager(k8sClient.Clientset(), bootstrapConfig)
-	bootstrapResult, err := bootstrapMgr.Bootstrap(bootstrapCtx)
-	if err != nil {
-		slog.Error("kubernetes bootstrap failed",
-			"error", err,
-			"remediation", "check permissions: ensure kubeconfig user can create namespaces, RBAC, and secrets")
-		return fmt.Errorf("kubernetes bootstrap failed: %w", err)
-	}
 
-	// Log bootstrap results
-	createdCount := bootstrapResult.CreatedCount()
-	existingCount := bootstrapResult.ExistingCount()
-	if createdCount > 0 {
-		slog.Info("kubernetes bootstrap complete",
-			"created", createdCount,
-			"existing", existingCount,
-			"namespace_created", bootstrapResult.NamespaceCreated)
+	// Use non-blocking bootstrap - failures are logged but don't block startup
+	bootstrapStatus := bootstrapMgr.BootstrapNonBlocking(ctx)
+
+	// Start background retry for any failed components
+	retryConfig := bootstrap.RetryConfig{
+		InitialBackoff: cfg.Startup.CredentialRetryInitial,
+		MaxBackoff:     cfg.Startup.CredentialRetryMax,
+		Multiplier:     cfg.Startup.CredentialRetryMultiplier,
+	}
+	backgroundRetry := bootstrap.StartBackgroundRetry(ctx, bootstrapMgr, retryConfig)
+	defer backgroundRetry.Stop()
+
+	// Log bootstrap status
+	if bootstrapStatus.IsReady() {
+		slog.Info("kubernetes bootstrap complete - all resources ready")
 	} else {
-		slog.Debug("kubernetes resources already exist, skipping creation",
-			"resources", existingCount)
+		slog.Warn("kubernetes bootstrap incomplete - running in degraded mode",
+			"state", bootstrapStatus.State,
+			"global_ready", bootstrapStatus.GlobalReady,
+			"api_keys_ready", bootstrapStatus.APIKeysReady,
+			"clusters_ready", fmt.Sprintf("%d/%d", bootstrapStatus.ReadyClusters(), bootstrapStatus.TotalClusters()),
+			"hint", "bootstrap will retry in background")
 	}
 
 	// Create ExecutionClusterManager for managing execution clusters
