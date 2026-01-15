@@ -363,3 +363,50 @@ func (s *Store) CancelExecution(ctx context.Context, executionID string) error {
 
 	return nil
 }
+
+// GetMonitoredClusters returns all monitored clusters with their reachability status.
+func (s *Store) GetMonitoredClusters(ctx context.Context) ([]ClusterInfo, error) {
+	query := `
+		SELECT
+			name,
+			COALESCE(environment, '') as environment,
+			mcp_endpoint,
+			triage_enabled,
+			COALESCE(connection_status, 'disconnected') as connection_status,
+			unreachable,
+			COALESCE(unreachable_reason, '') as unreachable_reason,
+			COALESCE(last_error, '') as last_error
+		FROM monitored_clusters
+		ORDER BY name
+	`
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var clusters []ClusterInfo
+	for rows.Next() {
+		var c ClusterInfo
+		var triageEnabled, unreachable int
+		err := rows.Scan(
+			&c.Name,
+			&c.Environment,
+			&c.MCPEndpoint,
+			&triageEnabled,
+			&c.ConnectionStatus,
+			&unreachable,
+			&c.UnreachableReason,
+			&c.LastError,
+		)
+		if err != nil {
+			return nil, err
+		}
+		c.TriageEnabled = triageEnabled != 0
+		c.Unreachable = unreachable != 0
+		clusters = append(clusters, c)
+	}
+
+	return clusters, rows.Err()
+}

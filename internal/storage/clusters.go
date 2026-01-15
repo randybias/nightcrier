@@ -23,6 +23,9 @@ type ClusterStorage interface {
 	// Sync operations for YAML-to-database synchronization
 	SyncMonitoredClustersFromYAML(ctx context.Context, clusters []MonitoredClusterRecord) error
 	SyncExecutionClustersFromYAML(ctx context.Context, clusters []ExecutionClusterRecord) error
+
+	// Status operations for runtime health tracking
+	UpdateMonitoredClusterStatus(ctx context.Context, status *ClusterStatusUpdate) error
 }
 
 // MonitoredClusterRecord represents a monitored cluster stored in the database.
@@ -63,6 +66,42 @@ type MonitoredClusterRecord struct {
 
 	// Source indicates where this cluster config came from: "yaml" or "database"
 	Source string
+
+	// Runtime reachability fields (updated separately from config)
+
+	// ConnectionStatus tracks MCP connection state: disconnected, connecting, connected, subscribing, active, failed
+	ConnectionStatus string
+
+	// Unreachable indicates Nightcrier cannot reach the cluster (MCP connection or permission validation failed)
+	Unreachable bool
+
+	// UnreachableReason explains why the cluster is unreachable (e.g., "connection timeout")
+	UnreachableReason string
+
+	// LastStatusCheck is when the reachability was last checked
+	LastStatusCheck *time.Time
+
+	// LastError is the most recent error message for display
+	LastError string
+}
+
+// ClusterStatusUpdate contains runtime reachability fields for a cluster.
+// Used to update reachability without modifying cluster configuration.
+type ClusterStatusUpdate struct {
+	// Name identifies which cluster to update
+	Name string
+
+	// ConnectionStatus: disconnected, connecting, connected, subscribing, active, failed
+	ConnectionStatus string
+
+	// Unreachable indicates Nightcrier cannot reach the cluster
+	Unreachable bool
+
+	// UnreachableReason explains why unreachable
+	UnreachableReason string
+
+	// LastError is the most recent error
+	LastError string
 }
 
 // ExecutionClusterRecord represents an execution cluster stored in the database.

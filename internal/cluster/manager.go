@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+// ClusterStatusPersister is an interface for persisting cluster reachability to storage.
+// This allows the ConnectionManager to update status without importing the storage package.
+type ClusterStatusPersister interface {
+	// UpdateClusterStatus persists the current reachability of a cluster.
+	// Parameters: name, connectionStatus, unreachable, unreachableReason, lastError
+	UpdateClusterStatus(ctx context.Context, name, connectionStatus string, unreachable bool, unreachableReason, lastError string) error
+}
+
 // ConnectionManager orchestrates multiple cluster connections.
 // It manages the lifecycle of all MCP connections, fans in events from
 // all clusters into a single channel, and provides health monitoring.
@@ -30,6 +38,9 @@ type ConnectionManager struct {
 
 	// transport is the shared HTTP transport used by all MCP clients
 	transport *http.Transport
+
+	// statusPersister persists cluster status to database (optional)
+	statusPersister ClusterStatusPersister
 
 	// Global configuration values
 	subscribeMode              string
@@ -141,6 +152,38 @@ func NewConnectionManager(cfg *ManagerConfig) (*ConnectionManager, error) {
 	return mgr, nil
 }
 
+// SetStatusPersister sets the storage interface for persisting cluster status.
+// This is optional - if not set, status is only tracked in memory.
+func (cm *ConnectionManager) SetStatusPersister(persister ClusterStatusPersister) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.statusPersister = persister
+}
+
+// persistStatus saves the current reachability of a cluster to the database.
+// If no persister is configured, this is a no-op.
+func (cm *ConnectionManager) persistStatus(ctx context.Context, name string, conn *ClusterConnection) {
+	if cm.statusPersister == nil {
+		return
+	}
+
+	conn.mu.RLock()
+	status := string(conn.status)
+	unreachable := conn.unreachable
+	unreachableReason := conn.unreachableReason
+	lastError := ""
+	if conn.lastError != nil {
+		lastError = conn.lastError.Error()
+	}
+	conn.mu.RUnlock()
+
+	if err := cm.statusPersister.UpdateClusterStatus(ctx, name, status, unreachable, unreachableReason, lastError); err != nil {
+		slog.Warn("failed to persist cluster status",
+			"cluster", name,
+			"error", err)
+	}
+}
+
 // SetClusterClient sets the event client for a specific cluster.
 // This must be called for each cluster before calling Start().
 //
@@ -172,18 +215,23 @@ func (cm *ConnectionManager) SetClusterClient(clusterName string, client interfa
 //
 // Clusters with triage.enabled=false are skipped.
 //
+// This method is non-blocking - validation failures are logged as warnings
+// but don't prevent startup. Clusters that fail validation will be marked
+// as degraded and can be retried later.
+//
 // Phase 3: Added for permission validation (design.md lines 269-304)
 //
 // Parameters:
 //   - ctx: Context for kubectl command execution (with timeout)
-//
-// Returns error if validation fails for any cluster with triage enabled.
 func (cm *ConnectionManager) Initialize(ctx context.Context) error {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
 	slog.Info("initializing connection manager - validating cluster permissions",
 		"cluster_count", len(cm.connections))
+
+	validatedCount := 0
+	unreachableCount := 0
 
 	for clusterName, conn := range cm.connections {
 		clusterConfig := conn.config
@@ -203,12 +251,21 @@ func (cm *ConnectionManager) Initialize(ctx context.Context) error {
 
 		perms, err := validateClusterPermissions(ctx, clusterConfig)
 		if err != nil {
-			return fmt.Errorf("cluster %s: permission validation failed: %w",
-				clusterName, err)
+			// Don't fail startup - mark cluster as unreachable and continue
+			slog.Warn("cluster permission validation failed - marking as unreachable",
+				"cluster", clusterName,
+				"error", err,
+				"hint", "cluster will be unavailable for triage until connectivity is restored")
+			conn.SetUnreachable(true, err.Error())
+			cm.persistStatus(ctx, clusterName, conn)
+			unreachableCount++
+			continue
 		}
 
 		// Set permissions on connection
 		conn.SetPermissions(perms)
+		conn.SetUnreachable(false, "")
+		cm.persistStatus(ctx, clusterName, conn)
 
 		// Warn if minimum permissions not met (but don't fail)
 		if !perms.MinimumPermissionsMet() {
@@ -221,9 +278,19 @@ func (cm *ConnectionManager) Initialize(ctx context.Context) error {
 				"minimum_met", true,
 				"helm_access", perms.HelmAccessAvailable())
 		}
+		validatedCount++
 	}
 
-	slog.Info("connection manager initialization complete")
+	if unreachableCount > 0 {
+		slog.Warn("connection manager initialized with unreachable clusters",
+			"validated", validatedCount,
+			"unreachable", unreachableCount,
+			"hint", "unreachable clusters will not receive triage until connectivity is restored")
+	} else {
+		slog.Info("connection manager initialization complete",
+			"validated", validatedCount)
+	}
+
 	return nil
 }
 
@@ -264,6 +331,11 @@ func (cm *ConnectionManager) Start(ctx context.Context) <-chan interface{} {
 //
 // This is the core of the fan-in architecture: each connection runs
 // independently and pushes ClusterEvent wrappers to the shared channel.
+//
+// Note: This loop does NOT mark clusters as "unreachable" - that flag is only
+// for clusters that fail permission validation (kubectl issues). MCP connection
+// failures are tracked via connection status (StatusFailed) and this loop handles
+// reconnection automatically.
 func (cm *ConnectionManager) runConnection(ctx context.Context, clusterName string, conn *ClusterConnection) {
 	defer cm.wg.Done()
 
@@ -291,7 +363,7 @@ func (cm *ConnectionManager) runConnection(ctx context.Context, clusterName stri
 					"error", err,
 					"next_retry_seconds", currentBackoff)
 
-				// Update connection status
+				// Update connection status to failed (persisted to DB)
 				cm.updateConnectionStatus(conn, StatusFailed, err)
 
 				// Wait before reconnecting with exponential backoff
@@ -440,10 +512,10 @@ func (cm *ConnectionManager) subscribeAndFanIn(ctx context.Context, clusterName 
 }
 
 // updateConnectionStatus updates a connection's status and error state.
+// It also persists significant state changes (active, failed) to the database.
 func (cm *ConnectionManager) updateConnectionStatus(conn *ClusterConnection, status ConnectionStatus, err error) {
 	conn.mu.Lock()
-	defer conn.mu.Unlock()
-
+	oldStatus := conn.status
 	conn.status = status
 	conn.lastError = err
 
@@ -451,6 +523,26 @@ func (cm *ConnectionManager) updateConnectionStatus(conn *ClusterConnection, sta
 		conn.retryCount++
 	} else if status == StatusActive {
 		conn.retryCount = 0
+	}
+	conn.mu.Unlock()
+
+	// Only persist significant state changes to avoid excessive DB writes
+	// Persist on: active (connection established), failed (connection lost)
+	if cm.statusPersister != nil && (status == StatusActive || status == StatusFailed) && status != oldStatus {
+		// Find the cluster name for this connection
+		cm.mu.RLock()
+		var clusterName string
+		for name, c := range cm.connections {
+			if c == conn {
+				clusterName = name
+				break
+			}
+		}
+		cm.mu.RUnlock()
+
+		if clusterName != "" {
+			cm.persistStatus(context.Background(), clusterName, conn)
+		}
 	}
 }
 
@@ -671,4 +763,115 @@ func (cm *ConnectionManager) GetClusterNames() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// StartUnreachableClusterRetry starts a background goroutine that periodically
+// retries permission validation for unreachable clusters. When a cluster becomes reachable,
+// it is marked as reachable and can process triage events.
+//
+// The retry uses exponential backoff with the provided initial and max intervals.
+// The goroutine runs until the context is cancelled.
+//
+// Parameters:
+//   - ctx: Context for cancellation
+//   - initialBackoff: Initial retry interval (e.g., 30 seconds)
+//   - maxBackoff: Maximum retry interval (e.g., 5 minutes)
+func (cm *ConnectionManager) StartUnreachableClusterRetry(ctx context.Context, initialBackoff, maxBackoff time.Duration) {
+	go cm.runUnreachableClusterRetry(ctx, initialBackoff, maxBackoff)
+}
+
+// runUnreachableClusterRetry is the background retry loop for unreachable clusters.
+func (cm *ConnectionManager) runUnreachableClusterRetry(ctx context.Context, initialBackoff, maxBackoff time.Duration) {
+	// Track per-cluster backoff
+	clusterBackoffs := make(map[string]time.Duration)
+	lastAttempt := make(map[string]time.Time)
+
+	ticker := time.NewTicker(5 * time.Second) // Check every 5 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("unreachable cluster retry stopped")
+			return
+		case <-ticker.C:
+			cm.retryUnreachableClusters(ctx, clusterBackoffs, lastAttempt, initialBackoff, maxBackoff)
+		}
+	}
+}
+
+// retryUnreachableClusters attempts to reconnect to unreachable clusters.
+func (cm *ConnectionManager) retryUnreachableClusters(ctx context.Context, backoffs map[string]time.Duration, lastAttempt map[string]time.Time, initialBackoff, maxBackoff time.Duration) {
+	cm.mu.RLock()
+	// Collect unreachable clusters
+	var unreachableClusters []*ClusterConnection
+	var unreachableNames []string
+	for name, conn := range cm.connections {
+		if conn.IsUnreachable() {
+			unreachableClusters = append(unreachableClusters, conn)
+			unreachableNames = append(unreachableNames, name)
+		}
+	}
+	cm.mu.RUnlock()
+
+	if len(unreachableClusters) == 0 {
+		return // Nothing to retry
+	}
+
+	for i, conn := range unreachableClusters {
+		name := unreachableNames[i]
+
+		// Check if backoff has elapsed
+		backoff := backoffs[name]
+		if backoff == 0 {
+			backoff = initialBackoff
+		}
+
+		if time.Since(lastAttempt[name]) < backoff {
+			continue // Still waiting
+		}
+
+		// Attempt retry
+		lastAttempt[name] = time.Now()
+
+		slog.Info("retrying permission validation for unreachable cluster",
+			"cluster", name,
+			"backoff", backoff)
+
+		config := conn.config
+		if config == nil || !config.Triage.Enabled {
+			continue
+		}
+
+		// Use a short timeout for the retry attempt
+		retryCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		perms, err := validateClusterPermissions(retryCtx, config)
+		cancel()
+
+		if err != nil {
+			// Still failing - increase backoff
+			nextBackoff := backoff * 2
+			if nextBackoff > maxBackoff {
+				nextBackoff = maxBackoff
+			}
+			backoffs[name] = nextBackoff
+
+			slog.Warn("unreachable cluster retry failed",
+				"cluster", name,
+				"error", err,
+				"next_retry", nextBackoff)
+			continue
+		}
+
+		// Success! Mark as reachable
+		conn.SetPermissions(perms)
+		conn.SetUnreachable(false, "")
+		cm.persistStatus(ctx, name, conn)
+		delete(backoffs, name)
+		delete(lastAttempt, name)
+
+		slog.Info("unreachable cluster now reachable",
+			"cluster", name,
+			"permissions_met", perms.MinimumPermissionsMet())
+	}
 }

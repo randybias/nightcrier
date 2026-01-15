@@ -9,6 +9,8 @@ import (
 
 // TestNewClient_UsesConfigurableBufferSize verifies that the event channel
 // buffer size is configured from TuningConfig rather than hardcoded.
+// Note: The actual channel is created in Subscribe(), so we verify the
+// buffer size is stored correctly in the client.
 func TestNewClient_UsesConfigurableBufferSize(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -46,14 +48,9 @@ func TestNewClient_UsesConfigurableBufferSize(t *testing.T) {
 				t.Fatal("expected client to be non-nil")
 			}
 
-			if client.eventChan == nil {
-				t.Fatal("expected eventChan to be initialized")
-			}
-
-			// Verify channel capacity matches configured buffer size
-			actualCapacity := cap(client.eventChan)
-			if actualCapacity != tt.bufferSize {
-				t.Errorf("expected channel buffer size %d, got %d", tt.bufferSize, actualCapacity)
+			// Verify buffer size is stored correctly (channel created in Subscribe)
+			if client.channelBufferSize != tt.bufferSize {
+				t.Errorf("expected channelBufferSize %d, got %d", tt.bufferSize, client.channelBufferSize)
 			}
 		})
 	}
@@ -76,15 +73,14 @@ func TestNewClient_RequiresTuningConfig(t *testing.T) {
 		t.Fatal("expected client to be non-nil")
 	}
 
-	// Verify the custom buffer size is used
-	actualCapacity := cap(client.eventChan)
-	if actualCapacity != customBufferSize {
-		t.Errorf("expected channel capacity %d, got %d (should not be hardcoded 100)", customBufferSize, actualCapacity)
+	// Verify the custom buffer size is stored
+	if client.channelBufferSize != customBufferSize {
+		t.Errorf("expected channelBufferSize %d, got %d (should not be hardcoded 100)", customBufferSize, client.channelBufferSize)
 	}
 }
 
 // TestNewClient_InitializesFields verifies that NewClient properly initializes
-// all client fields including the event channel with configured size.
+// all client fields including the buffer size configuration.
 func TestNewClient_InitializesFields(t *testing.T) {
 	endpoint := "http://test.local:8383/mcp"
 	mode := "events"
@@ -106,12 +102,10 @@ func TestNewClient_InitializesFields(t *testing.T) {
 		t.Errorf("expected subscribe mode %s, got %s", mode, client.subscribeMode)
 	}
 
-	if client.eventChan == nil {
-		t.Fatal("expected eventChan to be initialized")
-	}
-
-	if cap(client.eventChan) != bufferSize {
-		t.Errorf("expected channel capacity %d, got %d", bufferSize, cap(client.eventChan))
+	// eventChan is created in Subscribe(), not NewClient()
+	// Verify buffer size is stored for later use
+	if client.channelBufferSize != bufferSize {
+		t.Errorf("expected channelBufferSize %d, got %d", bufferSize, client.channelBufferSize)
 	}
 
 	if client.mcpClient == nil {
@@ -136,8 +130,9 @@ func TestNewClient_DefaultSubscribeMode(t *testing.T) {
 		t.Errorf("expected default subscribe mode 'faults', got %s", client.subscribeMode)
 	}
 
-	if cap(client.eventChan) != bufferSize {
-		t.Errorf("expected channel capacity %d, got %d", bufferSize, cap(client.eventChan))
+	// Verify buffer size is stored correctly
+	if client.channelBufferSize != bufferSize {
+		t.Errorf("expected channelBufferSize %d, got %d", bufferSize, client.channelBufferSize)
 	}
 }
 
@@ -216,5 +211,34 @@ func TestAuthTransport_SetsCorrectHeader(t *testing.T) {
 
 	if actualHeader != expectedHeader {
 		t.Errorf("expected Authorization header %q, got %q", expectedHeader, actualHeader)
+	}
+}
+
+// TestClient_SupportsReconnection verifies that Subscribe() can be called
+// multiple times on the same client to support reconnection after failures.
+func TestClient_SupportsReconnection(t *testing.T) {
+	bufferSize := 50
+
+	tuningConfig := &config.TuningConfig{
+		Events: config.EventsTuning{
+			ChannelBufferSize: bufferSize,
+		},
+	}
+
+	client := NewClient("http://localhost:8383/mcp", "faults", "", tuningConfig)
+
+	// Verify initial state - no channel yet
+	if client.eventChan != nil {
+		t.Error("expected eventChan to be nil before Subscribe()")
+	}
+
+	// Verify closed state is initially false
+	if client.closed.Load() {
+		t.Error("expected closed to be false initially")
+	}
+
+	// Verify buffer size is ready for Subscribe()
+	if client.channelBufferSize != bufferSize {
+		t.Errorf("expected channelBufferSize %d, got %d", bufferSize, client.channelBufferSize)
 	}
 }

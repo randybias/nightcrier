@@ -272,7 +272,7 @@ The system SHALL support configuration for MCP transport connection management.
 - **THEN** the following keys SHALL be recognized:
   ```yaml
   mcp_reconnect_initial_backoff: 1
-  mcp_reconnect_max_backoff: 60
+  mcp_reconnect_max_backoff: 300
   mcp_read_timeout: 120
   ```
 

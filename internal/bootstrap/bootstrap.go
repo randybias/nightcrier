@@ -119,71 +119,98 @@ func (m *Manager) Bootstrap(ctx context.Context) (*Result, error) {
 //
 // Returns a BootstrapStatus that tracks which components are ready vs degraded.
 func (m *Manager) BootstrapNonBlocking(ctx context.Context) *BootstrapStatus {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	slog.Info("starting non-blocking bootstrap",
 		"namespace", m.config.Namespace,
 		"clusters", len(m.config.MonitoredClusters))
 
+	slog.Debug("bootstrap phase 1: global resources (namespace, RBAC)")
+
 	// Step 1: Bootstrap global resources (namespace, RBAC)
 	// These are prerequisites - if they fail, we can't do anything else
+	m.mu.Lock()
 	globalReady := m.bootstrapGlobalResources(ctx)
 	m.status.SetGlobalReady(m.status.NamespaceReady, m.status.RBACReady)
+	m.mu.Unlock()
 
 	if !globalReady {
 		slog.Warn("global bootstrap failed - will retry in background",
 			"namespace_ready", m.status.NamespaceReady,
 			"rbac_ready", m.status.RBACReady)
+	} else {
+		slog.Debug("global resources ready",
+			"namespace", m.config.Namespace)
 	}
 
+	slog.Debug("bootstrap phase 2: API keys secret")
+
 	// Step 2: Bootstrap API keys secret (non-fatal)
+	m.mu.Lock()
 	m.bootstrapAPIKeysSecret(ctx)
+	m.mu.Unlock()
+
+	slog.Debug("bootstrap phase 3: per-cluster resources (kubeconfig secrets)")
 
 	// Step 3: Bootstrap per-cluster resources in parallel (non-fatal)
+	// Note: bootstrapClusterResources handles its own locking for parallel operations
 	m.bootstrapClusterResources(ctx)
 
 	// Log summary
+	m.mu.RLock()
 	ready := m.status.ReadyClusters()
 	total := m.status.TotalClusters()
+	state := m.status.State
+	globalReady = m.status.GlobalReady
+	apiKeysReady := m.status.APIKeysReady
+	statusClone := m.status.Clone()
+	m.mu.RUnlock()
+
 	slog.Info("non-blocking bootstrap complete",
-		"state", m.status.State,
-		"global_ready", m.status.GlobalReady,
-		"api_keys_ready", m.status.APIKeysReady,
+		"state", state,
+		"global_ready", globalReady,
+		"api_keys_ready", apiKeysReady,
 		"clusters_ready", fmt.Sprintf("%d/%d", ready, total))
 
-	return m.status.Clone()
+	return statusClone
 }
 
 // bootstrapGlobalResources bootstraps namespace and RBAC resources.
 // Returns true if all global resources are ready.
 func (m *Manager) bootstrapGlobalResources(ctx context.Context) bool {
 	// Namespace
+	slog.Debug("ensuring namespace exists", "namespace", m.config.Namespace)
 	_, err := ensureNamespace(ctx, m.kubeClient, m.config.Namespace)
 	if err != nil {
 		slog.Error("failed to ensure namespace", "error", err)
 		m.status.NamespaceReady = false
 	} else {
+		slog.Debug("namespace ready", "namespace", m.config.Namespace)
 		m.status.NamespaceReady = true
 	}
 
 	// RBAC resources - only attempt if namespace is ready
 	if m.status.NamespaceReady {
+		slog.Debug("ensuring RBAC resources exist")
 		rbacReady := true
 
 		if err := ensureServiceAccount(ctx, m.kubeClient, m.config.Namespace); err != nil {
 			slog.Error("failed to ensure ServiceAccount", "error", err)
 			rbacReady = false
+		} else {
+			slog.Debug("ServiceAccount ready")
 		}
 
 		if err := ensureRole(ctx, m.kubeClient, m.config.Namespace); err != nil {
 			slog.Error("failed to ensure Role", "error", err)
 			rbacReady = false
+		} else {
+			slog.Debug("Role ready")
 		}
 
 		if err := ensureRoleBinding(ctx, m.kubeClient, m.config.Namespace); err != nil {
 			slog.Error("failed to ensure RoleBinding", "error", err)
 			rbacReady = false
+		} else {
+			slog.Debug("RoleBinding ready")
 		}
 
 		m.status.RBACReady = rbacReady
@@ -229,18 +256,22 @@ func (m *Manager) bootstrapAPIKeysSecret(ctx context.Context) {
 // Each cluster's failure is tracked independently.
 func (m *Manager) bootstrapClusterResources(ctx context.Context) {
 	// Initialize status for all clusters
+	m.mu.Lock()
 	for _, cluster := range m.config.MonitoredClusters {
 		m.status.SetClusterStatus(cluster.Name, false, nil)
 	}
 
 	// Only attempt if global resources are ready
-	if !m.status.GlobalReady {
+	globalReady := m.status.GlobalReady
+	if !globalReady {
 		slog.Debug("skipping cluster resources - global resources not ready")
 		for _, cluster := range m.config.MonitoredClusters {
 			m.status.SetClusterStatus(cluster.Name, false, fmt.Errorf("waiting for global resources"))
 		}
+		m.mu.Unlock()
 		return
 	}
+	m.mu.Unlock()
 
 	// Bootstrap each cluster's resources
 	// Using a simple loop for now - could use errgroup for parallelism if needed

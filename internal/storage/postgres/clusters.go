@@ -19,7 +19,8 @@ func (s *Store) ListMonitoredClusters(ctx context.Context) ([]storage.MonitoredC
 	query := `
 		SELECT name, environment, labels, mcp_endpoint, mcp_api_key,
 		       triage_enabled, target_kubeconfig, allow_secrets_access,
-		       execution_cluster, created_at, updated_at, source
+		       execution_cluster, created_at, updated_at, source,
+		       connection_status, unreachable, unreachable_reason, last_status_check, last_error
 		FROM monitored_clusters
 		ORDER BY name`
 
@@ -34,11 +35,14 @@ func (s *Store) ListMonitoredClusters(ctx context.Context) ([]storage.MonitoredC
 		var c storage.MonitoredClusterRecord
 		var labelsJSON sql.NullString
 		var environment, mcpAPIKey, targetKubeconfig, executionCluster sql.NullString
+		var connectionStatus, unreachableReason, lastError sql.NullString
+		var lastStatusCheck sql.NullTime
 
 		err := rows.Scan(
 			&c.Name, &environment, &labelsJSON, &c.MCPEndpoint, &mcpAPIKey,
 			&c.TriageEnabled, &targetKubeconfig, &c.AllowSecretsAccess,
 			&executionCluster, &c.CreatedAt, &c.UpdatedAt, &c.Source,
+			&connectionStatus, &c.Unreachable, &unreachableReason, &lastStatusCheck, &lastError,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan monitored cluster: %w", err)
@@ -48,6 +52,12 @@ func (s *Store) ListMonitoredClusters(ctx context.Context) ([]storage.MonitoredC
 		c.MCPAPIKey = mcpAPIKey.String
 		c.TargetKubeconfig = targetKubeconfig.String
 		c.ExecutionCluster = executionCluster.String
+		c.ConnectionStatus = connectionStatus.String
+		c.UnreachableReason = unreachableReason.String
+		c.LastError = lastError.String
+		if lastStatusCheck.Valid {
+			c.LastStatusCheck = &lastStatusCheck.Time
+		}
 
 		if labelsJSON.Valid && labelsJSON.String != "" {
 			if err := json.Unmarshal([]byte(labelsJSON.String), &c.Labels); err != nil {
@@ -66,18 +76,22 @@ func (s *Store) GetMonitoredCluster(ctx context.Context, name string) (*storage.
 	query := `
 		SELECT name, environment, labels, mcp_endpoint, mcp_api_key,
 		       triage_enabled, target_kubeconfig, allow_secrets_access,
-		       execution_cluster, created_at, updated_at, source
+		       execution_cluster, created_at, updated_at, source,
+		       connection_status, unreachable, unreachable_reason, last_status_check, last_error
 		FROM monitored_clusters
 		WHERE name = $1`
 
 	var c storage.MonitoredClusterRecord
 	var labelsJSON sql.NullString
 	var environment, mcpAPIKey, targetKubeconfig, executionCluster sql.NullString
+	var connectionStatus, unreachableReason, lastError sql.NullString
+	var lastStatusCheck sql.NullTime
 
 	err := s.db.QueryRowContext(ctx, query, name).Scan(
 		&c.Name, &environment, &labelsJSON, &c.MCPEndpoint, &mcpAPIKey,
 		&c.TriageEnabled, &targetKubeconfig, &c.AllowSecretsAccess,
 		&executionCluster, &c.CreatedAt, &c.UpdatedAt, &c.Source,
+		&connectionStatus, &c.Unreachable, &unreachableReason, &lastStatusCheck, &lastError,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -90,6 +104,12 @@ func (s *Store) GetMonitoredCluster(ctx context.Context, name string) (*storage.
 	c.MCPAPIKey = mcpAPIKey.String
 	c.TargetKubeconfig = targetKubeconfig.String
 	c.ExecutionCluster = executionCluster.String
+	c.ConnectionStatus = connectionStatus.String
+	c.UnreachableReason = unreachableReason.String
+	c.LastError = lastError.String
+	if lastStatusCheck.Valid {
+		c.LastStatusCheck = &lastStatusCheck.Time
+	}
 
 	if labelsJSON.Valid && labelsJSON.String != "" {
 		if err := json.Unmarshal([]byte(labelsJSON.String), &c.Labels); err != nil {
@@ -349,6 +369,48 @@ func (s *Store) SyncExecutionClustersFromYAML(ctx context.Context, clusters []st
 		if err := s.UpsertExecutionCluster(ctx, &clusters[i]); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// UpdateMonitoredClusterStatus updates only the runtime reachability fields for a cluster.
+// This is called frequently by the connection manager to track connection health.
+func (s *Store) UpdateMonitoredClusterStatus(ctx context.Context, status *storage.ClusterStatusUpdate) error {
+	now := time.Now().UTC()
+
+	// Convert unreachable bool to integer for SQLite-compatible schema
+	unreachable := 0
+	if status.Unreachable {
+		unreachable = 1
+	}
+
+	query := `
+		UPDATE monitored_clusters
+		SET connection_status = $1,
+		    unreachable = $2,
+		    unreachable_reason = $3,
+		    last_error = $4,
+		    last_status_check = $5
+		WHERE name = $6`
+
+	result, err := s.db.ExecContext(ctx, query,
+		status.ConnectionStatus,
+		unreachable,
+		status.UnreachableReason,
+		status.LastError,
+		now,
+		status.Name,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update cluster status for %s: %w", status.Name, err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		// Cluster might not exist in DB yet (YAML-only config)
+		// This is OK - status will be persisted when cluster is synced
+		return nil
 	}
 
 	return nil

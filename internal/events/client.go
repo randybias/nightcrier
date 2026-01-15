@@ -21,16 +21,17 @@ const (
 
 // Client handles MCP connections to receive fault events from kubernetes-mcp-server
 type Client struct {
-	endpoint       string
-	subscribeMode  string // "events" or "faults"
-	apiKey         string // optional API key for Bearer token authentication
-	mcpClient      *mcp.Client
-	session        *mcp.ClientSession
-	eventChan      chan *FaultEvent
-	subscriptionID string
-	mu             sync.Mutex
-	closeOnce      sync.Once
-	closed         atomic.Bool // Tracks if client is closed to prevent send on closed channel
+	endpoint         string
+	subscribeMode    string // "events" or "faults"
+	apiKey           string // optional API key for Bearer token authentication
+	channelBufferSize int   // buffer size for event channel (from tuning config)
+	mcpClient        *mcp.Client
+	session          *mcp.ClientSession
+	eventChan        chan *FaultEvent
+	subscriptionID   string
+	mu               sync.Mutex
+	closeOnce        sync.Once
+	closed           atomic.Bool // Tracks if client is closed to prevent send on closed channel
 }
 
 // authTransport wraps an http.RoundTripper to add Authorization header
@@ -64,13 +65,13 @@ func NewClient(endpoint, subscribeMode, apiKey string, tuningConfig *config.Tuni
 	if subscribeMode == "" {
 		subscribeMode = "faults"
 	}
-	eventChan := make(chan *FaultEvent, tuningConfig.Events.ChannelBufferSize)
 
 	c := &Client{
-		endpoint:      endpoint,
-		subscribeMode: subscribeMode,
-		apiKey:        apiKey,
-		eventChan:     eventChan,
+		endpoint:          endpoint,
+		subscribeMode:     subscribeMode,
+		apiKey:            apiKey,
+		channelBufferSize: tuningConfig.Events.ChannelBufferSize,
+		// eventChan is created fresh in Subscribe() to support reconnections
 	}
 
 	// Create MCP client with logging message handler to receive fault notifications
@@ -167,10 +168,19 @@ func parseFaultEvent(data any) (*FaultEvent, error) {
 }
 
 // Subscribe connects to the MCP server, sets logging level, subscribes to faults,
-// and returns a channel of FaultEvents
+// and returns a channel of FaultEvents.
+//
+// This method can be called multiple times to reconnect after failures.
+// Each call creates a fresh event channel, resetting any previous state.
 func (c *Client) Subscribe(ctx context.Context) (<-chan *FaultEvent, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	// Reset state for fresh subscription (supports reconnection)
+	// This is critical: sync.Once only fires once per instance, so we need fresh instances
+	c.closeOnce = sync.Once{}
+	c.closed.Store(false)
+	c.eventChan = make(chan *FaultEvent, c.channelBufferSize)
 
 	// Create HTTP client, optionally with API key authentication
 	httpClient := &http.Client{}
@@ -245,13 +255,37 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan *FaultEvent, error) {
 
 	slog.Info("subscribed to fault events, waiting for notifications...")
 
+	// Capture current eventChan to avoid race with Close() resetting it
+	eventChan := c.eventChan
+
 	// Keep the session alive to receive notifications
-	// Wait() blocks until the session is closed
+	// Wait() blocks until the session is closed by server or error
 	go func() {
-		if err := c.session.Wait(); err != nil {
-			slog.Error("MCP session error", "error", err)
+		slog.Debug("session.Wait() starting", "endpoint", c.endpoint)
+		startTime := time.Now()
+		err := c.session.Wait()
+		duration := time.Since(startTime)
+
+		if err != nil {
+			slog.Error("MCP session error",
+				"error", err,
+				"duration", duration,
+				"endpoint", c.endpoint)
+		} else {
+			slog.Info("MCP session ended normally",
+				"duration", duration,
+				"endpoint", c.endpoint)
 		}
-		slog.Info("MCP session ended")
+
+		// Only close if duration is suspiciously short (less than 1 second)
+		// This indicates the session didn't actually stay open for notifications
+		if duration < time.Second {
+			slog.Warn("MCP session closed immediately - transport may not support long-lived connections",
+				"duration", duration,
+				"endpoint", c.endpoint,
+				"hint", "notifications may not be delivered")
+		}
+
 		c.Close()
 	}()
 
@@ -262,7 +296,7 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan *FaultEvent, error) {
 		c.Close()
 	}()
 
-	return c.eventChan, nil
+	return eventChan, nil
 }
 
 // Close closes the MCP session and event channel

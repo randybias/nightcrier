@@ -60,10 +60,9 @@ func (b *BackgroundRetry) run(ctx context.Context) {
 		case <-ticker.C:
 			status := b.manager.GetStatus()
 
-			// If everything is ready, we can stop
+			// If everything is ready, just reset backoffs and continue
 			if status.IsReady() {
-				slog.Debug("bootstrap fully recovered - background retry idle")
-				// Reset all backoffs when fully recovered
+				// Reset all backoffs when fully recovered (no need to log every tick)
 				globalBackoff = 0
 				apiKeysBackoff = 0
 				clusterBackoffs = make(map[string]time.Duration)
