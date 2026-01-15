@@ -761,8 +761,9 @@ object_storage:
 				t.Fatalf("LoadWithConfigFile() failed: %v", err)
 			}
 
-			if cfg.IsAzureStorageEnabled() != tt.enabled {
-				t.Errorf("IsAzureStorageEnabled() = %v, want %v", cfg.IsAzureStorageEnabled(), tt.enabled)
+			isEnabled := cfg.ObjectStorage.URL != ""
+			if isEnabled != tt.enabled {
+				t.Errorf("ObjectStorage.URL != \"\" = %v, want %v", isEnabled, tt.enabled)
 			}
 		})
 	}
@@ -877,8 +878,7 @@ func TestCircuitBreakerConfig(t *testing.T) {
 			config: baseConfigNoCircuitBreaker,
 			wantCfg: func(cfg *Config) bool {
 				return cfg.NotifyOnAgentFailure == false &&
-					cfg.FailureThresholdForAlert == 3 &&
-					cfg.UploadFailedInvestigations == false
+					cfg.FailureThresholdForAlert == 3
 			},
 		},
 		{
@@ -886,8 +886,7 @@ func TestCircuitBreakerConfig(t *testing.T) {
 			config: customConfig,
 			wantCfg: func(cfg *Config) bool {
 				return cfg.NotifyOnAgentFailure == false &&
-					cfg.FailureThresholdForAlert == 5 &&
-					cfg.UploadFailedInvestigations == true
+					cfg.FailureThresholdForAlert == 5
 			},
 		},
 	}
@@ -908,8 +907,8 @@ func TestCircuitBreakerConfig(t *testing.T) {
 			}
 
 			if !tt.wantCfg(cfg) {
-				t.Errorf("config values mismatch: NotifyOnAgentFailure=%v, FailureThresholdForAlert=%d, UploadFailedInvestigations=%v",
-					cfg.NotifyOnAgentFailure, cfg.FailureThresholdForAlert, cfg.UploadFailedInvestigations)
+				t.Errorf("config values mismatch: NotifyOnAgentFailure=%v, FailureThresholdForAlert=%d",
+					cfg.NotifyOnAgentFailure, cfg.FailureThresholdForAlert)
 			}
 		})
 	}
@@ -948,9 +947,6 @@ func TestCircuitBreakerConfigFromEnv(t *testing.T) {
 	}
 	if cfg.FailureThresholdForAlert != 10 {
 		t.Errorf("FailureThresholdForAlert = %d, want 10", cfg.FailureThresholdForAlert)
-	}
-	if cfg.UploadFailedInvestigations != true {
-		t.Errorf("UploadFailedInvestigations = %v, want true", cfg.UploadFailedInvestigations)
 	}
 }
 
@@ -1026,9 +1022,6 @@ object_storage:
 	}
 	if cfg.FailureThresholdForAlert != 5 {
 		t.Errorf("FailureThresholdForAlert = %d, want 5", cfg.FailureThresholdForAlert)
-	}
-	if cfg.UploadFailedInvestigations != true {
-		t.Errorf("UploadFailedInvestigations = %v, want true", cfg.UploadFailedInvestigations)
 	}
 
 	// Verify other settings still work
