@@ -24,6 +24,9 @@ type ConfigMapData struct {
 
 	// BaseTriagePrompt is the base triage prompt content (base-triage-prompt.md)
 	BaseTriagePrompt string
+
+	// AdditionalPrompt is optional operator-specified additional prompt content (additional-prompt.md)
+	AdditionalPrompt string
 }
 
 // ConfigMapConfig holds configuration for ConfigMap creation.
@@ -68,6 +71,18 @@ func (c *Client) CreateIncidentConfigMap(ctx context.Context, cfg ConfigMapConfi
 		labels[k] = v
 	}
 
+	// Build ConfigMap data
+	configMapData := map[string]string{
+		"incident.json":         data.IncidentJSON,
+		"permissions.json":      data.PermissionsJSON,
+		"base-triage-prompt.md": data.BaseTriagePrompt,
+	}
+
+	// Add additional prompt if provided
+	if data.AdditionalPrompt != "" {
+		configMapData["additional-prompt.md"] = data.AdditionalPrompt
+	}
+
 	// Create ConfigMap
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -75,11 +90,7 @@ func (c *Client) CreateIncidentConfigMap(ctx context.Context, cfg ConfigMapConfi
 			Namespace: cfg.Namespace,
 			Labels:    labels,
 		},
-		Data: map[string]string{
-			"incident.json":          data.IncidentJSON,
-			"permissions.json":       data.PermissionsJSON,
-			"base-triage-prompt.md":  data.BaseTriagePrompt,
-		},
+		Data: configMapData,
 	}
 
 	createdConfigMap, err := c.clientset.CoreV1().ConfigMaps(cfg.Namespace).Create(ctx, configMap, metav1.CreateOptions{})

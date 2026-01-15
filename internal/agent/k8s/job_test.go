@@ -190,8 +190,8 @@ func TestCreateJob(t *testing.T) {
 	}
 
 	// Verify volume mounts
-	if len(container.VolumeMounts) != 4 {
-		t.Errorf("Container has %d volume mounts, want 4", len(container.VolumeMounts))
+	if len(container.VolumeMounts) != 5 {
+		t.Errorf("Container has %d volume mounts, want 5", len(container.VolumeMounts))
 	}
 	expectedVolumeMounts := map[string]struct {
 		volumeName string
@@ -215,6 +215,12 @@ func TestCreateJob(t *testing.T) {
 			volumeName: "incident-data",
 			mountPath:  "/home/agent/base-triage-prompt.md",
 			subPath:    "base-triage-prompt.md",
+			readOnly:   true,
+		},
+		"additional-prompt.md": {
+			volumeName: "incident-data",
+			mountPath:  "/home/agent/additional-prompt.md",
+			subPath:    "additional-prompt.md",
 			readOnly:   true,
 		},
 		"config": {

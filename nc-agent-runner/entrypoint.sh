@@ -187,6 +187,13 @@ build_triage_prompt() {
         prompt+=$'\n'"</kubernetes_cluster_access_permissions>"$'\n'
     fi
 
+    # 4. Additional Operator Instructions (optional, from mounted ConfigMap)
+    if [[ -f /home/agent/additional-prompt.md && -s /home/agent/additional-prompt.md ]]; then
+        prompt+=$'\n'"## Additional Operator Instructions"$'\n\n'
+        prompt+="$(cat /home/agent/additional-prompt.md)"
+        prompt+=$'\n'
+    fi
+
     echo "$prompt"
 }
 
