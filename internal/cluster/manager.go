@@ -36,6 +36,7 @@ type ConnectionManager struct {
 	globalQueueSize            int
 	queueOverflowPolicy        string
 	mcpReconnectInitialBackoff int // seconds
+	mcpReconnectMaxBackoff     int // seconds
 
 	// mu protects access to the connections map
 	mu sync.RWMutex
@@ -59,6 +60,7 @@ type ManagerConfig struct {
 	GlobalQueueSize            int
 	QueueOverflowPolicy        string
 	MCPReconnectInitialBackoff int // seconds
+	MCPReconnectMaxBackoff     int // seconds
 }
 
 // NewConnectionManager creates a new ConnectionManager with the given configuration.
@@ -109,6 +111,7 @@ func NewConnectionManager(cfg *ManagerConfig) (*ConnectionManager, error) {
 		globalQueueSize:            cfg.GlobalQueueSize,
 		queueOverflowPolicy:        cfg.QueueOverflowPolicy,
 		mcpReconnectInitialBackoff: cfg.MCPReconnectInitialBackoff,
+		mcpReconnectMaxBackoff:     cfg.MCPReconnectMaxBackoff,
 		ctx:                        ctx,
 		cancel:                     cancel,
 	}
@@ -257,7 +260,7 @@ func (cm *ConnectionManager) Start(ctx context.Context) <-chan interface{} {
 // runConnection manages the lifecycle of a single cluster connection.
 // It subscribes to the MCP server, receives events, and fans them into
 // the global event channel. On disconnect, it implements reconnection
-// logic with backoff.
+// logic with exponential backoff.
 //
 // This is the core of the fan-in architecture: each connection runs
 // independently and pushes ClusterEvent wrappers to the shared channel.
@@ -271,6 +274,9 @@ func (cm *ConnectionManager) runConnection(ctx context.Context, clusterName stri
 		"cluster", clusterName,
 		"endpoint", clusterConfig.MCP.Endpoint)
 
+	// Track current backoff for exponential increase
+	currentBackoff := cm.mcpReconnectInitialBackoff
+
 	// Main connection loop with reconnection
 	for {
 		select {
@@ -282,20 +288,30 @@ func (cm *ConnectionManager) runConnection(ctx context.Context, clusterName stri
 			if err := cm.subscribeAndFanIn(ctx, clusterName, conn); err != nil {
 				slog.Error("cluster connection failed",
 					"cluster", clusterName,
-					"error", err)
+					"error", err,
+					"next_retry_seconds", currentBackoff)
 
 				// Update connection status
 				cm.updateConnectionStatus(conn, StatusFailed, err)
 
-				// Wait before reconnecting (simple backoff)
-				// TODO: Implement exponential backoff with jitter in future phase
+				// Wait before reconnecting with exponential backoff
 				select {
 				case <-ctx.Done():
 					return
-				case <-time.After(time.Duration(cm.mcpReconnectInitialBackoff) * time.Second):
+				case <-time.After(time.Duration(currentBackoff) * time.Second):
 					slog.Info("reconnecting to cluster",
-						"cluster", clusterName)
+						"cluster", clusterName,
+						"backoff_seconds", currentBackoff)
 				}
+
+				// Exponential backoff: double the delay, cap at max
+				currentBackoff *= 2
+				if currentBackoff > cm.mcpReconnectMaxBackoff {
+					currentBackoff = cm.mcpReconnectMaxBackoff
+				}
+			} else {
+				// Successful connection - reset backoff for next failure
+				currentBackoff = cm.mcpReconnectInitialBackoff
 			}
 		}
 	}
