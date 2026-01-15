@@ -303,6 +303,12 @@ func (c *Client) CreateJob(ctx context.Context, cfg JobConfig) (string, error) {
 			SubPath:   "base-triage-prompt.md",
 			ReadOnly:  true,
 		},
+		{
+			Name:      "incident-data",
+			MountPath: "/home/agent/additional-prompt.md",
+			SubPath:   "additional-prompt.md",
+			ReadOnly:  true,
+		},
 		// Secret mount (kubeconfig)
 		{
 			Name:      "kubeconfig",
