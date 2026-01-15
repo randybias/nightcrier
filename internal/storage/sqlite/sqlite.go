@@ -275,13 +275,17 @@ func (s *Store) RecordAgentExecution(ctx context.Context, exec *storage.AgentExe
 		INSERT INTO agent_executions (
 			execution_id, incident_id,
 			job_started_at, job_completed_at, exit_code, error_message,
-			log_paths
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
+			log_paths,
+			agent_cli, agent_model, cluster_name
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(execution_id) DO UPDATE SET
 			job_completed_at = excluded.job_completed_at,
 			exit_code = excluded.exit_code,
 			error_message = excluded.error_message,
-			log_paths = excluded.log_paths
+			log_paths = excluded.log_paths,
+			agent_cli = excluded.agent_cli,
+			agent_model = excluded.agent_model,
+			cluster_name = excluded.cluster_name
 	`,
 		exec.ExecutionID,
 		exec.IncidentID,
@@ -290,6 +294,9 @@ func (s *Store) RecordAgentExecution(ctx context.Context, exec *storage.AgentExe
 		exec.ExitCode,
 		exec.ErrorMessage,
 		logPathsJSON,
+		exec.AgentCLI,
+		exec.AgentModel,
+		exec.ClusterName,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to record agent execution: %w", err)

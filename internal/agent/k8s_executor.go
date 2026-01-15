@@ -37,6 +37,8 @@ type K8sExecutorConfig struct {
 	Model string
 	// System prompt file path
 	SystemPromptFile string
+	// Additional operator-specified prompt content
+	AdditionalPrompt string
 	// Debug mode - includes session archive and separate stderr
 	Debug bool
 	// NATS configuration for progress tracking
@@ -211,6 +213,9 @@ func (e *K8sExecutor) ExecuteOnCluster(ctx context.Context, workspacePath string
 			ExecutionID: executionID,
 			IncidentID:  incidentID,
 			StartedAt:   startedAt,
+			AgentCLI:    e.config.AgentCLI,
+			AgentModel:  e.config.Model,
+			ClusterName: incidentData.ClusterName,
 		}
 		if err := e.stateStore.RecordAgentExecution(ctx, initialExec); err != nil {
 			slog.Warn("failed to record initial agent execution", "incident_id", incidentID, "error", err)
@@ -288,6 +293,7 @@ type IncidentData struct {
 	IncidentJSON     string
 	PermissionsJSON  string
 	BaseTriagePrompt string
+	AdditionalPrompt string
 	ClusterName      string
 }
 
@@ -332,12 +338,18 @@ func (e *K8sExecutor) loadIncidentData(workspacePath string, incidentID string) 
 		data.BaseTriagePrompt = string(promptBytes)
 	}
 
+	// Read additional prompt from config if provided
+	if e.config.AdditionalPrompt != "" {
+		data.AdditionalPrompt = e.config.AdditionalPrompt
+	}
+
 	// Debug: Log what data was loaded
 	slog.Debug("incident data loaded",
 		"incident_id", incidentID,
 		"incident_json_size", len(data.IncidentJSON),
 		"permissions_json_size", len(data.PermissionsJSON),
 		"base_triage_prompt_size", len(data.BaseTriagePrompt),
+		"additional_prompt_size", len(data.AdditionalPrompt),
 		"cluster_name", data.ClusterName)
 
 	return data, nil
@@ -368,6 +380,7 @@ func (e *K8sExecutor) createConfigMap(ctx context.Context, execCluster *config.E
 		IncidentJSON:     data.IncidentJSON,
 		PermissionsJSON:  data.PermissionsJSON,
 		BaseTriagePrompt: data.BaseTriagePrompt,
+		AdditionalPrompt: data.AdditionalPrompt,
 	}
 
 	// Debug: Log ConfigMap data sizes
@@ -376,7 +389,8 @@ func (e *K8sExecutor) createConfigMap(ctx context.Context, execCluster *config.E
 		"execution_cluster", execCluster.Name,
 		"incident_json_size", len(cmData.IncidentJSON),
 		"permissions_json_size", len(cmData.PermissionsJSON),
-		"base_triage_prompt_size", len(cmData.BaseTriagePrompt))
+		"base_triage_prompt_size", len(cmData.BaseTriagePrompt),
+		"additional_prompt_size", len(cmData.AdditionalPrompt))
 
 	return e.k8sClient.CreateIncidentConfigMap(ctx, cfg, cmData)
 }
@@ -474,6 +488,9 @@ func (e *K8sExecutor) processResults(
 		StartedAt:       startedAt,
 		IncidentJSON:    []byte(incidentData.IncidentJSON),
 		PermissionsJSON: []byte(incidentData.PermissionsJSON),
+		AgentCLI:        e.config.AgentCLI,
+		AgentModel:      e.config.Model,
+		ClusterName:     incidentData.ClusterName,
 		Debug:           e.config.Debug,
 	}
 

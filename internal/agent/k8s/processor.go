@@ -54,7 +54,7 @@ func (p *ArtifactProcessor) ProcessJobResults(ctx context.Context, cfg ProcessJo
 
 	// Check for critical failures - missing result.json means the Job never completed properly
 	if cfg.JobResults.ResultJSON == nil {
-		err := p.handleJobFailure(ctx, cfg.IncidentID, cfg.ExecutionID, "Job failed: result.json not found", cfg.JobResults.Missing)
+		err := p.handleJobFailure(ctx, cfg.IncidentID, cfg.ExecutionID, "Job failed: result.json not found", cfg.JobResults.Missing, cfg.AgentCLI, cfg.AgentModel, cfg.ClusterName)
 		return nil, err
 	}
 
@@ -66,7 +66,7 @@ func (p *ArtifactProcessor) ProcessJobResults(ctx context.Context, cfg ProcessJo
 		reportHTML = reporting.ConvertMarkdownToHTML(reportMD, cfg.IncidentID)
 	} else {
 		// Missing report is a critical failure - the agent didn't complete investigation
-		err := p.handleJobFailure(ctx, cfg.IncidentID, cfg.ExecutionID, "Agent failed to generate investigation report", cfg.JobResults.Missing)
+		err := p.handleJobFailure(ctx, cfg.IncidentID, cfg.ExecutionID, "Agent failed to generate investigation report", cfg.JobResults.Missing, cfg.AgentCLI, cfg.AgentModel, cfg.ClusterName)
 		return nil, err
 	}
 
@@ -138,6 +138,9 @@ func (p *ArtifactProcessor) ProcessJobResults(ctx context.Context, cfg ProcessJo
 		ExitCode:     &exitCode,
 		ErrorMessage: cfg.JobResults.ResultJSON.Message,
 		LogPaths:     logPaths,
+		AgentCLI:     cfg.AgentCLI,
+		AgentModel:   cfg.AgentModel,
+		ClusterName:  cfg.ClusterName,
 	}
 
 	if err := p.stateStore.RecordAgentExecution(ctx, agentExecution); err != nil {
@@ -197,6 +200,11 @@ type ProcessJobResultsConfig struct {
 	IncidentJSON    []byte
 	PermissionsJSON []byte
 
+	// Agent execution metadata
+	AgentCLI    string
+	AgentModel  string
+	ClusterName string
+
 	// Debug mode - includes session archive and separate stderr
 	Debug bool
 }
@@ -213,7 +221,7 @@ type ProcessJobResultsOutput struct {
 
 // handleJobFailure records a Job failure in the database and completes the incident.
 // This is called when critical artifacts are missing or the Job failed before producing results.
-func (p *ArtifactProcessor) handleJobFailure(ctx context.Context, incidentID, executionID, failureReason string, missingArtifacts []string) error {
+func (p *ArtifactProcessor) handleJobFailure(ctx context.Context, incidentID, executionID, failureReason string, missingArtifacts []string, agentCLI, agentModel, clusterName string) error {
 	// Build detailed failure message
 	detailedReason := failureReason
 	if len(missingArtifacts) > 0 {
@@ -231,6 +239,9 @@ func (p *ArtifactProcessor) handleJobFailure(ctx context.Context, incidentID, ex
 		ExitCode:     &exitCode,
 		ErrorMessage: detailedReason,
 		LogPaths:     make(map[string]string),
+		AgentCLI:     agentCLI,
+		AgentModel:   agentModel,
+		ClusterName:  clusterName,
 	}
 
 	if err := p.stateStore.RecordAgentExecution(ctx, agentExecution); err != nil {

@@ -262,13 +262,17 @@ func (s *Store) RecordAgentExecution(ctx context.Context, exec *storage.AgentExe
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO agent_executions (
 			execution_id, incident_id, job_started_at, job_completed_at,
-			exit_code, error_message, log_paths
-		) VALUES ($1, $2, $3, $4, $5, $6, $7)
+			exit_code, error_message, log_paths,
+			agent_cli, agent_model, cluster_name
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (execution_id) DO UPDATE SET
 			job_completed_at = EXCLUDED.job_completed_at,
 			exit_code = EXCLUDED.exit_code,
 			error_message = EXCLUDED.error_message,
-			log_paths = EXCLUDED.log_paths`,
+			log_paths = EXCLUDED.log_paths,
+			agent_cli = EXCLUDED.agent_cli,
+			agent_model = EXCLUDED.agent_model,
+			cluster_name = EXCLUDED.cluster_name`,
 		exec.ExecutionID,
 		exec.IncidentID,
 		exec.StartedAt,
@@ -276,6 +280,9 @@ func (s *Store) RecordAgentExecution(ctx context.Context, exec *storage.AgentExe
 		exec.ExitCode,
 		nullStringValue(exec.ErrorMessage),
 		logPathsJSON,
+		exec.AgentCLI,
+		exec.AgentModel,
+		exec.ClusterName,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert/update agent_execution: %w", err)
