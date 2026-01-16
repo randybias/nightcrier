@@ -27,10 +27,10 @@ the [k8s4agents](https://github.com/randybias/k8s4agents) skillset (just one ski
 
 The initial triage reports are meant to do the following:
 
-- Provide an initial assessment and root cause analysis
+- Provide an incident assessment and root cause analysis
 - Provide a "proof of work" with all of the actions taken by the agent and their outputs
 - Suggest potential remediation steps
-- Operator only in "read-only" mode to avoid product change risk
+- Operate only in "read-only" mode to avoid change risk
 
 This saves the operations team valuable initial data collection efforts, shortening time to resolution if all goes well.  If this system even just
 saved 50% of data collection time on 50% of production faults, that would be a huge win.
