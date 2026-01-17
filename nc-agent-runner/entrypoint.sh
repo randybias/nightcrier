@@ -175,8 +175,9 @@ merge_skill_hooks() {
     fi
 
     # Find all skill-hooks.json files in skills directory
+    # Use -L to follow symbolic links (skills dir is often a symlink)
     local skill_hooks_files
-    mapfile -t skill_hooks_files < <(find ~/.claude/skills -name "skill-hooks.json" -type f 2>/dev/null)
+    mapfile -t skill_hooks_files < <(find -L ~/.claude/skills -name "skill-hooks.json" -type f 2>/dev/null)
 
     if [[ ${#skill_hooks_files[@]} -eq 0 ]]; then
         echo "No skill-hooks.json files found"
