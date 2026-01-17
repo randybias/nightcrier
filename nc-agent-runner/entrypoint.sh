@@ -216,7 +216,7 @@ merge_skill_hooks() {
                     if ($hook_type == "Stop" and $nats_enabled == "true") then
                         {
                             type: $original.type,
-                            command: ("VALIDATION_SCRIPT='" + $abs_command + "' " + $nats_wrapper),
+                            command: ("VALIDATION_SCRIPT=\"" + $abs_command + "\" " + $nats_wrapper),
                             timeout: $original.timeout,
                             description: $original.description
                         }
