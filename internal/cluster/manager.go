@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 )
@@ -849,17 +850,27 @@ func (cm *ConnectionManager) retryUnreachableClusters(ctx context.Context, backo
 		cancel()
 
 		if err != nil {
-			// Still failing - increase backoff
-			nextBackoff := backoff * 2
-			if nextBackoff > maxBackoff {
+			// Check if this is a permanent error (credentials invalid, not just a transient failure)
+			// For permanent errors, skip immediately to maxBackoff to reduce log noise
+			var nextBackoff time.Duration
+			if isPermanentAuthError(err) {
 				nextBackoff = maxBackoff
+				slog.Warn("unreachable cluster has permanent auth error (skipping to max backoff)",
+					"cluster", name,
+					"error", err,
+					"next_retry", nextBackoff)
+			} else {
+				// Transient error - use normal exponential backoff
+				nextBackoff = backoff * 2
+				if nextBackoff > maxBackoff {
+					nextBackoff = maxBackoff
+				}
+				slog.Warn("unreachable cluster retry failed",
+					"cluster", name,
+					"error", err,
+					"next_retry", nextBackoff)
 			}
 			backoffs[name] = nextBackoff
-
-			slog.Warn("unreachable cluster retry failed",
-				"cluster", name,
-				"error", err,
-				"next_retry", nextBackoff)
 			continue
 		}
 
@@ -874,4 +885,46 @@ func (cm *ConnectionManager) retryUnreachableClusters(ctx context.Context, backo
 			"cluster", name,
 			"permissions_met", perms.MinimumPermissionsMet())
 	}
+}
+
+// isPermanentAuthError returns true if the error indicates a permanent authentication
+// or authorization failure that won't be resolved by retrying. For these errors,
+// we skip immediately to max backoff to reduce log noise.
+//
+// Permanent errors include:
+//   - Unauthorized: credentials are invalid or expired
+//   - Forbidden: RBAC denies access
+//   - Certificate errors: TLS configuration issues
+//
+// Transient errors (worth retrying with normal backoff):
+//   - Connection refused: server might be temporarily down
+//   - Timeout: network issues
+//   - Server unavailable: temporary capacity issues
+func isPermanentAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+
+	// Check for permanent auth/authz errors from kubectl
+	permanentPatterns := []string{
+		"Unauthorized",
+		"Forbidden",
+		"certificate",
+		"x509:",
+		"tls:",
+		"authentication failed",
+		"invalid token",
+		"token expired",
+		"credentials",
+	}
+
+	for _, pattern := range permanentPatterns {
+		if strings.Contains(errStr, pattern) {
+			return true
+		}
+	}
+
+	return false
 }

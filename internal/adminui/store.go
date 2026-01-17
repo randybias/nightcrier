@@ -88,8 +88,11 @@ func (i *Incident) TriageIndicator() string {
 	if i.Status == "failed" || i.Status == "agent_failed" {
 		return "red"
 	}
-	// Success
+	// Success: either explicit exit code 0, or resolved status with no errors
 	if i.RunExitCode != nil && *i.RunExitCode == 0 {
+		return "green"
+	}
+	if i.Status == "resolved" {
 		return "green"
 	}
 	// Still running or unknown
