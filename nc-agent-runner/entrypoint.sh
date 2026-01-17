@@ -92,8 +92,8 @@ setup_agent_paths() {
             # Setup NATS progress tracking hooks if enabled
             if [[ "${NATS_ENABLED:-false}" == "true" ]]; then
                 if [[ -f /home/agent/hooks/claude-settings.json.template ]]; then
-                    cp /home/agent/hooks/claude-settings.json.template ~/.claude/settings.json
-                    echo "Claude: Installed NATS progress hooks to ~/.claude/settings.json"
+                    cp /home/agent/hooks/claude-settings.json.template ~/.claude.json
+                    echo "Claude: Installed NATS progress hooks to ~/.claude.json"
                 else
                     echo "Claude: NATS enabled but hooks template not found, skipping"
                 fi
@@ -154,14 +154,14 @@ setup_agent_paths() {
 #######################################
 # Merge skill hooks into Claude settings
 # Reads skill-hooks.json files from skill directories and merges them
-# with NATS hooks (if enabled) into ~/.claude/settings.json
+# with NATS hooks (if enabled) into ~/.claude.json
 # Globals:
 #   NATS_ENABLED
 # Arguments:
 #   None
 #######################################
 merge_skill_hooks() {
-    local settings_file=~/.claude/settings.json
+    local settings_file=~/.claude.json
     local temp_file
     temp_file=$(mktemp)
 
