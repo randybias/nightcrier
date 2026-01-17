@@ -7,30 +7,24 @@ Defines requirements for concurrent agent execution with per-cluster serializati
 
 The system SHALL execute agents concurrently up to a configured global limit while strictly serializing execution per cluster.
 
-#### Scenario: Global concurrency limit enforced
-- **GIVEN** `MaxConcurrentAgents` is set to N
-- **WHEN** N+1 events arrive for N+1 different clusters
-- **THEN** N agents start execution immediately
-- **AND** the (N+1)th agent waits until one of the running agents completes
+#### Scenario: Additional prompt appended to triage prompt
+- **GIVEN** `agent.additional_prompt` is configured with operator text
+- **WHEN** the triage prompt is built for agent execution
+- **THEN** the additional prompt SHALL be appended after all other prompt components
+- **AND** the additional prompt SHALL appear under a `## Additional Operator Instructions` heading
+- **AND** the complete prompt (including additional prompt) SHALL be captured in `prompt-sent.md`
 
-#### Scenario: Per-cluster serialization enforced
-- **GIVEN** an agent is currently running for Cluster A
-- **WHEN** a new event arrives for Cluster A
-- **THEN** the new event is queued in the cluster-specific queue
-- **AND** the system does NOT run two agents simultaneously on the same cluster
+#### Scenario: Empty additional prompt omitted
+- **GIVEN** `agent.additional_prompt` is empty or not configured
+- **WHEN** the triage prompt is built for agent execution
+- **THEN** no additional prompt section SHALL be appended
+- **AND** the base triage prompt SHALL drive investigation methodology
 
-#### Scenario: Non-blocking ingestion
-- **GIVEN** the system is at max capacity
-- **WHEN** a new event arrives
-- **THEN** the event ingestion loop DOES NOT block
-- **AND** the event is accepted and queued (or dropped if expired/queue full)
-
-#### Scenario: Isolated failures
-- **GIVEN** an agent panics or crashes during execution
-- **WHEN** the dispatcher handles the result
-- **THEN** the global semaphore slot is released
-- **AND** the cluster lock for that cluster is released
-- **AND** the system continues processing other events
+#### Scenario: Additional prompt mounted in container
+- **GIVEN** `agent.additional_prompt` is configured
+- **WHEN** the agent Job is created
+- **THEN** the ConfigMap SHALL include `additional-prompt.md` with the operator text
+- **AND** the file SHALL be mounted at `/home/agent/additional-prompt.md`
 
 ### Requirement: Event TTL
 
