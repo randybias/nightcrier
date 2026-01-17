@@ -207,6 +207,8 @@ merge_skill_hooks() {
                 end;
 
             # Process a single hook object (type/command)
+            # Note: Claude Code does not support "env" field in hooks, so we inline
+            # environment variables in the command string instead
             def process_hook($hook_type):
                 if .type == "command" and .command then
                     . as $original |
@@ -214,12 +216,9 @@ merge_skill_hooks() {
                     if ($hook_type == "Stop" and $nats_enabled == "true") then
                         {
                             type: $original.type,
-                            command: $nats_wrapper,
+                            command: ("VALIDATION_SCRIPT='" + $abs_command + "' " + $nats_wrapper),
                             timeout: $original.timeout,
-                            description: $original.description,
-                            env: {
-                                VALIDATION_SCRIPT: $abs_command
-                            }
+                            description: $original.description
                         }
                     else
                         $original | .command = $abs_command
