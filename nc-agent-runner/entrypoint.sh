@@ -98,6 +98,9 @@ setup_agent_paths() {
                     echo "Claude: NATS enabled but hooks template not found, skipping"
                 fi
             fi
+
+            # Merge skill hooks (Stop hook validation, etc.) into settings
+            merge_skill_hooks
             ;;
         codex)
             mkdir -p ~/.codex
@@ -146,6 +149,133 @@ setup_agent_paths() {
 
     export SESSION_DIR
     echo "Session directory: $SESSION_DIR"
+}
+
+#######################################
+# Merge skill hooks into Claude settings
+# Reads skill-hooks.json files from skill directories and merges them
+# with NATS hooks (if enabled) into ~/.claude/settings.json
+# Globals:
+#   NATS_ENABLED
+# Arguments:
+#   None
+#######################################
+merge_skill_hooks() {
+    local settings_file=~/.claude/settings.json
+    local temp_file
+    temp_file=$(mktemp)
+
+    echo "Merging skill hooks into Claude settings..."
+
+    # Start with base structure
+    if [[ -f "$settings_file" ]]; then
+        cp "$settings_file" "$temp_file"
+    else
+        echo '{"hooks":{}}' > "$temp_file"
+    fi
+
+    # Find all skill-hooks.json files in skills directory
+    local skill_hooks_files
+    mapfile -t skill_hooks_files < <(find ~/.claude/skills -name "skill-hooks.json" -type f 2>/dev/null)
+
+    if [[ ${#skill_hooks_files[@]} -eq 0 ]]; then
+        echo "No skill-hooks.json files found"
+        rm "$temp_file"
+        return 0
+    fi
+
+    # Process each skill-hooks.json file
+    for hooks_file in "${skill_hooks_files[@]}"; do
+        local skill_dir
+        skill_dir=$(dirname "$hooks_file")
+        echo "Processing hooks from: $hooks_file"
+
+        # Read and merge hooks using jq
+        # Convert relative command paths to absolute paths based on skill directory
+        # For Stop hooks with NATS enabled, wrap with NATS publishing wrapper
+        jq --arg skill_dir "$skill_dir" \
+           --arg nats_enabled "${NATS_ENABLED:-false}" \
+           --arg nats_wrapper "/home/agent/hooks/nats-validating.sh" '
+            # Function to make command path absolute
+            def make_absolute:
+                if startswith("./") or startswith("../") then
+                    $skill_dir + "/" + .
+                else
+                    .
+                end;
+
+            # Process hook commands to make paths absolute
+            # For Stop hooks with NATS enabled, wrap command with NATS publisher
+            .hooks // {} | to_entries | map(
+                . as $hook_entry |
+                {
+                    key: .key,
+                    value: (.value | map(
+                        if .type == "command" and .command then
+                            # Make command absolute first
+                            . as $original |
+                            ($original.command | make_absolute) as $abs_command |
+                            # Wrap Stop hooks with NATS wrapper if enabled
+                            if ($hook_entry.key == "Stop" and $nats_enabled == "true") then
+                                {
+                                    type: $original.type,
+                                    command: $nats_wrapper,
+                                    timeout: $original.timeout,
+                                    description: $original.description,
+                                    env: {
+                                        VALIDATION_SCRIPT: $abs_command
+                                    }
+                                }
+                            else
+                                $original | .command = $abs_command
+                            end
+                        else
+                            .
+                        end
+                    ))
+                }
+            ) | from_entries
+        ' "$hooks_file" > /tmp/processed-hooks.json 2>/dev/null || {
+            echo "Warning: Failed to process $hooks_file, skipping"
+            continue
+        }
+
+        # Merge processed hooks into settings
+        jq -s '
+            # Merge two hook objects
+            def merge_hooks:
+                reduce .[] as $item ({};
+                    . as $result | $item | to_entries | reduce .[] as $entry (
+                        $result;
+                        .[$entry.key] = ((.[$entry.key] // []) + $entry.value)
+                    )
+                );
+
+            .[0] as $settings |
+            .[1] as $new_hooks |
+            $settings | .hooks = ([$settings.hooks // {}, $new_hooks] | merge_hooks)
+        ' "$temp_file" /tmp/processed-hooks.json > "${temp_file}.merged" 2>/dev/null || {
+            echo "Warning: Failed to merge hooks from $hooks_file"
+            continue
+        }
+
+        mv "${temp_file}.merged" "$temp_file"
+        echo "Merged hooks from $(basename "$(dirname "$hooks_file")")"
+    done
+
+    # Write final settings file
+    mv "$temp_file" "$settings_file"
+    chmod 600 "$settings_file"
+
+    echo "Skill hooks merged successfully"
+
+    # Show merged hooks for debugging
+    if [[ -f "$settings_file" ]]; then
+        echo "Final hooks configuration:"
+        jq '.hooks | to_entries | map("\(.key): \(.value | length) hook(s)") | .[]' "$settings_file" 2>/dev/null || echo "  (unable to parse)"
+    fi
+
+    rm -f /tmp/processed-hooks.json
 }
 
 #######################################

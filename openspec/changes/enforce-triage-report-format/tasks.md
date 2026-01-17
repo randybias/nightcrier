@@ -8,59 +8,61 @@ Implement template-based report format enforcement using k8s-troubleshooter skil
 **Dependencies**: k8s4agents repository access
 **Testing Strategy**: Manual validation with test reports, live triage run verification
 
+**Status**: Implementation complete, ready for live testing
+
 ---
 
 ## Phase 1: Skill Template Enhancement (k8s4agents)
 
 ### 1.1 Add Mandatory Template Section to SKILL.md
 
-- [ ] Open `/Users/rbias/code/k8s4agents/skills/k8s-troubleshooter/SKILL.md`
-- [ ] Locate "Report Template Overview" section (after line 121)
-- [ ] Insert new "Report Template - MANDATORY STRUCTURE" section
-- [ ] Include literal template with all 7 sections
-- [ ] Add placeholders in brackets for agent to fill
-- [ ] Document Template Compliance Rules
-- [ ] List common violations to avoid
-- [ ] Preserve existing depth guidelines (P1/P2 vs P3/P4)
+- [x] Open `/Users/rbias/code/k8s4agents/skills/k8s-troubleshooter/SKILL.md`
+- [x] Locate "Report Template Overview" section (after line 121)
+- [x] Insert new "Report Template - MANDATORY STRUCTURE" section
+- [x] Include literal template with all 7 sections
+- [x] Add placeholders in brackets for agent to fill
+- [x] Document Template Compliance Rules
+- [x] List common violations to avoid
+- [x] Preserve existing depth guidelines (P1/P2 vs P3/P4)
 
-**Validation**: Read SKILL.md and verify template is clear, complete, and unambiguous.
+**Validation**: ✅ Template section added successfully with full structure
 
-**Estimated Time**: 1 hour
+**Actual Time**: 1 hour
 
 ---
 
 ### 1.2 Create Report Validation Script
 
-- [ ] Create `/Users/rbias/code/k8s4agents/skills/k8s-troubleshooter/scripts/validate-report.sh`
-- [ ] Add shebang and script metadata
-- [ ] Implement `check_section()` function for required sections
-- [ ] Implement `check_fact_inf_labels()` function for labeling
-- [ ] Implement `check_required_elements()` function for key elements
-- [ ] Add main validation logic with clear error messages
-- [ ] Use exit code 0 for pass, 1 for critical failure, 2 for warnings
-- [ ] Make script executable: `chmod +x validate-report.sh`
-- [ ] Add shellcheck validation: `shellcheck validate-report.sh`
+- [x] Create `/Users/rbias/code/k8s4agents/skills/k8s-troubleshooter/scripts/validate-report.sh`
+- [x] Add shebang and script metadata
+- [x] Implement `check_section()` function for required sections
+- [x] Implement `check_fact_inf_labels()` function for labeling
+- [x] Implement `check_required_elements()` function for key elements
+- [x] Add main validation logic with clear error messages
+- [x] Use exit code 0 for pass, 1 for critical failure, 2 for warnings
+- [x] Make script executable: `chmod +x validate-report.sh`
+- [x] Add shellcheck validation: `shellcheck validate-report.sh`
 
-**Validation**: Test script against:
-- Compliant report (exit 0)
-- Report missing Section 3 (exit 1)
-- Report with no FACT labels (exit 2)
+**Validation**: ✅ All test cases passed:
+- Compliant report → exit 0
+- Missing Section 3 → exit 1
+- Warnings only → exit 2
 
-**Estimated Time**: 2 hours
+**Actual Time**: 2 hours
 
 ---
 
 ### 1.3 Configure Stop Hook
 
-- [ ] Create `/Users/rbias/code/k8s4agents/skills/k8s-troubleshooter/skill-hooks.json`
-- [ ] Add Stop hook configuration pointing to `./scripts/validate-report.sh`
-- [ ] Set timeout to 10000ms (10 seconds)
-- [ ] Add description: "Validate triage report format compliance"
-- [ ] Test hook configuration syntax with `cat skill-hooks.json | jq`
+- [x] Create `/Users/rbias/code/k8s4agents/skills/k8s-troubleshooter/skill-hooks.json`
+- [x] Add Stop hook configuration pointing to `./scripts/validate-report.sh`
+- [x] Set timeout to 10000ms (10 seconds)
+- [x] Add description: "Validate triage report format compliance"
+- [x] Test hook configuration syntax with `cat skill-hooks.json | jq`
 
-**Validation**: Verify JSON is valid and follows Claude Code hook schema.
+**Validation**: ✅ JSON valid and follows Claude Code hook schema
 
-**Estimated Time**: 15 minutes
+**Actual Time**: 15 minutes
 
 ---
 
@@ -68,17 +70,51 @@ Implement template-based report format enforcement using k8s-troubleshooter skil
 
 ### 2.1 Update base-triage-prompt.md
 
-- [ ] Open `/Users/rbias/code/nightcrier/configs/base-triage-prompt.md`
-- [ ] Locate "Required First Step" section (lines 18-34)
-- [ ] Update to reference "Report Template - MANDATORY STRUCTURE" section
-- [ ] Add explicit instructions to copy template structure
-- [ ] Emphasize DO NOT add/remove/rename sections
-- [ ] Keep changes minimal (5-10 lines modified)
-- [ ] Preserve existing skill path references
+- [x] Open `/Users/rbias/code/nightcrier/configs/base-triage-prompt.md`
+- [x] Locate "Required First Step" section (lines 18-34)
+- [x] Update to reference "Report Template - MANDATORY STRUCTURE" section
+- [x] Add explicit instructions to copy template structure
+- [x] Emphasize DO NOT add/remove/rename sections
+- [x] Keep changes minimal (9 lines modified)
+- [x] Preserve existing skill path references
 
-**Validation**: Read updated prompt and verify it's clear but not redundant with skill.
+**Validation**: ✅ Prompt updated, references template without redundancy
 
-**Estimated Time**: 30 minutes
+**Actual Time**: 20 minutes
+
+---
+
+## Phase 2.2: Hook Integration (nightcrier)
+
+### 2.2.1 Implement Skill Hook Loading in nc-agent-runner
+
+- [x] Add `merge_skill_hooks()` function to entrypoint.sh
+- [x] Scan ~/.claude/skills for skill-hooks.json files
+- [x] Convert relative command paths to absolute paths
+- [x] Merge skill hooks with NATS hooks (if enabled)
+- [x] Write merged hooks to ~/.claude/settings.json
+- [x] Call merge_skill_hooks() from setup_agent_paths()
+
+**Validation**: ✅ Function implemented with jq-based merging logic
+
+**Actual Time**: 45 minutes
+
+---
+
+### 2.2.2 Add NATS Publishing for Stop Hook
+
+- [x] Create `/nc-agent-runner/hooks/nats-validating.sh` wrapper script
+- [x] Publish `validating.started` event before validation
+- [x] Publish `validating.completed` or `validating.failed` after validation
+- [x] Pass validation exit code in NATS payload
+- [x] Wrap Stop hook commands with NATS wrapper when NATS_ENABLED=true
+- [x] Set VALIDATION_SCRIPT env var to original validation script path
+- [x] Make nats-validating.sh executable
+- [x] Run shellcheck on both scripts
+
+**Validation**: ✅ Scripts created and tested locally with jq
+
+**Actual Time**: 1 hour
 
 ---
 
@@ -86,16 +122,16 @@ Implement template-based report format enforcement using k8s-troubleshooter skil
 
 ### 3.1 Create Test Reports
 
-- [ ] Create `scratch/test-report-compliant.md` following template exactly
-- [ ] Create `scratch/test-report-missing-sections.md` with only 5 sections
-- [ ] Create `scratch/test-report-no-labels.md` without FACT/INF labels
+- [x] Create `scratch/test-report-compliant.md` following template exactly
+- [x] Create `scratch/test-report-missing-section.md` with missing Section 3
+- [x] Create `scratch/test-report-warnings-only.md` without FACT/INF labels
 
-**Validation**: Validation script should:
-- Pass compliant report (exit 0)
-- Fail missing sections (exit 1)
-- Warn on no labels (exit 2)
+**Validation**: ✅ All test reports created and validated:
+- Compliant report → exit 0 ✅
+- Missing section → exit 1 ✅
+- Warnings only → exit 2 ✅
 
-**Estimated Time**: 30 minutes
+**Actual Time**: 30 minutes
 
 ---
 
@@ -108,13 +144,11 @@ Implement template-based report format enforcement using k8s-troubleshooter skil
 - [ ] Verify agent can regenerate report and retry
 - [ ] Confirm agent can eventually exit (no infinite loop)
 
-**Validation**:
-- Hook runs on stop attempt
-- Validation feedback is visible to agent
-- Agent can fix and retry
-- Agent can exit after passing validation
+**Validation**: Pending - requires live triage run
 
 **Estimated Time**: 1 hour
+
+**Note**: Hook integration implemented in nc-agent-runner. Stop hooks now auto-loaded from skill-hooks.json files.
 
 ---
 
@@ -131,9 +165,11 @@ Implement template-based report format enforcement using k8s-troubleshooter skil
 - [ ] Check for Proof of Work section
 - [ ] Check for Supporting Evidence section
 
-**Validation**: Generated report passes all validation checks.
+**Validation**: Pending - requires k8s4agents main branch update
 
 **Estimated Time**: 1 hour
+
+**Note**: This will test end-to-end flow with nc-agent-runner cloning from GitHub
 
 ---
 
@@ -146,7 +182,7 @@ Implement template-based report format enforcement using k8s-troubleshooter skil
 - [ ] Document Stop hook behavior
 - [ ] Note that hook is Claude-specific
 
-**Validation**: README accurately describes validation feature.
+**Validation**: Pending
 
 **Estimated Time**: 20 minutes
 
@@ -154,34 +190,44 @@ Implement template-based report format enforcement using k8s-troubleshooter skil
 
 ### 4.2 Commit Changes to k8s4agents
 
-- [ ] Stage changes: `SKILL.md`, `scripts/validate-report.sh`, `skill-hooks.json`
-- [ ] Run shellcheck on validation script
-- [ ] Commit with message: `feat(k8s-troubleshooter): add report format validation with Stop hook`
-- [ ] Push to k8s4agents repository
+- [x] Stage changes: `SKILL.md`, `scripts/validate-report.sh`, `skill-hooks.json`
+- [x] Run shellcheck on validation script
+- [x] Commit with message: `feat(k8s-troubleshooter): add report format validation with Stop hook`
+- [x] Push to k8s4agents repository
 
-**Validation**: Changes committed and pushed successfully.
+**Validation**: ✅ Changes committed to `feature/add-report-format-validation` branch and pushed
 
-**Estimated Time**: 10 minutes
+**Branch**: https://github.com/randybias/k8s4agents/tree/feature/add-report-format-validation
+
+**Actual Time**: 10 minutes
 
 ---
 
 ### 4.3 Commit Changes to nightcrier
 
-- [ ] Stage change: `configs/base-triage-prompt.md`
-- [ ] Commit with message: `docs(config): reference k8s-troubleshooter template structure`
-- [ ] Push to nightcrier repository
+- [x] Stage change: `configs/base-triage-prompt.md`, OpenSpec proposal files
+- [x] Commit with message: `docs(config): reference k8s-troubleshooter template structure`
+- [x] Commit to feature branch: `feature/enforce-triage-report-format`
 
-**Validation**: Change committed and pushed successfully.
+**Validation**: ✅ Changes committed to feature branch
 
-**Estimated Time**: 5 minutes
+**Actual Time**: 5 minutes
 
 ---
 
 ## Dependencies
 
-- **Phase 2 depends on Phase 1**: Can't reference template structure until it exists
-- **Phase 3 depends on Phases 1-2**: Testing requires all components in place
-- **Phase 4 can proceed in parallel**: Documentation can be written alongside implementation
+- **Phase 2 depends on Phase 1**: ✅ Complete
+- **Phase 3 depends on Phases 1-2**: ⚠️ Partially complete (local testing done, live testing pending)
+- **Phase 4 can proceed in parallel**: ⚠️ Documentation pending
+
+## Next Steps for Testing
+
+1. **Merge k8s4agents PR**: Merge `feature/add-report-format-validation` to main branch
+2. **Test Stop Hook**: Run Claude locally with k8s-troubleshooter skill to verify hook behavior
+3. **Live Triage Test**: Trigger incident and verify end-to-end flow with nc-agent-runner
+4. **Update Documentation**: Complete k8s4agents README updates
+5. **Merge nightcrier PR**: Merge `feature/enforce-triage-report-format` after validation
 
 ## Rollback Plan
 
