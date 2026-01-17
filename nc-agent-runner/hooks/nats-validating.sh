@@ -94,24 +94,31 @@ validation_exit_code=0
 validation_output=""
 validation_output=$("$VALIDATION_SCRIPT" 2>&1) || validation_exit_code=$?
 
-# Print validation output to stdout so Claude sees it
-echo "$validation_output"
-
-# Publish completion event based on exit code
+# Publish completion event and output JSON for Claude Code Stop hook
+# Claude Code expects JSON: {"decision": "allow"} or {"decision": "block", "reason": "..."}
 case $validation_exit_code in
     0)
         publish_nats_event "validating.completed" 0 "Report validation passed"
+        # Allow stop - validation passed
+        jq -n '{decision: "allow"}'
         ;;
     1)
         publish_nats_event "validating.failed" 1 "Report validation failed (critical errors)"
+        # Block stop - validation failed, include output as reason
+        jq -n --arg reason "$validation_output" '{decision: "block", reason: $reason}'
         ;;
     2)
         publish_nats_event "validating.completed" 2 "Report validation passed with warnings"
+        # Allow stop but include warnings - validation passed with warnings
+        jq -n --arg reason "$validation_output" '{decision: "allow", reason: $reason}'
         ;;
     *)
         publish_nats_event "validating.failed" "$validation_exit_code" "Report validation error"
+        # Block stop - unexpected error
+        jq -n --arg reason "Validation script exited with code $validation_exit_code: $validation_output" '{decision: "block", reason: $reason}'
         ;;
 esac
 
-# Exit with validation script's exit code
-exit $validation_exit_code
+# Always exit 0 - the JSON decision controls whether Claude stops
+# A non-zero exit here would be treated as hook failure, not validation failure
+exit 0
