@@ -24,12 +24,18 @@ The k8s-troubleshooter skill is available in your skills directory. Look for it 
 - `~/.config/goose/skills/k8s-troubleshooter/SKILL.md`
 - `~/.gemini/skills/k8s-troubleshooter/SKILL.md`
 
-The skill defines a **mandatory 7-section report template** starting at "Report Template Overview". You MUST follow this exact structure, including:
+The skill defines a **mandatory 7-section report template** in the "Report Template - MANDATORY STRUCTURE" section. You MUST:
+1. Copy the template structure exactly as shown
+2. Fill in the bracketed placeholders with your findings
+3. Do NOT add, remove, or rename sections
+4. Follow all Template Compliance Rules
+
+Required sections:
 - Section 0: Executive Triage Card (with emoji status indicators)
 - Section 1: Problem Statement
 - Section 2: Assessment & Findings (with FACT-n/INF-n labeling)
-- Section 3: Root Cause Analysis (with H1/H2/H3 hypothesis ranking)
-- Section 4: Suggested Remediation Plan
+- Section 3: Root Cause Analysis (with H1/H2/H3 hypothesis ranking and falsification tests)
+- Section 4: Remediation Plan
 - Section 5: Proof of Work
 - Section 6: Supporting Evidence
 
@@ -51,4 +57,4 @@ Use the systematic diagnostic workflows defined in your skill:
 
 Write your investigation report to: `output/report.md`
 
-**The report MUST follow the 7-section structure defined in the skill's "Report Template Overview" section.**
+**The report MUST follow the 7-section structure defined in the skill's "Report Template - MANDATORY STRUCTURE" section.**
