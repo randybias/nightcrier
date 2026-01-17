@@ -218,7 +218,9 @@ func (m *Manager) bootstrapGlobalResources(ctx context.Context) bool {
 		m.status.RBACReady = false
 	}
 
-	return m.status.NamespaceReady && m.status.RBACReady
+	// Update GlobalReady based on individual components
+	m.status.GlobalReady = m.status.NamespaceReady && m.status.RBACReady
+	return m.status.GlobalReady
 }
 
 // bootstrapAPIKeysSecret attempts to create the API keys secret.

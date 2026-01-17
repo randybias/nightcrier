@@ -40,41 +40,27 @@
 
 - [x] Modify main.go to handle `BootstrapStatus` instead of error
 - [x] Start background retry goroutine
-- [ ] Store bootstrap status for health/admin endpoints
 - [x] Remove fatal exit on bootstrap failure
 
-### Phase 6: Health Endpoint
+### Phase 6: Admin UI Cluster Status
 
-- [ ] Update health endpoint to include bootstrap status
-- [ ] Return degraded clusters list
-- [ ] Return missing API keys list
-- [ ] Add aggregate status (ready/degraded)
+- [x] Add cluster reachability tracking to database (connection_status, unreachable, unreachable_reason, last_error)
+- [x] Display cluster connection state in admin UI
+- [x] Add visual indicator for unreachable clusters
+- [x] Start admin UI before permission validation (early availability)
 
-### Phase 7: Admin UI
+### Phase 7: Connection Resilience
 
-- [ ] Add System Status section to admin UI header
-- [ ] Display global status (Ready/Degraded/Initializing)
-- [ ] Display API keys status with provider names
-- [ ] Display cluster summary (X/Y ready)
-- [ ] Add Bootstrap column to Clusters table
-- [ ] Add Last Error column or tooltip to Clusters table
-- [ ] Add visual indicator (color) for degraded clusters
-- [ ] Ensure auto-refresh updates bootstrap status
+- [x] Detect permanent auth errors (Unauthorized, Forbidden, certificate) and skip to max backoff
+- [x] Add tests for permanent vs transient error classification
 
-### Phase 8: Observability
+### Phase 8: Testing
 
-- [ ] Add periodic warning log when degraded (every 5 min)
-- [ ] Log recovery events at INFO level
-- [ ] Add metrics: `nightcrier_bootstrap_degraded_clusters`
-- [ ] Add metrics: `nightcrier_bootstrap_retry_total`
-
-### Phase 9: Testing
-
-- [ ] Add unit tests for parallel bootstrap
-- [ ] Add unit tests for exponential backoff
-- [ ] Add unit tests for recovery detection
-- [ ] Add integration test for degraded startup
-- [ ] Add integration test for recovery scenario
+- [x] Add unit tests for parallel bootstrap
+- [x] Add unit tests for exponential backoff
+- [x] Add unit tests for recovery detection
+- [x] Add integration test for degraded startup
+- [x] Add integration test for recovery scenario
 
 ## Notes
 
@@ -83,3 +69,4 @@
 - Fatal errors: none - all errors become degraded state
 - Per-cluster retry is independent - don't retry all clusters together
 - Max backoff 300s (5 minutes) balances responsiveness with API load
+- Permanent auth errors (Unauthorized, etc.) skip immediately to max backoff

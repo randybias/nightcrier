@@ -339,3 +339,45 @@ The system SHALL support API key configuration via config file and environment v
 - **AND** the documentation SHALL note the TLS requirement
 - **AND** the documentation SHALL recommend using environment variable substitution for secrets
 
+### Requirement: Resilient Credential Startup
+
+The system SHALL support non-blocking startup with background retry for failed components.
+
+#### Scenario: Credential retry initial backoff configuration
+- **WHEN** the application starts
+- **AND** `startup.credential_retry_initial` is configured
+- **THEN** the background retry loop SHALL use that value as the initial backoff duration
+
+#### Scenario: Credential retry initial backoff default
+- **WHEN** the application starts
+- **AND** `startup.credential_retry_initial` is not configured
+- **THEN** the default value of 5 seconds SHALL be used
+
+#### Scenario: Credential retry max backoff configuration
+- **WHEN** the application starts
+- **AND** `startup.credential_retry_max` is configured
+- **THEN** the background retry loop SHALL cap the backoff at that value
+
+#### Scenario: Credential retry max backoff default
+- **WHEN** the application starts
+- **AND** `startup.credential_retry_max` is not configured
+- **THEN** the default value of 300 seconds (5 minutes) SHALL be used
+
+#### Scenario: Non-blocking bootstrap
+- **WHEN** the application starts
+- **AND** a component fails to bootstrap (namespace, RBAC, secrets, or cluster kubeconfig)
+- **THEN** the application SHALL NOT exit with an error
+- **AND** the application SHALL start in degraded mode
+- **AND** the application SHALL retry failed components in the background
+
+#### Scenario: Parallel cluster bootstrap
+- **WHEN** the application starts with multiple monitored clusters
+- **THEN** each cluster's kubeconfig secret SHALL be bootstrapped in parallel
+- **AND** one cluster's failure SHALL NOT block other clusters
+
+#### Scenario: Automatic recovery
+- **WHEN** a component is in degraded state
+- **AND** the background retry succeeds
+- **THEN** the system SHALL automatically recover
+- **AND** the system SHALL log the recovery at INFO level
+
