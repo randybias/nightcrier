@@ -73,6 +73,12 @@ type ExecutionDefaults struct {
 	// CPULimit for Job containers (default: "1")
 	CPULimit string `mapstructure:"cpu_limit"`
 
+	// MemoryRequest for Job containers (default: "512Mi")
+	MemoryRequest string `mapstructure:"memory_request"`
+
+	// CPURequest for Job containers (default: "250m")
+	CPURequest string `mapstructure:"cpu_request"`
+
 	// CleanupTTL is the TTL for Job cleanup after completion in seconds (default: 3600)
 	CleanupTTL int `mapstructure:"cleanup_ttl"`
 
@@ -106,6 +112,12 @@ type ExecutionClusterConfig struct {
 
 	// CPULimit for Job containers (optional, uses execution_defaults)
 	CPULimit string `mapstructure:"cpu_limit"`
+
+	// MemoryRequest for Job containers (optional, uses execution_defaults)
+	MemoryRequest string `mapstructure:"memory_request"`
+
+	// CPURequest for Job containers (optional, uses execution_defaults)
+	CPURequest string `mapstructure:"cpu_request"`
 
 	// CleanupTTL is the TTL for Job cleanup after completion in seconds (optional, uses execution_defaults)
 	CleanupTTL int `mapstructure:"cleanup_ttl"`
@@ -217,6 +229,12 @@ func (e *ExecutionDefaults) ApplyDefaults() {
 	if e.CPULimit == "" {
 		e.CPULimit = "1"
 	}
+	if e.MemoryRequest == "" {
+		e.MemoryRequest = "512Mi"
+	}
+	if e.CPURequest == "" {
+		e.CPURequest = "250m"
+	}
 	if e.CleanupTTL == 0 {
 		e.CleanupTTL = 3600
 	}
@@ -268,6 +286,12 @@ func (e *ExecutionClusterConfig) ApplyDefaults(defaults *ExecutionDefaults) {
 	}
 	if e.CPULimit == "" {
 		e.CPULimit = defaults.CPULimit
+	}
+	if e.MemoryRequest == "" {
+		e.MemoryRequest = defaults.MemoryRequest
+	}
+	if e.CPURequest == "" {
+		e.CPURequest = defaults.CPURequest
 	}
 	if e.CleanupTTL == 0 {
 		e.CleanupTTL = defaults.CleanupTTL
@@ -944,14 +968,6 @@ func (c *Config) GetAWSAccessKeyID() string {
 // GetAWSSecretAccessKey returns the AWS secret access key for S3.
 func (c *Config) GetAWSSecretAccessKey() string {
 	return c.ObjectStorage.AWSSecretAccessKey
-}
-
-// IsAzureStorageEnabled detects if object storage is configured.
-// This method maintains backward compatibility with the StorageConfig interface.
-// It returns true if any object storage URL is configured.
-// Deprecated: This method will be removed once the storage layer is refactored to use ObjectStorage.
-func (c *Config) IsAzureStorageEnabled() bool {
-	return c.ObjectStorage.URL != ""
 }
 
 // ValidateObjectStorageConfig validates object storage configuration if object storage is enabled.

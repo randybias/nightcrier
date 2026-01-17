@@ -32,6 +32,8 @@ execution_clusters: []
 #     timeout: 600
 #     memory_limit: "2Gi"
 #     cpu_limit: "1"
+#     memory_request: "512Mi"
+#     cpu_request: "250m"
 #     cleanup_ttl: 3600
 #     max_concurrent_agents: 5
 
@@ -218,6 +220,16 @@ execution_defaults:
   # Default: 1
   # Environment variable: EXECUTION_DEFAULTS_CPU_LIMIT
   cpu_limit: "1"
+
+  # Memory request for Job containers (e.g., "512Mi", "1Gi")
+  # Default: 512Mi
+  # Environment variable: EXECUTION_DEFAULTS_MEMORY_REQUEST
+  memory_request: "512Mi"
+
+  # CPU request for Job containers (e.g., "250m", "500m")
+  # Default: 250m
+  # Environment variable: EXECUTION_DEFAULTS_CPU_REQUEST
+  cpu_request: "250m"
 
   # TTL for Job cleanup after completion (seconds)
   # Default: 3600 (1 hour)

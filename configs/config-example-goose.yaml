@@ -56,6 +56,8 @@ execution_defaults:
   timeout: 600
   memory_limit: "2Gi"
   cpu_limit: "1"
+  memory_request: "512Mi"
+  cpu_request: "250m"
   cleanup_ttl: 3600
 
 # Event processing

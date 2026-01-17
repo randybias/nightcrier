@@ -86,7 +86,6 @@ ENV PATH="/home/npm-global/bin:${PATH}"
 RUN mkdir -p /home/npm-global && chmod 777 /home/npm-global
 
 # Install AI CLI tools
-# Note: These are placeholder package names. Update with actual package names when available.
 # Claude Code CLI (Anthropic)
 RUN npm install -g @anthropic-ai/claude-code@latest || echo "Warning: Claude Code CLI not available, install manually if needed"
 

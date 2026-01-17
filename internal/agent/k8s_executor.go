@@ -420,8 +420,8 @@ func (e *K8sExecutor) createJob(
 		Resources: k8s.ResourceConfig{
 			MemoryLimit:   execCluster.MemoryLimit,
 			CPULimit:      execCluster.CPULimit,
-			MemoryRequest: "512Mi", // Fixed for now
-			CPURequest:    "250m",  // Fixed for now
+			MemoryRequest: execCluster.MemoryRequest,
+			CPURequest:    execCluster.CPURequest,
 		},
 		TTLSecondsAfterFinished: int32(execCluster.CleanupTTL),
 		ActiveDeadlineSeconds:   int64(execCluster.Timeout),
