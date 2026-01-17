@@ -92,8 +92,8 @@ setup_agent_paths() {
             # Setup NATS progress tracking hooks if enabled
             if [[ "${NATS_ENABLED:-false}" == "true" ]]; then
                 if [[ -f /home/agent/hooks/claude-settings.json.template ]]; then
-                    cp /home/agent/hooks/claude-settings.json.template ~/.claude.json
-                    echo "Claude: Installed NATS progress hooks to ~/.claude.json"
+                    cp /home/agent/hooks/claude-settings.json.template ~/.claude/settings.json
+                    echo "Claude: Installed NATS progress hooks to ~/.claude/settings.json"
                 else
                     echo "Claude: NATS enabled but hooks template not found, skipping"
                 fi
@@ -154,14 +154,14 @@ setup_agent_paths() {
 #######################################
 # Merge skill hooks into Claude settings
 # Reads skill-hooks.json files from skill directories and merges them
-# with NATS hooks (if enabled) into ~/.claude.json
+# with NATS hooks (if enabled) into ~/.claude/settings.json
 # Globals:
 #   NATS_ENABLED
 # Arguments:
 #   None
 #######################################
 merge_skill_hooks() {
-    local settings_file=~/.claude.json
+    local settings_file=~/.claude/settings.json
     local temp_file
     temp_file=$(mktemp)
 
@@ -194,6 +194,7 @@ merge_skill_hooks() {
         # Read and merge hooks using jq
         # Convert relative command paths to absolute paths based on skill directory
         # For Stop hooks with NATS enabled, wrap with NATS publishing wrapper
+        # Hook structure: { "hooks": { "Stop": [{ "hooks": [{ "type": "command", ... }] }] } }
         jq --arg skill_dir "$skill_dir" \
            --arg nats_enabled "${NATS_ENABLED:-false}" \
            --arg nats_wrapper "/home/agent/hooks/nats-validating.sh" '
@@ -205,33 +206,40 @@ merge_skill_hooks() {
                     .
                 end;
 
-            # Process hook commands to make paths absolute
-            # For Stop hooks with NATS enabled, wrap command with NATS publisher
+            # Process a single hook object (type/command)
+            def process_hook($hook_type):
+                if .type == "command" and .command then
+                    . as $original |
+                    ($original.command | make_absolute) as $abs_command |
+                    if ($hook_type == "Stop" and $nats_enabled == "true") then
+                        {
+                            type: $original.type,
+                            command: $nats_wrapper,
+                            timeout: $original.timeout,
+                            description: $original.description,
+                            env: {
+                                VALIDATION_SCRIPT: $abs_command
+                            }
+                        }
+                    else
+                        $original | .command = $abs_command
+                    end
+                else
+                    .
+                end;
+
+            # Process hook entries with nested hooks array structure
             .hooks // {} | to_entries | map(
                 . as $hook_entry |
                 {
                     key: .key,
                     value: (.value | map(
-                        if .type == "command" and .command then
-                            # Make command absolute first
-                            . as $original |
-                            ($original.command | make_absolute) as $abs_command |
-                            # Wrap Stop hooks with NATS wrapper if enabled
-                            if ($hook_entry.key == "Stop" and $nats_enabled == "true") then
-                                {
-                                    type: $original.type,
-                                    command: $nats_wrapper,
-                                    timeout: $original.timeout,
-                                    description: $original.description,
-                                    env: {
-                                        VALIDATION_SCRIPT: $abs_command
-                                    }
-                                }
-                            else
-                                $original | .command = $abs_command
-                            end
+                        if .hooks then
+                            # New nested structure: { "hooks": [...] }
+                            .hooks = (.hooks | map(process_hook($hook_entry.key)))
                         else
-                            .
+                            # Legacy flat structure (should not happen but handle gracefully)
+                            process_hook($hook_entry.key)
                         end
                     ))
                 }
