@@ -423,6 +423,64 @@ Extend validation to other agent types:
 
 ---
 
+## Implementation Notes (Post-Implementation)
+
+### Claude Code Hook Configuration Learnings
+
+During implementation, several important details about Claude Code hook configuration were discovered:
+
+1. **Settings File Location**: Claude Code reads hooks from `~/.claude/settings.json`, NOT `~/.claude.json`. The latter is Claude Code's internal state file which it overwrites.
+
+2. **Hook Structure**: Stop hooks require a nested `hooks` array structure:
+   ```json
+   {
+     "hooks": {
+       "Stop": [
+         {
+           "hooks": [
+             {
+               "type": "command",
+               "command": "/path/to/script.sh"
+             }
+           ]
+         }
+       ]
+     }
+   }
+   ```
+
+3. **Environment Variables**: The `env` field is NOT supported in Claude Code hooks. Environment variables must be inlined in the command string:
+   ```json
+   "command": "VALIDATION_SCRIPT=\"/path/to/script.sh\" /home/agent/hooks/wrapper.sh"
+   ```
+
+4. **Hook Output Format**: Stop hooks must return JSON to control session behavior:
+   - `{"decision": "allow"}` - permits session to end
+   - `{"decision": "block", "reason": "..."}` - prevents session from ending
+   - Plain text output is treated as "allow"
+
+### nc-agent-runner Integration
+
+The entrypoint.sh `merge_skill_hooks()` function:
+- Scans `~/.claude/skills/*/skill-hooks.json` for hook definitions
+- Converts relative command paths to absolute paths
+- Wraps Stop hooks with NATS publishing wrapper when `NATS_ENABLED=true`
+- Inlines environment variables in command strings (since `env` field not supported)
+- Writes merged configuration to `~/.claude/settings.json`
+
+### Commits Made
+
+**nightcrier repository** (`feature/enforce-triage-report-format` branch):
+- `fix(nc-agent-runner): add -L flag to find command to follow skill symlinks`
+- `feat(nc-agent-runner): auto-load skill hooks with NATS integration`
+- `fix(nc-agent-runner): use settings.json for hooks and handle nested structure`
+- `fix(nc-agent-runner): return JSON from Stop hook for Claude Code`
+- `fix(nc-agent-runner): inline env var in hook command (env field not supported)`
+- `fix(nc-agent-runner): use double quotes to avoid bash quoting issue`
+
+**k8s4agents repository** (merged to `main`):
+- `fix(k8s-troubleshooter): correct hook structure per Claude Code docs`
+
 ## Open Questions
 
-None - design is complete and ready for implementation.
+None - design is complete and implementation verified through live testing.
